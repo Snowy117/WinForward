@@ -1,3 +1,5 @@
+using WinForward.E2E.Analysis.Release;
+
 namespace WinForward.E2E.Analysis.Cli;
 
 /// <summary>
@@ -22,12 +24,23 @@ internal sealed record AnalysisOptions
 
     internal const string Usage =
         "e2e-analysis [--raw <dir>] [--out <dir>] [--ledger <path>] [--flat] "
-        + "[--warmup-seconds S] [--resamples N] [--seed N]";
+        + "[--warmup-seconds S] [--resamples N] [--seed N] "
+        + "[--release --thresholds <file> [--min-passes N] [--discard-pass N]]";
 
-    private static readonly string[] s_flags = ["--flat"];
+    private static readonly string[] s_flags = ["--flat", "--release"];
 
     private static readonly string[] s_valued =
-        ["--raw", "--out", "--ledger", "--warmup-seconds", "--resamples", "--seed"];
+    [
+        "--raw",
+        "--out",
+        "--ledger",
+        "--warmup-seconds",
+        "--resamples",
+        "--seed",
+        "--thresholds",
+        "--min-passes",
+        "--discard-pass",
+    ];
 
     /// <summary>The campaign tree: <c>&lt;raw&gt;/pass&lt;N&gt;/&lt;row&gt;/</c> plus the ledgers beside it.</summary>
     internal string Raw { get; private init; } = DefaultRaw;
@@ -48,16 +61,47 @@ internal sealed record AnalysisOptions
     internal int Seed { get; private init; } = DefaultSeed;
 
     /// <summary>
-    /// Walks <paramref name="args"/> once. Every refusal names the argument it refuses, on the
-    /// <paramref name="error"/> channel the caller already reports usage errors on.
+    /// The release flags the invocation declared, or a default value for a legacy run. The release
+    /// walk owns their rules; the legacy walk below only has to accept their names.
+    /// </summary>
+    internal ReleaseOptions Release { get; private init; } = new();
+
+    /// <summary>
+    /// Reads the release vector, then walks the legacy arguments once. Every refusal names the argument
+    /// it refuses, on the <paramref name="error"/> channel the caller already reports usage errors on.
     /// </summary>
     internal static bool TryParse(string[] args, out AnalysisOptions options, out string? error)
     {
         ArgumentNullException.ThrowIfNull(args);
 
         options = new AnalysisOptions();
+        if (!ReleaseOptions.TryParse(args, out var release, out error)
+            || !TryWalk(args, release, out options, out var ledgers, out error))
+        {
+            return false;
+        }
+
+        if (release.Release && options.Flat)
+        {
+            error = "argument '--release': a release run reads pass directories and cannot be combined with '--flat'";
+            return false;
+        }
+
+        options = options with { Ledgers = ledgers };
+        return true;
+    }
+
+    /// <summary>Walks every argument except the release flags, which the release walk already owns.</summary>
+    private static bool TryWalk(
+        string[] args,
+        ReleaseOptions release,
+        out AnalysisOptions options,
+        out List<string> ledgers,
+        out string? error)
+    {
+        options = new AnalysisOptions();
+        ledgers = [];
         error = null;
-        var ledgers = new List<string>();
         var index = 0;
         while (index < args.Length)
         {
@@ -78,6 +122,12 @@ internal sealed record AnalysisOptions
                 {
                     options = options with { Flat = true };
                 }
+                else if (string.Equals(name, "--release", StringComparison.Ordinal))
+                {
+                    // The release vector was parsed up front, in full; the flag records that this run
+                    // asked for it.
+                    options = options with { Release = release };
+                }
 
                 index++;
                 continue;
@@ -89,15 +139,9 @@ internal sealed record AnalysisOptions
                 return false;
             }
 
-            if (value is null)
+            if (!TryTakeValue(args, ref index, name, value, out value, out error))
             {
-                if (++index >= args.Length)
-                {
-                    error = $"missing value for '{name}'";
-                    return false;
-                }
-
-                value = args[index];
+                return false;
             }
 
             if (!Apply(options, name, value, ledgers, out options, out error))
@@ -108,8 +152,34 @@ internal sealed record AnalysisOptions
             index++;
         }
 
-        options = options with { Ledgers = ledgers };
         return true;
+    }
+
+    /// <summary>One valued argument's value: its inline form, or the next argument, or a missing-value refusal.</summary>
+    private static bool TryTakeValue(
+        string[] args,
+        ref int index,
+        string name,
+        string? inline,
+        out string value,
+        out string? error)
+    {
+        error = null;
+        if (inline is not null)
+        {
+            value = inline;
+            return true;
+        }
+
+        if (++index < args.Length)
+        {
+            value = args[index];
+            return true;
+        }
+
+        value = string.Empty;
+        error = $"missing value for '{name}'";
+        return false;
     }
 
     /// <summary>Assigns one value, refusing it the way a caller can act on.</summary>
@@ -163,6 +233,12 @@ internal sealed record AnalysisOptions
                 }
 
                 options = current with { Seed = seed };
+                return true;
+            case "--thresholds":
+            case "--min-passes":
+            case "--discard-pass":
+                // ReleaseOptions.TryParse parsed and cross-checked the value; consuming it here keeps
+                // the known-argument table in one place.
                 return true;
             default:
                 error = $"unknown argument '{name}'";

@@ -27,6 +27,17 @@ internal static class RepoPaths
     internal static string ReleasePlansDirectory => Path.Combine(Root, "benchmarks", "WinForward.E2E", "scripts", "plans-release");
 
     /// <summary>
+    /// The checked-in example thresholds file: the release contract's fields filled in for the current
+    /// release caliber. Tests parse it, so the example cannot drift from the schema without a red test.
+    /// </summary>
+    internal static string ReleaseThresholdsExample =>
+        Path.Combine(Root, "benchmarks", "WinForward.E2E.Analysis", "release-thresholds.example.json");
+
+    /// <summary>One negative thresholds fixture from the test project's own fixture tree.</summary>
+    internal static string ThresholdFixture(string name) =>
+        Path.Combine(Root, "tests", "WinForward.E2E.Tests", "Fixtures", "thresholds", name);
+
+    /// <summary>
     /// The minimal plans a fact loads by path: the Tier 0 defect repros, which are either rejected at
     /// load time or would need a live target, and the semantic fixtures that pin one plan key to one
     /// published value. They live with the tests, not in <c>scripts/plans/</c>, because none of them is

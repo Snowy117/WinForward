@@ -37,7 +37,7 @@ reviews and commits; it does not write code. Every subagent prompt names the tas
 ## B2 — Release plan and row profiles (harness)
 
 - [ ] Add `plans-release/{full,udp,dns,dual,base}-plan.json` with the B0 arm durations and unchanged
-      rates; add `stall` to the MIX `modeMix` for B4.
+      rates; add `stall` to the REL `modeMix` for B4.
 - [ ] Update the orchestrator row table so `wf-aot-nativeudp` runs `full-plan.json` with `Dual = $true`;
       leave the deploy mapping to B7.
 - [ ] Add the `wf-aot-nativeudp` full-plan row profile and keep `wf-aot-opt` as the UoT variant;
@@ -51,14 +51,16 @@ reviews and commits; it does not write code. Every subagent prompt names the tas
 
 ## B3 — Orchestrator P0 (harness)
 
-- [ ] Clock gate: preflight round-trip to the target echo endpoint; write `clockOffsetMs`; abort
-      above 0.2 s.
+- [ ] Clock: preflight probe with host timestamps; record `clockOffsetMs` (`vm - host`) and
+      per-pass pre/post samples in `clock.jsonl`; default gate aborts only on probe failure,
+      |offset| > 5 s, or >100 ms drift; `-RequireClockSync` enforces ±0.2 s for a clean campaign.
 - [ ] Environment: read NIC offload, dynamic memory, product versions/hashes, power plan, driver
       versions and snapshot id before any `Set-*`; record every change in `environmentChanges`.
 - [ ] `failures.json`; failed rows write a `run.json` skeleton; `declared-row-missing` finding.
 - [ ] Clean-slate failures enter `failures.json` and the result tree.
 - [ ] Arm-order randomization per pass, with the permutation seed recorded.
-- [ ] Correct the `connectionId` table caption to "UTC-window attribution".
+- [ ] Defer the `connectionId` caption correction to the release-mode/oracle decision; do not
+      change the frozen legacy `tables.md` in B3.
 - [ ] Verify: `pwsh -NoProfile -Command "$null=[scriptblock]::Create((Get-Content -Raw ...))"`;
       C# tests; a short VM preflight (preflight + one row, no campaign).
 - [ ] Commit `feat(e2e): ...`.
@@ -67,7 +69,10 @@ reviews and commits; it does not write code. Every subagent prompt names the tas
 
 - [ ] Target `--inject-delay-ms <n>` (deterministic, per-request stall) and a sensitivity plan that
       runs the reference row without a product.
-- [ ] `stall` (2 s) in the MIX `modeMix` of both `plans-release/full-plan.json` and
+- [ ] Record the effective delay in `<ledger-base>.injection.json` beside the ledger, never a new
+      published ledger key; the legacy contract and `check-fixture-drift`/`oracle-diff` must stay
+      unchanged.
+- [ ] `stall` (2 s) in the REL `modeMix` of both `plans-release/full-plan.json` and
       `plans/full-plan.json`, so the release plan stays a duration-only variant; re-hash
       `plans-release/caliber.json` and keep the README's "only `seconds` changed" claim true.
 - [ ] Tests: injection changes the observed p99.9; the sensitivity row fails when injection is on.
@@ -76,21 +81,24 @@ reviews and commits; it does not write code. Every subagent prompt names the tas
 
 ## B5 — Verdict and gate semantics (harness)
 
-Split into three commits if the diff is large:
+Read `research/b5-release-design.md` first (oracle strategy D15). The legacy
+`tables.md`/`verdict.json` stay byte-identical; the release path is C#-only; **do not change the
+frozen golden** for B5.
 
-- [ ] B5a: `--thresholds <file>`; primary family and band data; `verdict.json` prints band, MDD,
-      coverage and `min_passes`; add a machine-readable reference row (`RowProfiles.ReferenceRow` /
-      `row-profiles.json` `referenceRow`) instead of hardcoding `wf-aot-nativeudp`; validate
-      `plans-release/caliber.json` and print it in the provenance.
-- [ ] B5b: band-aligned `different`; `unevaluable` for degenerate/zero-variance; `same` only in a
-      declared TOST family; Holm family = reference vs each opponent; `min_passes` CLI.
-- [ ] B5c: gate-into-verdict (gate failure invalidates the cell); UDP identity checks all prefixes;
-      DNS `clientSendLoss` denominator.
-- [ ] Update the golden/boundary trees only with a recorded semantic change in `FROZEN.md`; never
-      regenerate a golden to hide a defect.
-- [ ] Verify: analyzer tests; `python3 .../oracle-diff.py`; `check-boundary-trees.py`;
-      `check-fairness.py`; a synthetic-tree run.
-- [ ] Commit `feat(analysis): ...`.
+- [ ] B5a-lite: thresholds schema/parser, `--release`/`--thresholds`/`--min-passes`/`--discard-pass`
+      (release-only), reference row/opponents, caliber validation at run time, public seam skeleton;
+      no default output change; parser/validation tests.
+- [ ] B5d-lite: `clock.jsonl` parser, `-offset` window shift, pre/post interpolation and residual,
+      no-op when absent; public `ClockCorrection`; copied-tree test with the sign and a negative control.
+- [ ] B5b: release comparison/state machine, Bonferroni-adjusted intervals, TOST family, REL
+      capability, exploratory demotion, family/opponent logic; tests and named negative controls.
+- [ ] B5c: gate matrix, `verdict.release.json`/`tables.release.md` writer, findings/limits; tests
+      incl. the gate matrix and the `unevaluable` path.
+- [ ] B5e: campaign invocation (`--release --thresholds ... --min-passes 6 --discard-pass 1`),
+      B7 staging, README/report contract, `measurement-tooling.md` updates.
+- [ ] Verify: legacy `oracle-diff.py`/boundary/fairness stay green; release tests and negative
+      controls; a copied-tree clock test; `git diff` shows no frozen-golden change.
+- [ ] Commit each slice separately (`feat(analysis): ...`).
 
 ## B6 — `BASE-singbox` (harness)
 
@@ -110,6 +118,9 @@ Split into three commits if the diff is large:
       the release `caliber.json` hash.
 - [ ] Stage `plans-release/*` as `C:\wfbench\e2e\{full,udp,dns,dual,base}-plan.json` and stage
       `caliber.json`; do not stage canonical `plans/` under the release label.
+- [ ] Analyze the full 7-pass tree with `--discard-pass 1`; do not stage only passes 2–7 (it
+      loses the discarded-pass provenance). `publish-campaign.sh` must `cd` to the repo or use an
+      absolute `caliber.path`; it currently analyzes every pass from `$raw`.
 - [ ] Verify: `bash -n`; `--help`/dry run; `git ls-files` shows the four scripts; a dirty-tree run
       refuses without `--allow-dirty`.
 - [ ] Commit `feat(e2e): ...`.
@@ -119,6 +130,8 @@ Split into three commits if the diff is large:
 - [ ] Preflight: clock, firewall state, product versions, `BASE-singbox`, targets.
 - [ ] Three back-to-back release runs on `wf-aot-nativeudp`; write `thresholds.json` with
       `B = max(B_business, 1.5 × spread)`; record the sensitivity proof.
+- [ ] Archive the sensitivity run's `<ledger-base>.injection.json`, its ledger and the sensitivity
+      plan; `publish-campaign.sh` does not collect the sidecar.
 - [ ] Verify: all gates green; band file exists before B9; archive the calibration tree.
 - [ ] Commit the calibration record/band file (not raw data).
 - [ ] Report to the user: the band, the duration, and the release-night go/no-go.
@@ -127,7 +140,8 @@ Split into three commits if the diff is large:
 
 - [ ] Run seven passes (one discarded + six measured) under the release caliber; archive every
       attempt; write `attempt`.
-- [ ] Analyze with the pre-registered band; generate `tables.md` and `verdict.json`.
+- [ ] Analyze the full 7-pass tree with `--min-passes 6 --discard-pass 1` and the pre-registered
+      band; do not stage only 2–7; n=6 measured passes; generate the release tables/verdict.
 - [ ] Write the report with release caliber, primary family, band/MDD, coverage, attempts and the
       limits section; review it against the measurement model.
 - [ ] Verify: gates green; `sha256sum -c`; manifest matches; report review.

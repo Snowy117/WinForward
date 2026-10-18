@@ -37,8 +37,20 @@ internal sealed record RowProfile(
 /// <c>verdict.json</c>'s <c>rows</c> is sorted by it before anything else; a row outside it sorts
 /// after every declared one, by <see cref="NaturalKey"/>.</para>
 /// </remarks>
-internal static class RowProfiles
+public static class RowProfiles
 {
+    /// <summary>
+    /// The row every release comparison is drawn against: the default WinForward configuration, whose
+    /// plan runs the whole measured set.
+    /// </summary>
+    /// <remarks>
+    /// This constant, and nothing else in the table, is public so the test project can pin the row the
+    /// release design names without the analysis granting <c>InternalsVisibleTo</c>. The thresholds
+    /// file's <c>referenceRow</c> is validated against <see cref="Declared"/>, so the constant and the
+    /// data cannot disagree: a row renamed here fails to parse a file that still names the old id.
+    /// </remarks>
+    public const string ReferenceRow = "wf-aot-nativeudp";
+
     /// <summary>The control block that runs before the product block.</summary>
     internal const string ControlPre = "control-pre";
 

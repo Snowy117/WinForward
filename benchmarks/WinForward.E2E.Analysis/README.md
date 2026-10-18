@@ -50,6 +50,74 @@ for the caller. `<repo>` is the checkout that holds this file.
 
 A missing input directory prints a `usage:` line and exits 2, as does a tree with no rows in it.
 
+### The release invocation
+
+```bash
+bash <repo>/benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh \
+  --raw raw --out .. \
+  --release --thresholds thresholds.json --min-passes 6 --discard-pass 1
+```
+
+`--release` reads a pre-registered thresholds file and, when its inputs are accepted, adds
+`release-inputs.json` beside the legacy documents. It changes neither `tables.md` nor `verdict.json`
+nor `plots/SKIPPED.md`. The release verdict (`verdict.release.json`) and the release tables
+(`tables.release.md`) are the next slices of the release path and are not rendered yet.
+
+| flag | default | meaning |
+|---|---|---|
+| `--release` | off | run the release input path; requires `--thresholds` |
+| `--thresholds` | — | the pre-registered thresholds file; without `--release` it is a usage error |
+| `--min-passes` | the file's `minPasses`, else 6 | measured passes a release claim needs; release-only |
+| `--discard-pass` | the file's `discardPass`, else none | the warm-up pass removed before any metric is computed; release-only |
+
+The pass counts are the invocation's override of the thresholds file, in that order. `--release`
+cannot be combined with `--flat`: a release run reads `pass1`, `pass2`, … directories and counts them.
+Every refusal exits 2 and names the field it refused — an unknown or repeated thresholds key, a missing
+or repeated primary metric, a band at or below zero, an equivalence family outside the primary family,
+a metric declared as both a primary and a capability gate, an undeclared row, a caliber digest that
+does not match its plan, declared arm durations that disagree with that plan, a non-finite
+`--warmup-seconds`, or a warm-up that differs from the file's calibrated window. The file's own
+SHA-256, the verified caliber hash and the measured pass list are recorded in `release-inputs.json`;
+the legacy outputs are untouched.
+
+`release-thresholds.example.json` beside this README is the schema filled in for the current release
+caliber. Its `caliber.sha256` is the digest of
+`benchmarks/WinForward.E2E/scripts/plans-release/full-plan.json`, so a plan edit updates that value or
+fails the release tests. A relative `caliber.path` is resolved from the process's current working
+directory — the same base `--thresholds` is opened from, and the one `scripts/analyze.sh` deliberately
+does not change.
+
+### `release-inputs.json`
+
+The release inputs record, schema `release-inputs/1`:
+
+```json
+{
+  "schema": "release-inputs/1",
+  "thresholds": {"path": "thresholds.json", "sha256": "1f2e…"},
+  "caliber": {
+    "path": "benchmarks/WinForward.E2E/scripts/plans-release/full-plan.json",
+    "sha256": "da14…",
+    "seconds": {"IDLE": 30, "LAT": 30, "LATLOAD": 30, "DNS": 30, "DNSALT": 30,
+                "LOSS": 120, "REL": 60, "THRU": 30, "MIX": 60, "PERSIST": 60}
+  },
+  "referenceRow": "wf-aot-nativeudp",
+  "opponents": ["proxifyre", "proxifier", "proxybridge"],
+  "primary": [
+    {"metric": "lat.tcp_rtt.p50", "kind": "ratio", "band": 0.18, "business": 0.05, "mdd": 0.18}
+  ],
+  "warmupSeconds": 5,
+  "passes": {"total": 7, "discarded": [1], "measured": [2, 3, 4, 5, 6, 7],
+             "n": 6, "required": 6, "insufficient": false}
+}
+```
+
+`passes.measured` is the campaign's pass list minus the discarded pass; fewer measured passes than
+`required` is recorded as `"insufficient": true` rather than refused, because what a short campaign can
+still support is the verdict's decision, not the input reader's. `band` is the decision band in the
+unit `kind` names: `ratio` bands are fractions (±0.18 is ±18 %), `pp` bands are percentage points.
+`business` and `mdd` are report metadata.
+
 ## What it reads
 
 ```

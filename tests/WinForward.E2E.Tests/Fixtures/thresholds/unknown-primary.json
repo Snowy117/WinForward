@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "caliber": {
+    "path": "benchmarks/WinForward.E2E/scripts/plans-release/full-plan.json",
+    "sha256": "da148a1d99580475cdc75ea0b93130b55819aab1206074f9a21fd9ddd0a925d3",
+    "seconds": {
+      "IDLE": 30,
+      "LAT": 30,
+      "LATLOAD": 30,
+      "DNS": 30,
+      "DNSALT": 30,
+      "LOSS": 120,
+      "REL": 60,
+      "THRU": 30,
+      "MIX": 60,
+      "PERSIST": 60
+    }
+  },
+  "referenceRow": "wf-aot-nativeudp",
+  "opponents": [
+    "proxifyre",
+    "proxifier",
+    "proxybridge"
+  ],
+  "primary": [
+    {
+      "metric": "lat.tcp_rtt.p95",
+      "kind": "ratio",
+      "band": 0.18,
+      "business": 0.05,
+      "mdd": 0.18
+    },
+    {
+      "metric": "cpu.proxy.vcpuPct",
+      "kind": "ratio",
+      "band": 0.18,
+      "business": 0.1,
+      "mdd": 0.18
+    },
+    {
+      "metric": "mem.privateBytes.p50",
+      "kind": "ratio",
+      "band": 0.05,
+      "business": 0.1,
+      "mdd": 0.05
+    },
+    {
+      "metric": "loss.lossRate",
+      "kind": "pp",
+      "band": 0.5,
+      "business": 0.5,
+      "mdd": 0.5
+    }
+  ],
+  "exploratory": [
+    "lat.tcp_rtt.p99",
+    "lat.udp_rtt.p50",
+    "lat.udp_lossRate",
+    "latload.tcp_rtt.p50",
+    "latload.tcp_rtt.p99",
+    "loss.corruptRate",
+    "loss.foreignConnection",
+    "rel.fidelityRate",
+    "dns.answerRate",
+    "dns.rtt.p50",
+    "dnsalt.answerRate",
+    "dnsalt.rtt.p50",
+    "thru.goodputMbps",
+    "mix.udp.lossRate",
+    "persist.responseRate",
+    "persist.reconnects"
+  ],
+  "capability": {
+    "rel.unexpectedEofRate": {
+      "kind": "pp",
+      "upperBound": 0.25,
+      "nFrom": "connectAttempts"
+    }
+  },
+  "equivalence": {
+    "families": []
+  },
+  "minPasses": 6,
+  "discardPass": 1,
+  "warmupSeconds": 5,
+  "clock": {
+    "require": false,
+    "maxDriftMs": 100
+  }
+}

@@ -59,6 +59,9 @@ decision each estimate supports, and what the device cannot support.
 - 7 passes: 1 discarded warm-up + 6 measured. Every attempt archived; `attempt` recorded.
 - Per-run warm-up 30 s; per-arm trim 5 s. The deviation from the design's per-arm 30/60 s is in the
   report's limits section.
+- Clock: the probe writes per-pass `clock.jsonl`; the analyzer shifts the client arm window by
+  `-clockOffsetMs` before ledger attribution, interpolates pre/post, and reports the residual.
+  Headline latency/CPU/memory/throughput are client-tick based and do not need this correction.
 - Rerun only for a pre-registered instrument gate; the failed pass is archived and disclosed.
 
 ## What the device cannot support

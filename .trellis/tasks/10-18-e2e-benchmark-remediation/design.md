@@ -24,9 +24,9 @@ The parent owns B0 (decision ledger and task tree), cross-batch review and final
 | B0a | Repair the repository gate | direct package override for the vulnerable transitive `System.Security.Cryptography.Pkcs` | `dotnet build`; `dotnet format`; `jb inspectcode` zero issues | — |
 | B1 | Archive and baseline | `~/bench-archive/2026-10-06-validation/`, `~/bench-archive/2026-10-08-e5b2/`, `SHA256SUMS`, checked-in manifest, baseline analysis | `sha256sum -c`; `analyze.sh` exit 0; manifest fields | B0 |
 | B2 | Release plan and row profiles | `plans-release/`, orchestrator row plan, `RowProfiles`, `row-profiles.json`, committed configs, README | E2E tests; analyzer tests; fairness/fixture/boundary checks | B0 |
-| B3 | Orchestrator P0 | clock gate, environment read-before-change, `failures.json`/failed rows, clean-slate, arm-order randomization, caption fix | `pwsh` parse; C# tests; short VM preflight | B2 |
-| B4 | Positive control and `stall` | target delay injection, sensitivity plan, `stall` in `modeMix`, tests | E2E tests; local self-test; sensitivity run | B2 |
-| B5 | Verdict and gate semantics | thresholds file, primary family, band-aligned test, `unevaluable`, Holm family, gate-into-verdict, UDP prefixes, DNS denominator | analyzer tests; synthetic tree; `oracle-diff`; boundary trees | B2 |
+| B3 | Orchestrator P0 | clock probe + drift gate, environment read-before-change, `failures.json`/failed rows, clean-slate, arm-order randomization; caption deferred to the release mode | `pwsh` parse; C# tests; short VM preflight | B2 |
+| B4 | Positive control and `stall` | target delay injection, sensitivity plan, `stall` in the REL `modeMix`, tests | E2E tests; local self-test; sensitivity run | B2 |
+| B5 | Release path (oracle strategy B) | thresholds schema, primary family, Bonferroni-adjusted band, `unevaluable`, TOST, REL capability, clock correction, gate matrix, release outputs; legacy frozen | legacy `oracle-diff`/boundary/fairness green; release tests + negative controls; copied-tree clock | B2, B4 |
 | B6 | `BASE-singbox` | client CONNECT-only SOCKS5, control row, plan, analysis support | E2E tests; VM calibration record | B3–B5 |
 | B7 | Reproducible driver | tracked/parameterized scripts, `campaign.env`, `deploy.json` | `bash -n`; dry run; `git ls-files` | B2 |
 | B8 | Calibration | three reference runs, pre-registered band, `BASE-singbox` record, sensitivity proof | gates green; band file written before B9 | B3–B7 |
@@ -72,7 +72,9 @@ and says so in `verdict.json`. The primary family is data, not a hard-coded list
 
 - `environment.json` adds `clockOffsetMs`, `nicOffload`, `dynamicMemory`, `productVersions`,
   `powerPlan`, `driverVersions`, `snapshotId`, `environmentChanges`. Fields are read before any
-  `Set-*`; every change is recorded as an `environmentChange` entry.
+  `Set-*`; every change is recorded as an `environmentChange` entry. Per-pass pre/post clock
+  samples go to `clock.jsonl` (pass, phase, offsetMs, rttMs, vmUtc, hostUtc), with
+  `clockOffsetMs = vm - host`.
 - `failures.json` lists every failed row/arm with a reason. A row that did not start writes a
   `run.json` skeleton with `failed: true` and a reason, so `LooksLikeRow` sees it and the
   `declared-row-missing` finding can fire.

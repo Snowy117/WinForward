@@ -10,7 +10,7 @@ and verdict rules. This child owns B2–B7.
 | B2 | `benchmarks/WinForward.E2E/scripts/plans-release/*.json`, `orchestrator.ps1` (row table only), `WinForward.E2E.Analysis/Model/RowProfiles.cs`, `verification/row-profiles.json`, `scripts/configs/*.json`, README tables |
 | B3 | `benchmarks/WinForward.E2E/scripts/orchestrator.ps1`, `Client/` order flag, `Analysis/Loading/*`, `Analysis/Findings/*`, `Tables/TableEnvironment.cs` |
 | B4 | `benchmarks/WinForward.E2E/Target/*`, release plan `modeMix`, sensitivity plan, tests |
-| B5 | `Analysis/Cli/AnalysisOptions.cs`, `Analysis/Stats/BootstrapPair.cs`, `Analysis/Verdict/*`, `Analysis/Metrics/*`, `Analysis/Checks/*`, tests, golden fixtures |
+| B5 | `research/b5-release-design.md`; `Analysis/Cli/*`, `Analysis/Stats/*`, `Analysis/Verdict/*`, `Analysis/Metrics/*`, `Analysis/Checks/*`, new `Analysis/Release/*` public seam, tests. No frozen-golden changes (legacy path stays byte-identical). |
 | B6 | `Client/` SOCKS5 flag, orchestrator control row, control plan, analysis row support |
 | B7 | `scripts/{wf,deploy-campaign,start-targets,publish-campaign}.sh`, `campaign.env`, `.gitignore`, `deploy.json` |
 

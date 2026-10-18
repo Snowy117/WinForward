@@ -11,10 +11,11 @@ driver.
 
 - B2: `plans-release/`, orchestrator row plan, row profiles, committed configs, README.
 - B3: clock gate, environment read-before-change, `failures.json`/failed rows, clean-slate,
-  arm-order randomization, caption fix.
+  arm-order randomization; the `connectionId` caption is deferred to the release mode.
 - B4: target delay injection, sensitivity plan, `stall` in `modeMix`.
-- B5: thresholds file, primary family, band-aligned test, `unevaluable`, Holm family,
-  gate-into-verdict, UDP prefixes, DNS denominator.
+- B5: release path (oracle strategy B): thresholds schema, primary family, Bonferroni-adjusted
+  band, `unevaluable`, TOST family, REL capability, clock correction, gate matrix; legacy
+  `tables.md`/`verdict.json` stay byte-identical.
 - B6: `BASE-singbox` control.
 - B7: tracked and parameterized campaign driver, `campaign.env`, `deploy.json`.
 

@@ -40,6 +40,11 @@ internal static class Program
             The parameters and their defaults are the published interface:
             raw {AnalysisOptions.DefaultRaw}, out {AnalysisOptions.DefaultOut}, warmup {AnalysisOptions.DefaultWarmupSeconds:0.0#} s,
             {AnalysisOptions.DefaultResamples} resamples, seed {AnalysisOptions.DefaultSeed}.
+
+            The release run:
+              --release --thresholds <file> [--min-passes <n>] [--discard-pass <n>]
+            reads the pre-registered thresholds file, verifies the caliber plan it names and writes
+            release-inputs.json beside the legacy documents.
             """));
     }
 }

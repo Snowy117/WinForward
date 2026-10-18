@@ -65,9 +65,10 @@ it is to make the claim boundary, the instrument and the evidence chain match.
       `jb inspectcode -f=Xml -e=HINT -o=/tmp/jb-inspectcode.xml WinForward.slnx` has zero `<Issue>`.
 - [ ] `check-fairness.py`, `check-boundary-trees.py`, `check-fixture-drift.py` and `oracle-diff.py`
       pass on the committed analyzer.
-- [ ] Positive control moves p99.9 to about 1 s; the clock gate aborts above 0.2 s; the environment
-      block records the required fields before any change; a gate failure invalidates the verdict
-      cell; arm order is randomized.
+- [ ] Positive control moves p99.9 to about 1 s; the clock gate aborts on probe failure, an
+      absolute offset above 5 s, or more than 100 ms drift (with `-RequireClockSync` enforcing
+      ±0.2 s); the environment block records the required fields before any change; a gate failure
+      invalidates the verdict cell; arm order is randomized.
 - [ ] The calibration band is written before the release campaign; the release campaign has seven
       archived passes (one discarded + six measured) with attempt metadata.
 - [ ] The report contains the release caliber, primary family, band/MDD, coverage, attempts and the
@@ -81,6 +82,9 @@ it is to make the claim boundary, the instrument and the evidence chain match.
 - Two machines only: the Linux host and the Windows VM. No new hardware and no network emulation.
 - One calibration night and one release night. If the window is 8–9 hours, use the MIX/PERSIST 45 s
   fallback rather than dropping the default configuration row.
+- Concurrent owner work on `src/` and `tests/` (NDISAPI optimization): stage only this task's
+  paths; use project-scoped build/test/format while that work is in progress; run the full-solution
+  gate only at a stable point; never stage, revert or fix the owner's files.
 - Every subagent reads its task's `implement.jsonl` / `check.jsonl` and the relevant
   `.trellis/spec` files before editing. The main session does not write code.
 
