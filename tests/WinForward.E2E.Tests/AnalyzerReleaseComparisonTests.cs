@@ -176,6 +176,33 @@ public sealed class AnalyzerReleaseComparisonTests
     }
 
     [Fact]
+    public void AnEquivalentAndUnevaluableFamilyAggregatesToUnevaluable()
+    {
+        var thresholds = ParseFixture("comparison.json");
+        var passes = Passes(10);
+        var inputs = Inputs(thresholds, passes, required: 2);
+        var reference = Series(100.0, 0.004, 10);
+        var dataset = Dataset(
+            passes,
+            Row(Reference, passes).With(Latency, reference),
+            Row("proxifyre", passes).With(Latency, Series(100.0 / 1.02, 0.004, 10)),
+            Row("proxybridge", passes).With(Latency, [.. Enumerable.Repeat(0.0, 10)]));
+
+        var metric = Metric(dataset, thresholds, inputs, Latency);
+        var equivalent = Pair(dataset, thresholds, inputs, Latency, "proxifyre");
+        var unevaluable = Pair(dataset, thresholds, inputs, Latency, "proxybridge");
+
+        Assert.Equal(ReleaseState.Equivalent, equivalent.State);
+        Assert.Equal(ReleaseState.Unevaluable, unevaluable.State);
+        Assert.Equal(2, metric.FamilySize);
+        Assert.Equal(ReleaseState.Unevaluable, metric.State);
+        Assert.Contains("no pair is different or inconclusive", metric.Reason, StringComparison.Ordinal);
+        Assert.Contains("unevaluable", metric.Reason, StringComparison.Ordinal);
+        Assert.Contains("equivalent", metric.Reason, StringComparison.Ordinal);
+        Assert.Equal("proxybridge", metric.DecisionPair);
+    }
+
+    [Fact]
     public void ExploratoryMetricsAreReportOnlyAndCarryNoAdjustedInterval()
     {
         var thresholds = ParseFixture("comparison.json");

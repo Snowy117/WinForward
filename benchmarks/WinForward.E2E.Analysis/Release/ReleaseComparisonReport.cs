@@ -82,7 +82,16 @@ public sealed record ReleasePairResult(
     ReleaseInterval? AdjustedInterval,
     double? EquivalenceMargin,
     string State,
-    string Reason);
+    string Reason)
+{
+    /// <summary>The measured passes a release gate removed from this pair, in natural-key order.</summary>
+    /// <remarks>
+    /// A pair is still in the family when only some of its passes were invalidated; the interval is then
+    /// drawn over the surviving passes and this list says which ones are missing. A pair whose every pass
+    /// was invalidated leaves the family and reports the gate as its <see cref="Ineligibility"/>.
+    /// </remarks>
+    public IReadOnlyList<string> InvalidatedPasses { get; init; } = [];
+}
 
 /// <summary>One metric's release result: its family, its reference readings and every row's pair.</summary>
 /// <param name="Metric">The metric's catalogue identifier.</param>
@@ -117,7 +126,33 @@ public sealed record ReleaseMetricResult(
     double? ZeroEventUpperBound,
     IReadOnlyList<ReleasePairResult> Pairs,
     string State,
-    string Reason);
+    string Reason)
+{
+    /// <summary>The cells of this metric that a release gate invalidated.</summary>
+    /// <remarks>
+    /// The comparison has already removed the invalidated values from every interval and shrank the
+    /// family; these entries are the evidence the verdict's gate section prints, kept on the metric so a
+    /// reader does not have to join two lists by metric id.
+    /// </remarks>
+    public IReadOnlyList<ReleaseGateInvalidation> GateInvalidations { get; init; } = [];
+
+    /// <summary>The pair whose interval is the evidence for <see cref="State"/>, or null.</summary>
+    /// <remarks>
+    /// The aggregate state is selected first by severity (`different`, `inconclusive`, `unevaluable`,
+    /// `equivalent`); this names the first in-family pair carrying it, preferring a pair with an adjusted
+    /// interval and tie-breaking by row id ordinal.
+    /// </remarks>
+    public string? DecisionPair { get; init; }
+
+    /// <summary>The decision pair's estimate, or the reference median for an exploratory metric.</summary>
+    public double? Median { get; init; }
+
+    /// <summary>The decision pair's unadjusted interval, or null.</summary>
+    public ReleaseInterval? RawInterval { get; init; }
+
+    /// <summary>The decision pair's Bonferroni-adjusted interval, or null.</summary>
+    public ReleaseInterval? AdjustedInterval { get; init; }
+}
 
 /// <summary>One measured pass's counts for the capability gate.</summary>
 /// <param name="PassId">The pass the counts belong to.</param>
@@ -175,4 +210,12 @@ public sealed record ReleaseComparisonReport(
     bool Insufficient,
     double FamilywiseAlpha,
     IReadOnlyList<ReleaseMetricResult> Metrics,
-    IReadOnlyList<ReleaseCapabilityResult> Capabilities);
+    IReadOnlyList<ReleaseCapabilityResult> Capabilities)
+{
+    /// <summary>The gate matrix result the comparison applied to the dataset.</summary>
+    /// <remarks>
+    /// <see cref="ReleaseGateMatrixResult.Empty"/> is a campaign whose gates are clean; it is a value,
+    /// not a null, so the writer never has to branch on whether a gate section exists.
+    /// </remarks>
+    public ReleaseGateMatrixResult Gates { get; init; } = ReleaseGateMatrixResult.Empty;
+}

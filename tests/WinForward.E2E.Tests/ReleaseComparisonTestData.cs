@@ -36,6 +36,7 @@ internal static class ReleaseComparisonTestData
             Opponents = thresholds.Opponents,
             Primary = thresholds.Primary,
             WarmupSeconds = thresholds.WarmupSeconds ?? 5.0,
+            Clock = thresholds.Clock,
             Passes = passes,
         };
     }

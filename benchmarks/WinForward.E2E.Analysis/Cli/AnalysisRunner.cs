@@ -20,7 +20,7 @@ namespace WinForward.E2E.Analysis.Cli;
 /// <para><b>A release run validates its inputs before it writes anything.</b> The thresholds file, the
 /// plan hash and the pass selection are checked first, so a refused release invocation leaves no
 /// half-written artifact set behind; on success the legacy documents are written unchanged and
-/// <c>release-inputs.json</c> is added beside them.</para>
+/// <c>release-inputs.json</c> and the three release documents are written beside them.</para>
 /// <para><b>stdout is not part of the contract.</b> The dump of what each batch still owes is for a
 /// human running the skeleton; the compared bytes are the two files below, and nothing about the
 /// summary lines is diffed.</para>
@@ -39,13 +39,37 @@ internal static class AnalysisRunner
             return ExitCodes.InputError;
         }
 
-        if (!TryBuildReleaseInputs(options, campaign, out var releaseInputs))
+        var findings = FindingsCollector.Collect(campaign);
+        if (!TryBuildReleaseInputs(options, campaign, out var releaseInputs, out var thresholds))
         {
             return ExitCodes.InputError;
         }
 
+        ReleaseArtifacts? artifacts = null;
+        if (releaseInputs is not null)
+        {
+            if (thresholds is null)
+            {
+                Console.Error.WriteLine("e2e-analysis: release: the thresholds file was not retained");
+                return ExitCodes.InputError;
+            }
+
+            if (!ReleaseWriter.TryBuild(
+                    campaign,
+                    options.Raw,
+                    thresholds,
+                    releaseInputs,
+                    findings,
+                    out artifacts,
+                    out var releaseError))
+            {
+                Console.Error.WriteLine($"e2e-analysis: {releaseError}");
+                return ExitCodes.InputError;
+            }
+        }
+
         var output = Directory.CreateDirectory(options.Out);
-        Render(campaign, releaseInputs, output.FullName);
+        Render(campaign, findings, releaseInputs, artifacts, output.FullName);
         Report(options, campaign, releaseInputs, output.FullName);
         return ExitCodes.Success;
     }
@@ -54,30 +78,45 @@ internal static class AnalysisRunner
     /// The release path's share of one run: validate the thresholds file, the caliber hash and the pass
     /// tree before anything is written.
     /// </summary>
-    private static bool TryBuildReleaseInputs(AnalysisOptions options, CampaignModel campaign, out ReleaseInputs? inputs)
+    private static bool TryBuildReleaseInputs(
+        AnalysisOptions options,
+        CampaignModel campaign,
+        out ReleaseInputs? inputs,
+        out ThresholdsFile? thresholds)
     {
         inputs = null;
+        thresholds = null;
         var release = options.Release;
         if (!release.Release)
         {
             return true;
         }
 
-        var outcome = ReleaseRun.Execute(release, options.WarmupSeconds, campaign.PassIds, Directory.GetCurrentDirectory());
-        if (outcome.ExitCode != ExitCodes.Success || outcome.Inputs is null)
+        var outcome = ReleaseRun.Execute(
+            release,
+            options.WarmupSeconds,
+            campaign.PassIds,
+            Directory.GetCurrentDirectory(),
+            options.Raw);
+        if (outcome.ExitCode != ExitCodes.Success || outcome.Inputs is null || outcome.Thresholds is null)
         {
             Console.Error.WriteLine($"e2e-analysis: {outcome.Error}");
             return false;
         }
 
         inputs = outcome.Inputs;
+        thresholds = outcome.Thresholds;
         return true;
     }
 
     /// <summary>Writes the two legacy documents, the plotting notice and the release inputs.</summary>
-    private static void Render(CampaignModel campaign, ReleaseInputs? releaseInputs, string outputDirectory)
+    private static void Render(
+        CampaignModel campaign,
+        IReadOnlyList<Finding> findings,
+        ReleaseInputs? releaseInputs,
+        ReleaseArtifacts? artifacts,
+        string outputDirectory)
     {
-        var findings = FindingsCollector.Collect(campaign);
         using (var tables = OpenOutput(Path.Combine(outputDirectory, "tables.md")))
         {
             TablesWriter.Write(tables, campaign, findings);
@@ -92,8 +131,15 @@ internal static class AnalysisRunner
 
         if (releaseInputs is not null)
         {
-            using var document = OpenOutput(Path.Combine(outputDirectory, "release-inputs.json"));
-            document.Write(releaseInputs.ToJson());
+            using (var document = OpenOutput(Path.Combine(outputDirectory, "release-inputs.json")))
+            {
+                document.Write(releaseInputs.ToJson());
+            }
+
+            if (artifacts is not null)
+            {
+                ReleaseWriter.Write(outputDirectory, artifacts);
+            }
         }
     }
 
@@ -129,7 +175,12 @@ internal static class AnalysisRunner
                 System.Globalization.CultureInfo.InvariantCulture,
                 $"e2e-analysis: release inputs -> {Path.Combine(outputDirectory, "release-inputs.json")}; "
                 + $"{releaseInputs.Passes.N} measured pass(es) of {releaseInputs.Passes.Total}, required {releaseInputs.Passes.Required}{suffix}"));
+            Console.WriteLine(
+                $"e2e-analysis: release verdict -> {Path.Combine(outputDirectory, "verdict.release.json")}; "
+                + $"tables -> {Path.Combine(outputDirectory, "tables.release.md")}; "
+                + $"findings -> {Path.Combine(outputDirectory, "findings.release.json")}");
         }
+
 
         foreach (var passId in campaign.PassIds)
         {

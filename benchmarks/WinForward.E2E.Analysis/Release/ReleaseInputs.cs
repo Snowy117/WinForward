@@ -55,6 +55,12 @@ public sealed record ReleaseInputs
     /// <summary>The per-arm warm-up window the run trims.</summary>
     public required double WarmupSeconds { get; init; }
 
+    /// <summary>What the thresholds file asks the clock correction to prove.</summary>
+    /// <remarks>
+    /// The rule is carried on the inputs, not written into the provenance document: it changes whether a
+    /// release invocation is refused, and the <c>release-inputs/1</c> schema stays as it was.
+    /// </remarks>
+    public required ClockRule Clock { get; init; }
     /// <summary>The pass selection the run measured over.</summary>
     public required ReleasePasses Passes { get; init; }
 
@@ -123,6 +129,7 @@ public sealed record ReleaseInputs
             Opponents = thresholds.Opponents,
             Primary = thresholds.Primary,
             WarmupSeconds = warmupSeconds,
+            Clock = thresholds.Clock,
             Passes = passes,
         };
         return true;

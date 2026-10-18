@@ -43,7 +43,10 @@ internal static class ReleasePairDecision
         int familySize,
         double? equivalenceMargin,
         int resamples,
-        int seed)
+        int seed,
+        string? gateExclusion = null,
+        string? gateNote = null,
+        IReadOnlyList<string>? gateInvalidatedPasses = null)
     {
         ArgumentNullException.ThrowIfNull(spec);
         ArgumentNullException.ThrowIfNull(row);
@@ -61,28 +64,51 @@ internal static class ReleasePairDecision
             resamples,
             seed);
 
+        if (gateExclusion is not null)
+        {
+            return Tagged(
+                Result(
+                    row.RowId,
+                    ReleaseState.Unevaluable,
+                    gateExclusion,
+                    inFamily: false,
+                    gateExclusion,
+                    default,
+                    adjusted: null,
+                    facts.ReferenceMedian,
+                    facts.RowMedian,
+                    facts.PassesUsed,
+                    margin: null),
+                gateNote: null,
+                gateInvalidatedPasses);
+        }
+
+        ReleasePairResult result;
         if (primary is null)
         {
-            return ReportOnly(
+            result = ReportOnly(
                 row,
                 facts,
                 "exploratory metric: values and the raw interval are reported, and no difference or equivalence claim is made",
                 "exploratory metric: no decision family");
         }
-
-        if (!declaredOpponent)
+        else if (!declaredOpponent)
         {
-            return ReportOnly(
+            result = ReportOnly(
                 row,
                 facts,
                 "row is not a declared opponent: internal and extra rows are exploratory and report-only",
                 "row is not a declared opponent: internal and extra rows are exploratory");
         }
-
-        return facts.Included
-            ? InFamily(row, primary, facts, minimumPasses, insufficient, familySize)
-            : Excluded(row, facts);
+        else
+        {
+            result = facts.Included
+                ? InFamily(row, primary, facts, minimumPasses, insufficient, familySize)
+                : Excluded(row, facts);
+        }
+        return Tagged(result, gateNote, gateInvalidatedPasses);
     }
+
 
     private static PairFacts Facts(
         MetricSpec spec,
@@ -409,6 +435,16 @@ internal static class ReleasePairDecision
             state,
             reason);
 
+    /// <summary>Adds the gate evidence a cell lost to an otherwise complete pair result.</summary>
+    private static ReleasePairResult Tagged(
+        ReleasePairResult result,
+        string? gateNote,
+        IReadOnlyList<string>? invalidatedPasses) =>
+        result with
+        {
+            Reason = gateNote is null ? result.Reason : $"{result.Reason}; {gateNote}",
+            InvalidatedPasses = invalidatedPasses ?? [],
+        };
     /// <summary>One pair's draws and the reason a draw failed.</summary>
     private readonly record struct PairDraw(
         double? Median,

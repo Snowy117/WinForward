@@ -43,17 +43,21 @@ public static class ReleaseComparison
     /// The inputs are not the record built from this thresholds file, or the dataset's measured passes are
     /// not the inputs' measured passes.
     /// </exception>
+    /// <param name="gates">The gate matrix result to apply, or null when the campaign's gates are clean.</param>
     public static ReleaseComparisonReport Evaluate(
         ThresholdsFile thresholds,
         ReleaseInputs inputs,
-        ReleaseDataset dataset)
+        ReleaseDataset dataset,
+        ReleaseGateMatrixResult? gates = null)
     {
         ArgumentNullException.ThrowIfNull(thresholds);
         ArgumentNullException.ThrowIfNull(inputs);
         ArgumentNullException.ThrowIfNull(dataset);
 
-        EnsureInputsAgree(thresholds, inputs);
-        EnsureDataset(inputs, dataset);
+        gates ??= ReleaseGateMatrixResult.Empty;
+        ReleaseComparisonValidation.InputsAgree(thresholds, inputs);
+        ReleaseComparisonValidation.Dataset(inputs, dataset);
+        dataset = ReleaseGateFilter.Apply(dataset, gates);
 
         var reference = dataset.Rows.FirstOrDefault(row =>
             string.Equals(row.RowId, thresholds.ReferenceRow, StringComparison.Ordinal));
@@ -77,13 +81,14 @@ public static class ReleaseComparison
                     thresholds.Opponents,
                     inputs,
                     dataset,
-                    equivalence.GetValueOrDefault(primary.Metric)));
+                    equivalence.GetValueOrDefault(primary.Metric),
+                    gates));
         }
 
         foreach (var metric in thresholds.Exploratory)
         {
             var spec = Spec(metric);
-            metrics.Add(EvaluateExploratory(spec, thresholds.ReferenceRow, reference, rowOrder, inputs, dataset));
+            metrics.Add(EvaluateExploratory(spec, thresholds.ReferenceRow, reference, rowOrder, inputs, dataset, gates));
         }
 
         var capabilities = ReleaseCapabilityGate.Evaluate(thresholds, dataset, reference, rowOrder);
@@ -96,7 +101,10 @@ public static class ReleaseComparison
             inputs.Passes.Insufficient,
             FamilywiseAlpha,
             metrics,
-            capabilities);
+            capabilities)
+        {
+            Gates = gates,
+        };
     }
 
     private static ReleaseMetricResult EvaluatePrimary(
@@ -108,47 +116,38 @@ public static class ReleaseComparison
         IReadOnlyList<string> opponents,
         ReleaseInputs inputs,
         ReleaseDataset dataset,
-        double? equivalenceMargin)
+        double? equivalenceMargin,
+        ReleaseGateMatrixResult gates)
     {
-        var referenceReadings = Read(reference, spec.Key);
+        var referenceReadings = ReleaseGateFilter.Reading(reference, spec.Key);
         var referenceValues = referenceReadings?.Values ?? s_emptyValues;
         var familySize = rowOrder.Count(row =>
             IsDeclaredOpponent(opponents, row.RowId)
-            && ReleasePairDecision.IsInFamily(spec, primary, referenceRow, reference, row, declaredOpponent: true));
-        var pairs = new List<ReleasePairResult>(rowOrder.Count);
-        foreach (var row in rowOrder)
-        {
-            pairs.Add(
-                ReleasePairDecision.Evaluate(
-                    spec,
-                    primary,
-                    referenceRow,
-                    reference,
-                    row,
-                    IsDeclaredOpponent(opponents, row.RowId),
-                    dataset.MeasuredPasses,
-                    inputs.Passes.Required,
-                    inputs.Passes.Insufficient,
-                    familySize,
-                    equivalenceMargin,
-                    dataset.Resamples,
-                    dataset.Seed));
-        }
+            && ReleasePairDecision.IsInFamily(spec, primary, referenceRow, reference, row, declaredOpponent: true)
+            && ReleaseGateFilter.Exclusion(spec, row) is null);
+        var pairs = EvaluatePairs(
+            spec,
+            primary,
+            referenceRow,
+            reference,
+            rowOrder,
+            opponents,
+            inputs,
+            dataset,
+            familySize,
+            equivalenceMargin,
+            gates);
 
         var (state, reason) = AggregatePrimary(pairs, familySize, reference, referenceReadings, referenceRow);
-        var (zeroEventN, zeroEventUpperBound) = ZeroEventBound(reference, spec, dataset.MeasuredPasses);
-        if (string.Equals(state, ReleaseState.Unevaluable, StringComparison.Ordinal)
-            && zeroEventUpperBound is { } bound
-            && zeroEventN is { } exposure)
+        if (ReleaseGateFilter.Note(spec, reference, gates, dataset.MeasuredPasses) is { } referenceGateNote)
         {
-            reason = string.Concat(
-                reason,
-                "; zero-event rate: 3/",
-                exposure.ToString(CultureInfo.InvariantCulture),
-                " upper bound ",
-                bound.ToString("0.#####", CultureInfo.InvariantCulture),
-                " pp");
+            reason = $"{reason}; {referenceGateNote}";
         }
+
+        var (zeroEventN, zeroEventUpperBound) = ZeroEventBound(reference, spec, dataset.MeasuredPasses);
+        reason = ZeroEventReason(reason, state, zeroEventN, zeroEventUpperBound);
+
+        var decision = DecisionPair(pairs, state);
 
         return new ReleaseMetricResult(
             spec.Key,
@@ -166,8 +165,69 @@ public static class ReleaseComparison
             zeroEventUpperBound,
             pairs,
             state,
-            reason);
+            reason)
+        {
+            GateInvalidations = ReleaseGateFilter.Collect(spec.Key, dataset.Rows, gates),
+            DecisionPair = decision?.RowId,
+            Median = decision?.Median,
+            RawInterval = decision?.RawInterval,
+            AdjustedInterval = decision?.AdjustedInterval,
+        };
     }
+
+    /// <summary>Evaluates every row against the reference, with the family size already fixed.</summary>
+    private static List<ReleasePairResult> EvaluatePairs(
+        MetricSpec spec,
+        PrimaryMetric primary,
+        string referenceRow,
+        ReleaseRowReadings? reference,
+        List<ReleaseRowReadings> rowOrder,
+        IReadOnlyList<string> opponents,
+        ReleaseInputs inputs,
+        ReleaseDataset dataset,
+        int familySize,
+        double? equivalenceMargin,
+        ReleaseGateMatrixResult gates)
+    {
+        var pairs = new List<ReleasePairResult>(rowOrder.Count);
+        foreach (var row in rowOrder)
+        {
+            pairs.Add(
+                ReleasePairDecision.Evaluate(
+                    spec,
+                    primary,
+                    referenceRow,
+                    reference,
+                    row,
+                    IsDeclaredOpponent(opponents, row.RowId),
+                    dataset.MeasuredPasses,
+                    inputs.Passes.Required,
+                    inputs.Passes.Insufficient,
+                    familySize,
+                    equivalenceMargin,
+                    dataset.Resamples,
+                    dataset.Seed,
+                    ReleaseGateFilter.Exclusion(spec, row),
+                    ReleaseGateFilter.Note(spec, row, gates, dataset.MeasuredPasses),
+                    ReleaseGateFilter.InvalidatedPasses(spec, row, dataset.MeasuredPasses)));
+        }
+
+        return pairs;
+    }
+
+    /// <summary>Adds the rule-of-three bound to an unevaluable zero-event rate's reason.</summary>
+    private static string ZeroEventReason(string reason, string state, long? n, double? upperBound) =>
+        string.Equals(state, ReleaseState.Unevaluable, StringComparison.Ordinal)
+            && upperBound is { } bound
+            && n is { } exposure
+            ? string.Concat(
+                reason,
+                "; zero-event rate: 3/",
+                exposure.ToString(CultureInfo.InvariantCulture),
+                " upper bound ",
+                bound.ToString("0.#####", CultureInfo.InvariantCulture),
+                " pp")
+            : reason;
 
     private static ReleaseMetricResult EvaluateExploratory(
         MetricSpec spec,
@@ -175,9 +235,10 @@ public static class ReleaseComparison
         ReleaseRowReadings? reference,
         List<ReleaseRowReadings> rowOrder,
         ReleaseInputs inputs,
-        ReleaseDataset dataset)
+        ReleaseDataset dataset,
+        ReleaseGateMatrixResult gates)
     {
-        var referenceValues = Read(reference, spec.Key)?.Values ?? s_emptyValues;
+        var referenceValues = ReleaseGateFilter.Reading(reference, spec.Key)?.Values ?? s_emptyValues;
         var pairs = new List<ReleasePairResult>(rowOrder.Count);
         foreach (var row in rowOrder)
         {
@@ -195,8 +256,13 @@ public static class ReleaseComparison
                     familySize: 0,
                     equivalenceMargin: null,
                     dataset.Resamples,
-                    dataset.Seed));
+                    dataset.Seed,
+                    ReleaseGateFilter.Exclusion(spec, row),
+                    ReleaseGateFilter.Note(spec, row, gates, dataset.MeasuredPasses),
+                    ReleaseGateFilter.InvalidatedPasses(spec, row, dataset.MeasuredPasses)));
         }
+
+        var referenceMedian = DescriptiveStats.Median([.. referenceValues.Values]);
 
         return new ReleaseMetricResult(
             spec.Key,
@@ -206,7 +272,7 @@ public static class ReleaseComparison
             Business: null,
             Mdd: null,
             referenceRow,
-            DescriptiveStats.Median([.. referenceValues.Values]),
+            referenceMedian,
             referenceValues,
             FamilySize: 0,
             EquivalenceMargin: null,
@@ -214,7 +280,11 @@ public static class ReleaseComparison
             ZeroEventUpperBound: null,
             pairs,
             ReleaseState.ReportOnly,
-            "exploratory metric: values and raw intervals are reported, and no difference or equivalence claim is made");
+            "exploratory metric: values and raw intervals are reported, and no difference or equivalence claim is made")
+        {
+            GateInvalidations = ReleaseGateFilter.Collect(spec.Key, dataset.Rows, gates),
+            Median = referenceMedian,
+        };
     }
 
     /// <summary>The metric-level state over the in-family pairs; outside pairs never contribute.</summary>
@@ -242,41 +312,90 @@ public static class ReleaseComparison
                 $"the reference row '{referenceRow}' did not run the metric: {referenceReadings.StatusReason ?? referenceReadings.Status}");
         }
 
+        if (referenceReadings.Values.Count == 0 && referenceReadings.InvalidatedPasses > 0)
+        {
+            return (
+                ReleaseState.Unevaluable,
+                $"a release gate invalidated every measured pass of the reference row '{referenceRow}' for this metric");
+        }
+
         var inFamily = pairs.Where(pair => pair.InFamily).ToList();
         if (inFamily.Count == 0 || familySize == 0)
         {
             return (ReleaseState.Unevaluable, "no comparable declared opponent contributed to the pre-registered family");
         }
 
-        if (inFamily.TrueForAll(pair => string.Equals(pair.State, ReleaseState.Unevaluable, StringComparison.Ordinal)))
-        {
-            return (ReleaseState.Unevaluable, JoinReasons(inFamily));
-        }
-
-        if (inFamily.Exists(pair => string.Equals(pair.State, ReleaseState.Different, StringComparison.Ordinal)))
-        {
-            return (
-                ReleaseState.Different,
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"{AdjustmentLabel}: at least one of {familySize} adjusted intervals excludes the decision band"));
-        }
-
-        if (inFamily.TrueForAll(pair => string.Equals(pair.State, ReleaseState.Equivalent, StringComparison.Ordinal)))
-        {
-            return (
-                ReleaseState.Equivalent,
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"every one of {familySize} in-family raw interval(s) lies inside the pre-registered TOST margin; unadjusted and declared"));
-        }
-
-        return (
-            ReleaseState.Inconclusive,
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"no adjusted interval excludes the band; at least one of {familySize} in-family pair(s) is inconclusive"));
+        var state = AggregateState(inFamily);
+        return (state, AggregateReason(state, inFamily, familySize));
     }
+
+    /// <summary>The aggregate state, by severity: different, then inconclusive, then unevaluable, then equivalent.</summary>
+    /// <remarks>
+    /// The order is the decision the family can actually support: one different pair is a difference even
+    /// when another pair is unevaluable; one inconclusive pair keeps the family inconclusive even when
+    /// another is unevaluable; equivalence is the weakest claim and is returned only when every in-family
+    /// pair is equivalent. A mixture therefore never becomes a state no pair carried.
+    /// </remarks>
+    private static string AggregateState(IReadOnlyList<ReleasePairResult> inFamily)
+    {
+        if (inFamily.Any(pair => string.Equals(pair.State, ReleaseState.Different, StringComparison.Ordinal)))
+        {
+            return ReleaseState.Different;
+        }
+
+        if (inFamily.Any(pair => string.Equals(pair.State, ReleaseState.Inconclusive, StringComparison.Ordinal)))
+        {
+            return ReleaseState.Inconclusive;
+        }
+
+        if (inFamily.Any(pair => string.Equals(pair.State, ReleaseState.Unevaluable, StringComparison.Ordinal)))
+        {
+            return ReleaseState.Unevaluable;
+        }
+
+        return inFamily.All(pair => string.Equals(pair.State, ReleaseState.Equivalent, StringComparison.Ordinal))
+            ? ReleaseState.Equivalent
+            : ReleaseState.Unevaluable;
+
+    }
+
+    private static string AggregateReason(string state, IReadOnlyList<ReleasePairResult> inFamily, int familySize)
+    {
+        var reason = state switch
+        {
+            ReleaseState.Different => $"{AdjustmentLabel}: at least one of {familySize.ToString(CultureInfo.InvariantCulture)} adjusted intervals excludes the decision band",
+            ReleaseState.Inconclusive => $"no adjusted interval excludes the band; at least one of {familySize.ToString(CultureInfo.InvariantCulture)} in-family pair(s) is inconclusive",
+            ReleaseState.Unevaluable => $"no pair is different or inconclusive; at least one of {familySize.ToString(CultureInfo.InvariantCulture)} in-family pair(s) is unevaluable",
+            _ => $"every one of {familySize.ToString(CultureInfo.InvariantCulture)} in-family raw interval(s) lies inside the pre-registered TOST margin; unadjusted and declared",
+        };
+
+        var others = new[] { ReleaseState.Different, ReleaseState.Inconclusive, ReleaseState.Unevaluable, ReleaseState.Equivalent }
+            .Where(candidate => !string.Equals(candidate, state, StringComparison.Ordinal))
+            .Select(candidate => (State: candidate, Count: inFamily.Count(pair => string.Equals(pair.State, candidate, StringComparison.Ordinal))))
+            .Where(entry => entry.Count > 0)
+            .Select(entry => $"{entry.Count} pair(s) are {entry.State}")
+            .ToList();
+        return others.Count == 0 ? reason : $"{reason}; {string.Join(", ", others)}";
+    }
+
+    /// <summary>The pair whose interval is the evidence for the aggregate state.</summary>
+    /// <remarks>
+    /// The aggregate state is chosen first; this then picks the first in-family pair carrying that state,
+    /// preferring a pair that has an adjusted interval and tie-breaking by row id. The interval the
+    /// metric publishes is therefore never a pair that did not carry the aggregate and never a pair with
+    /// no interval when one with an interval exists.
+    /// </remarks>
+    private static ReleasePairResult? DecisionPair(IReadOnlyList<ReleasePairResult> pairs, string state) =>
+        pairs
+            .Where(pair => pair.InFamily && string.Equals(pair.State, state, StringComparison.Ordinal))
+            .OrderByDescending(pair => pair.AdjustedInterval is not null)
+            .ThenBy(pair => pair.RowId, StringComparer.Ordinal)
+            .FirstOrDefault()
+        ?? pairs
+            .Where(pair => pair.InFamily)
+            .OrderByDescending(pair => pair.AdjustedInterval is not null)
+            .ThenBy(pair => pair.RowId, StringComparer.Ordinal)
+            .FirstOrDefault();
 
     /// <summary>The rule-of-three exposure behind a zero-event rate, when the reference row has counts.</summary>
     private static (long? N, double? UpperBound) ZeroEventBound(
@@ -339,122 +458,6 @@ public static class ReleaseComparison
         MetricCatalogue.Specs.FirstOrDefault(spec => string.Equals(spec.Key, key, StringComparison.Ordinal))
         ?? throw new ArgumentException($"release: the thresholds file names an unknown metric '{key}'", nameof(key));
 
-    private static ReleaseMetricReadings? Read(ReleaseRowReadings? row, string metric) =>
-        row is not null && row.Metrics.TryGetValue(metric, out var readings) ? readings : null;
 
-    private static string JoinReasons(IEnumerable<ReleasePairResult> pairs)
-    {
-        var reasons = pairs
-            .Select(pair => pair.Reason)
-            .Distinct(StringComparer.Ordinal)
-            .Take(2)
-            .ToList();
-        return reasons.Count == 0 ? "no pair produced a reason" : string.Join("; ", reasons);
-    }
-
-    private static void EnsureInputsAgree(ThresholdsFile thresholds, ReleaseInputs inputs)
-    {
-        if (!string.Equals(inputs.ReferenceRow, thresholds.ReferenceRow, StringComparison.Ordinal))
-        {
-            throw new ArgumentException(
-                $"the release inputs name reference row '{inputs.ReferenceRow}', but the thresholds file names '{thresholds.ReferenceRow}'",
-                nameof(inputs));
-        }
-
-        if (!inputs.Opponents.SequenceEqual(thresholds.Opponents, StringComparer.Ordinal))
-        {
-            throw new ArgumentException("the release inputs' opponents are not the thresholds file's opponents", nameof(inputs));
-        }
-
-        if (!inputs.Primary.SequenceEqual(thresholds.Primary))
-        {
-            throw new ArgumentException("the release inputs' primary family is not the thresholds file's primary family", nameof(inputs));
-        }
-    }
-
-    private static void EnsureDataset(ReleaseInputs inputs, ReleaseDataset dataset)
-    {
-        if (dataset.Resamples < 1)
-        {
-            throw new ArgumentException("the release dataset needs at least one resample", nameof(dataset));
-        }
-
-        if (dataset.MeasuredPasses.Count == 0)
-        {
-            throw new ArgumentException("the release dataset holds no measured pass", nameof(dataset));
-        }
-
-        EnsurePassCounts(inputs);
-        EnsureMeasuredPasses(inputs, dataset);
-        EnsureRows(dataset);
-    }
-
-    private static void EnsurePassCounts(ReleaseInputs inputs)
-    {
-        if (inputs.Passes.N != inputs.Passes.Measured.Count || inputs.Passes.N == 0)
-        {
-            throw new ArgumentException("the release inputs' measured pass count does not match their measured pass list", nameof(inputs));
-        }
-
-        if (inputs.Passes.Required < ReleaseOptions.MinimumMinPasses)
-        {
-            throw new ArgumentException(
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"the release inputs require {inputs.Passes.Required} passes, below the minimum of {ReleaseOptions.MinimumMinPasses}"),
-                nameof(inputs));
-        }
-
-        var duplicate = inputs.Passes.Measured
-            .GroupBy(number => number)
-            .FirstOrDefault(group => group.Skip(1).Any())?.Key;
-        if (duplicate is not null)
-        {
-            throw new ArgumentException(
-                string.Create(CultureInfo.InvariantCulture, $"the release inputs list pass {duplicate} twice"),
-                nameof(inputs));
-        }
-    }
-
-    private static void EnsureMeasuredPasses(ReleaseInputs inputs, ReleaseDataset dataset)
-    {
-        var numbers = dataset.MeasuredPasses
-            .Select(passId => ParsePass(passId, nameof(dataset)))
-            .ToList();
-        var duplicate = numbers
-            .GroupBy(number => number)
-            .FirstOrDefault(group => group.Skip(1).Any())?.Key;
-        if (duplicate is not null)
-        {
-            throw new ArgumentException(
-                string.Create(CultureInfo.InvariantCulture, $"the release dataset lists pass {duplicate} twice"),
-                nameof(dataset));
-        }
-
-        if (!numbers.ToHashSet().SetEquals(inputs.Passes.Measured))
-        {
-            throw new ArgumentException("the release dataset's measured passes are not the release inputs' measured passes", nameof(dataset));
-        }
-    }
-
-    private static void EnsureRows(ReleaseDataset dataset)
-    {
-        var duplicate = dataset.Rows
-            .GroupBy(row => row.RowId, StringComparer.Ordinal)
-            .FirstOrDefault(group => group.Skip(1).Any())?.Key;
-        if (duplicate is not null)
-        {
-            throw new ArgumentException(
-                $"the release dataset lists row '{duplicate}' twice",
-                nameof(dataset));
-        }
-    }
-
-    private static int ParsePass(string passId, string parameterName) =>
-        ReleasePasses.TryNumber(passId, out var number)
-            ? number
-            : throw new ArgumentException(
-                $"the release dataset holds an unnumbered pass '{passId}'",
-                parameterName);
 
 }

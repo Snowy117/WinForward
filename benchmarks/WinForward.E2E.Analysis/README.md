@@ -9,6 +9,9 @@ things:
 | `verdict.json` | per-row medians, the findings list, the control-block comparison, the dual phase, the ledger cross-check, and a pairwise practical-significance test per headline metric |
 | `plots/` | `plots/SKIPPED.md`; the charts the reference drew are not rendered (see "Plots") |
 
+With `--release` the same run also writes `verdict.release.json`, `tables.release.md` and
+`findings.release.json`; the three legacy files stay byte-identical (see "The release files").
+
 It is a .NET console project in this repository, built with the rest of the solution and referencing the
 harness's contract project (`WinForward.E2E.Contracts`), so the envelope-level field names it reads —
 `run.json`'s keys, the sample counters, the ledger's records — are the same `ArmKeys` constants the
@@ -58,10 +61,10 @@ bash <repo>/benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh \
   --release --thresholds thresholds.json --min-passes 6 --discard-pass 1
 ```
 
-`--release` reads a pre-registered thresholds file and, when its inputs are accepted, adds
-`release-inputs.json` beside the legacy documents. It changes neither `tables.md` nor `verdict.json`
-nor `plots/SKIPPED.md`. The release verdict (`verdict.release.json`) and the release tables
-(`tables.release.md`) are the next slices of the release path and are not rendered yet.
+`--release` reads a pre-registered thresholds file and, when its inputs are accepted, writes
+`release-inputs.json`, `verdict.release.json`, `tables.release.md` and `findings.release.json`
+beside the legacy documents. It changes neither `tables.md` nor `verdict.json` nor
+`plots/SKIPPED.md`; those three files are the frozen legacy output and remain byte-identical.
 
 | flag | default | meaning |
 |---|---|---|
@@ -178,12 +181,72 @@ rather than read from the wrong counter.
 The public seam is:
 
 - `ReleaseDataset.TryRead(campaignRoot, inputs, resamples, seed)` — the read-only per-pass dataset.
-- `ReleaseComparison.Evaluate(thresholds, inputs, dataset)` — a `ReleaseComparisonReport` with each
+- `ReleaseComparison.Evaluate(thresholds, inputs, dataset, gates = null)` — a `ReleaseComparisonReport` with each
   metric's role, band, MDD, reference per-pass values and median, family size, per-opponent pairs
   (`inFamily`, raw and adjusted intervals, state and reason), and the capability results.
 
 The release rules are C#-only and are not compared by the Python oracle. The legacy documents and the
-frozen golden remain byte-identical; the release writer is a later slice.
+frozen golden remain byte-identical.
+
+### The release files (release-only)
+
+A successful release run writes three files beside `release-inputs.json`; a legacy run writes none of
+them.
+
+| file | what it is |
+|---|---|
+| `verdict.release.json` | schema `release-verdict/1`: caliber and thresholds hashes, pass selection, primary results, capability gate, exploratory results, clock evidence and both ledger reads, gate invalidations, findings and limits |
+| `tables.release.md` | the compact human report: caliber, primary table with band/MDD/raw and adjusted CI/state, REL capability, clock, gate invalidations, coverage and limits |
+| `findings.release.json` | schema `release-findings/1`: the legacy findings plus the release-only clock and gate findings, the per-severity counts and the limits |
+
+`verdict.release.json` publishes the reference row's per-pass values and median, and per opponent the
+pair estimate, raw CI, Bonferroni-adjusted CI, passes used, state and reason. `coverage.json` beside the
+thresholds file is embedded as `coverage` when present; absent is `null`, never zero. The document names
+both hashes, so a reader can tie the verdict to the exact plan and band.
+
+#### The gate invalidation matrix
+
+A failed gate makes the affected metric cell `unevaluable`: the pass is removed from the pair's values
+and the metric's CI family shrinks. A pair with some surviving passes keeps the family and draws its
+interval over the survivors, so it may remain `inconclusive`; only a pair whose every measured pass was
+invalidated leaves the family and reports the gate as its ineligibility.
+
+The metric-level state is the strongest claim the in-family pairs support, in this order: `different`,
+`inconclusive`, `unevaluable`, `equivalent`. A mixture therefore never becomes a state no pair carried —
+one `equivalent` and one `unevaluable` pair make the metric `unevaluable`, not a synthetic
+`inconclusive`. The published `decisionPair` is the first pair carrying that aggregate state, preferring
+a pair with an adjusted interval and tie-breaking by row id ordinal; the metric-level `median`, `rawCi`
+and `adjustedCi` are that pair's values.
+
+| gate | invalidates | scope |
+|---|---|---|
+| `windowOverflow > 0` | the arm's latency cells | arm, pass |
+| `clientSendLoss > 0` | the arm's latency and loss cells | arm, pass |
+| UDP accounting identity mismatch | the arm's loss cells and the row's throughput cell | arm, pass |
+| DNS partition identity mismatch | the DNS arm's latency and loss cells | arm, pass |
+| `backlogDrops > 0` | the arm's latency cells | arm, pass |
+| `scheduleTruncated > 0` | the arm's latency cells and the row's throughput cell | arm, pass |
+| `laneShortfall > 0` | every metric cell the arm serves | arm, pass |
+| `samplerError > 0` or a rejected sample | the row's CPU and memory cells | row, pass |
+| `foreignConnection > 0`, `directLeak > 0` | no cell; a campaign-level correctness finding | campaign |
+| control block drift | control comparison/caveat only | campaign |
+| BASE floor FAIL | path-quality caveat only; never a global invalidation | campaign |
+
+The sampler gate covers both a `samplerError` record and a sample the harness rejected with
+`readError`, because both leave the 1 Hz CPU/memory trace with a gap. `clientSendLoss` on `REL` or
+`PERSIST` stops no release cell: those arms publish no latency or loss metric.
+The matrix is `WinForward.E2E.Analysis.Release.ReleaseGateMatrix`, a public pure value object. The
+legacy `TableLatency` window-overflow cell and `GateValidity` verdict are unchanged; no legacy writer
+consults the matrix.
+
+#### Coverage and limits
+
+`ReleaseCoverage.TryRead` reads `coverage.json` beside the thresholds file, renders it into the verdict
+and prints it in the report. A malformed file is a `coverage-unreadable` finding and `coverage: null`;
+an absent one is printed as absent. The eight `limits` lines are the claim boundary from the measurement
+model: solution comparison rather than product ranking, no absolute latency, no WAN, session noise
+rather than machine reproducibility, C#-only release rules, the per-pass clock assumption, "not worse
+than" phrasing, and the exploratory/out-of-scope items.
 
 ### The clock correction (release-only)
 
@@ -230,8 +293,17 @@ Passing `null` — or a correction whose status is `Absent` or `Incomplete` — 
 untranslated views the legacy documents are built from, which is how the release path gets the
 uncorrected negative control beside its corrected evidence.
 
+The release verdict runs that read twice — once with the correction and once without — and prints both
+mismatch counts under `clock.correctedLedger` and `clock.uncorrectedLedger`, with the per-pass pre/post
+offsets, drift, residual and the applied offset under `clock.passes`. A missing or partial log is
+disclosed pass by pass and `clock.applied` is false; the corrected count is never fabricated as zero.
+The uncorrected count is the negative control, so a correction that changes no window and one that
+changes the counts are both visible.
+
 The seam is C#-only and is not compared by the Python oracle: the legacy path and its golden are
 untouched, and the correction is covered by `tests/WinForward.E2E.Tests/AnalyzerClock*`. The
+gate matrix and the three release files are covered by `AnalyzerReleaseGateMatrixTests` and
+`AnalyzerReleaseWriterTests` on copied trees; the frozen tree itself is never written to. The
 regression is a copied clean tree — every `run.json`'s `startedUtc` shifted by two seconds, a
 `clock.jsonl` at pre `+1800` / post `+2200` — where the corrected per-arm counts reproduce the
 unshifted tree's exactly, while the uncorrected read, an omitted log and an inverted sign do not.

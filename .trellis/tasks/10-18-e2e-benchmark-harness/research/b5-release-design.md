@@ -86,10 +86,12 @@ not in `primary`/`capability` when omitted.
 - `passes`: `{total, discarded: [1], measured: [2..7], n: 6}`. `--discard-pass` removes the
   warm-up pass before any metric is computed; the legacy output still includes it.
 - `referenceRow`, `opponents`, `primary` (metric/kind/band/mdd).
-- Per primary metric: per-pass values, median, raw CI, **Bonferroni-adjusted CI** (see below),
-  `verdict` (`different` / `inconclusive` / `unevaluable`), reason, `familySize`, and per-opponent
-  pairs with `inFamily`. Internal WinForward pairs are reported exploratory and are not in the
-  adjusted family.
+- Per primary metric: per-pass values, the metric-level median/raw CI/adjusted CI, `decisionPair`
+  (the pair those intervals come from), `verdict`, reason, `familySize`, and per-opponent pairs
+  with `inFamily` and their own intervals. The metric-level state is the most severe in-family pair
+  state (`different` > `inconclusive` > `unevaluable` > `equivalent`); the decision pair is the
+  first same-state in-family pair with a non-null adjusted interval; ties by row id ordinal, and if
+  no same-state pair has an interval, the first same-state pair by row id. Internal WinForward pairs are exploratory and not in the adjusted family.
 - `capability`: REL measured rate, n, 3/n upper bound, threshold (0.25 pp), `status` pass/fail/
   not-measured. No difference claim.
 - `exploratory`: values and raw CI only; no decision.
@@ -144,7 +146,11 @@ reason, excluded from that metric's family. The matrix:
 | `windowOverflow > 0` | latency cells | arm, pass |
 | `clientSendLoss > 0` | latency and loss cells | arm, pass |
 | UDP accounting identity mismatch (any prefix) | loss and throughput cells | arm, pass |
-| `backlogDrops > 0`, `scheduleTruncated > 0`, `laneShortfall > 0`, `samplerError > 0` | affected arm's cells | arm, pass |
+| `backlogDrops > 0` | arm's latency cells | arm, pass |
+| `scheduleTruncated > 0` | arm's latency cells + row's throughput cell | arm, pass |
+| `laneShortfall > 0` | every metric cell the arm serves | arm, pass |
+| `samplerError > 0` or `readError`-rejected samples | row's CPU and memory cells | row, pass |
+| `dns-partition` mismatch | DNS arm's latency and loss cells | arm, pass |
 | `foreignConnection > 0`, `directLeak > 0` | no cell invalidation; campaign-level correctness finding | campaign |
 | control block drift | control comparisons/caveat only | control |
 | BASE floor FAIL | path-quality caveat only; **not** a global invalidation | campaign |
@@ -152,6 +158,12 @@ reason, excluded from that metric's family. The matrix:
 The frozen tree's `control-post` BASE loss 0.008 is exactly why the BASE floor must not invalidate
 every row. `TableLatency`'s existing `windowOverflow` behavior stays for the legacy table; the
 release matrix is a separate value object (`GateMatrix`) and does not change the legacy path.
+
+A gate-invalidated pass is excluded from that metric's CI family; `InvalidatedPasses` counts only
+values actually removed, so a gate targeting a pass with no value does not shrink `m`. A fully
+invalidated pair leaves the family; a partial invalidation keeps it and draws over survivors.
+REL/PERSIST `clientSendLoss` maps to no release cell because those arms have no latency/loss metric;
+the legacy gate still reports it.
 
 ## Clock correction
 

@@ -74,6 +74,18 @@ public sealed record ReleaseMetricReadings
 
     /// <summary>How many measured passes have a reason rather than a value.</summary>
     public int MissingPasses { get; init; }
+
+    /// <summary>How many measured passes a release gate removed from <see cref="Values"/>.</summary>
+    /// <remarks>
+    /// A gate failure is not the same state as a published null denominator: the pass was measured and
+    /// then disqualified, so the comparison keeps the reason beside the cell and excludes the value from
+    /// every interval. Counting the passes here is what lets the comparison tell a gate-empty row from a
+    /// row that merely had no denominator.
+    /// </remarks>
+    public int InvalidatedPasses { get; init; }
+
+    /// <summary>The measured pass ids whose value a release gate removed, in natural-key order.</summary>
+    public IReadOnlyList<string> InvalidatedPassIDs { get; init; } = [];
 }
 
 /// <summary>One campaign row's readings, keyed by metric.</summary>

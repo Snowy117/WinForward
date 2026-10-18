@@ -44,7 +44,9 @@ internal static class Program
             The release run:
               --release --thresholds <file> [--min-passes <n>] [--discard-pass <n>]
             reads the pre-registered thresholds file, verifies the caliber plan it names and writes
-            release-inputs.json beside the legacy documents.
+            release-inputs.json, verdict.release.json, tables.release.md and findings.release.json
+            beside the legacy documents. A campaign whose clock log is missing while its thresholds
+            declare 'clock.require' is refused before anything is written.
             """));
     }
 }

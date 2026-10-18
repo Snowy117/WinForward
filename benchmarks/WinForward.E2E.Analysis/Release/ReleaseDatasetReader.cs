@@ -47,7 +47,7 @@ internal static class ReleaseDatasetReader
     }
 
     /// <summary>Reads one already-loaded campaign into a dataset.</summary>
-    private static bool TryBuild(
+    internal static bool TryBuild(
         CampaignModel campaign,
         ReleaseInputs inputs,
         out ReleaseDataset? dataset,
