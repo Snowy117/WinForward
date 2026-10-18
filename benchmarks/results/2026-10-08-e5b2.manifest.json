@@ -1,0 +1,70 @@
+{
+  "campaign": "2026-10-08-e5b2",
+  "caliber": {
+    "pathBase": "repo-root",
+    "plan": "benchmarks/WinForward.E2E/scripts/plans-windows/full-shape-plan.json",
+    "sha256": "ed0a3477b74dfa973227c80e732592076220fdfa54e29aeb69094f805779d92e",
+    "planHash": "ed0a3477b74dfa97",
+    "recordedPlanPath": "C:\\wfbench\\e2e-win2\\full-plan.json"
+  },
+  "caliberNote": "mixed-caliber campaign: full-shape plan for the five full rows (wf-aot-opt, wf-fdd-opt, proxifyre, proxifier, proxybridge); base-plan for both controls (control-pre, control-post); udp-plan for wf-aot-nativeudp; dns-plan for wf-aot-dnsrelay.",
+  "rows": [
+    "control-pre",
+    "wf-aot-opt",
+    "wf-fdd-opt",
+    "wf-aot-nativeudp",
+    "wf-aot-dnsrelay",
+    "proxifyre",
+    "proxifier",
+    "proxybridge",
+    "control-post"
+  ],
+  "passes": 3,
+  "archive": "~/bench-archive/2026-10-08-e5b2",
+  "files": [
+    {
+      "path": "campaign-e5b2.zip",
+      "sha256": "b1316b0f1c6fcf8f847ee774bf54f6c18a6220554bb76cbac9aa643b5b815a4b",
+      "bytes": 1379548
+    },
+    {
+      "path": "ledger-main.jsonl",
+      "sha256": "d04ee9a15a9fe4604ab8d3fb4d1e24eb8958c81400346fdbc604fa98fbc9c388",
+      "bytes": 5398952
+    },
+    {
+      "path": "ledger-direct.jsonl",
+      "sha256": "87d29fb6e8d1f07fd423c1c42cb030c5a9478977c74587293976215208e9ff62",
+      "bytes": 2409409
+    },
+    {
+      "path": "environment.json",
+      "sha256": "54a98ad5fd5c83ec1482ae83aa77489c0efc2a9f081aac261b56f595a131d5eb",
+      "bytes": 703
+    },
+    {
+      "path": "orch-e5b2.log",
+      "sha256": "d23017f326a596fbfadde5e35f7ee04a3f501fb27dfd3eeb6d72bd0e0c7411ab",
+      "bytes": 5467
+    },
+    {
+      "path": "clock-probe.out",
+      "sha256": "5219015efafbe784f73f42f82707fad410fb595399918585b23cd43a58e15e50",
+      "bytes": 757
+    },
+    {
+      "path": "e5b2-shift.out",
+      "sha256": "f531c9100438dd613630511643b4b7bca9e8d8090c2440ba2976ecd177d626b7",
+      "bytes": 4070
+    },
+    {
+      "path": "e5b2-shift.py",
+      "sha256": "fea92939aea64fa7db6ee7423d15ce0e8aeb3fc9c6bf802320110e77df516051",
+      "bytes": 3461
+    }
+  ],
+  "analysis": {
+    "tables": "analysis/tables.md",
+    "verdict": "analysis/verdict.json"
+  }
+}
