@@ -67,6 +67,7 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `scripts/plans-release/` | the release caliber: the five campaign plans with only their declared `seconds` changed, plus `caliber.json` — the machine-readable descriptor naming the plan set, `full-plan.json`'s SHA-256 and the per-arm seconds the report prints |
 | `scripts/configs/` | the six committed product configurations — six of the seven rows, since the Proxifier row's profile is machine-local; the repo-file → row → deployed-path mapping is in "The configs and the plan sets" |
 | `scripts/orchestrator.ps1` | the campaign driver, run on the machine under test |
+| `scripts/clock-probe.py` | the Linux host's half of the preflight clock gate: one TCP connection per probe, one UTC receive instant in reply; see "Preflight: clock and environment" |
 | `scripts/publish.sh` | build and publish the artifacts |
 | `scripts/selftest.sh` | run the harness against itself on one host |
 | `scripts/jsonl_paths.py` | the one canonical flattener (`join('/', member names)`) the comparator and the fixture-drift guard share |
@@ -286,9 +287,12 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/orchestrator.ps1 `
 | Parameter | Default | Meaning |
 |---|---|---|
 | `-Passes` | 4 | passes to run |
-| `-OutRoot` | `C:\wfbench\results` | campaign output root |
+| `-OutRoot` | `C:\wfbench\results` | campaign output root; use a fresh directory for a new campaign |
 | `-PlanRoot` | `C:\wfbench\e2e` | directory holding the deployed plan files |
 | `-TargetAddress` | `192.168.100.4` | the Linux host running the targets |
+| `-ClockProbePort` | 40099 | TCP port of the Linux host's clock probe (`scripts/clock-probe.py`) |
+| `-PreflightOnly` | off | read the environment and run the clock gate, write `environment.json` only, then exit before the firewall change and the pass loop; use a fresh `-OutRoot` |
+| `-RequireClockSync` | off | enforce ±200 ms on the preflight and every pass phase instead of measure-and-correct |
 | `-TcpPort`, `-UdpPort`, `-DnsPort` | 40010, 40010, 53 | proxied-lane target ports |
 | `-DnsPortAlt` | 40053 | the alternate DNS responder port |
 | `-TcpPortDirect`, `-DnsPortDirect` | 40011, 40054 | direct-lane target ports |
@@ -298,11 +302,78 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/orchestrator.ps1 `
 | `-Seed` | 20261006 | seeds the per-pass product order |
 
 One product is loaded at a time, measured with that row's own plan, then stopped. The campaign root
-holds `environment.json`; each `pass<N>/` holds `order.txt`, a `control-pre/` and a `control-post/`
+holds `environment.json` and `clock.jsonl`; each `pass<N>/` holds `order.txt`, a `control-pre/` and a `control-post/`
 block, and one directory per product row. The orchestrator writes each row's `proxy-truth.json`,
 copies the product's effective configuration into the row and writes the `environment.json` block;
 deploying the artifacts, the plans and the product configurations to that machine is machine-specific
 work (`scripts/deploy-campaign.sh`, local).
+
+#### Preflight: clock and environment
+
+Before the first pass the orchestrator runs two read-only preflights. The **clock gate** measures the
+VM/host UTC offset, because the target ledger timestamps are compared with the client's arm windows
+and a large offset moves every window edge into the neighbouring arm. The Linux host runs its half:
+
+```bash
+python3 benchmarks/WinForward.E2E/scripts/clock-probe.py --bind 0.0.0.0 --port 40099 --count 0
+```
+
+A preflight-only check can use `--count 5`; a campaign needs `5 + 10 × passes` probes — five for
+the preflight and five on each side of every pass — so the default `--count 0` serves until interrupted.
+The probe waits indefinitely for the next connection by default; `--timeout` bounds that wait and
+`--read-timeout` (30 s) bounds each probe's read.
+
+Each probe opens one TCP connection from the VM. The VM sends `vmT0=<UTC ISO>` and the host replies
+with the instant at which it received the line, as one UTC ISO line. The orchestrator computes
+
+```text
+offset(vm - host) = vmT0 + rtt / 2 - hostRecv
+```
+
+where `rtt` is the VM's send-to-receive interval, measured with a stopwatch. Five probes are run and
+the median is `clockOffsetMs`, **signed `vm - host`**: a VM that is 303.6 ms behind records `-303.6`.
+The default policy is **measure-and-correct**, not a hard sync gate:
+
+- a stable offset up to ±5 s is accepted; it is recorded with a warning when it exceeds 200 ms, and the
+  campaign proceeds (the per-pass samples let the analysis correct it and report the residual);
+- the campaign aborts with exit `1` if the probe cannot run, if `|median| > 5 s` (a wrong clock or
+  timezone), or if the offset drifts more than 100 ms between a pass's pre and post samples;
+- `-RequireClockSync` restores the strict ±200 ms bound for a campaign that demands a clean VM clock.
+
+The port is `-ClockProbePort` (default `40099`). Each pass measures five probes before and five after
+its measurements and appends one line per probe to the campaign-root `clock.jsonl`: `pass`, `phase`
+(`pre` or `post`), `offsetMs`, `rttMs`, `vmUtc` and `hostUtc`. The preflight median and its five
+samples are in `environment.json`'s `clockGate`; a pass whose pre/post medians differ by more than
+100 ms aborts after the pass.
+
+An abort is an instrument finding, not a speed problem: sync the VM clock and rerun the preflight; do
+not continue the campaign.
+
+The **environment block** is read before `Set-NetFirewallProfile`, before `Start-SingBox` and before
+any pass. It keeps the original `os`, `build`, `logicalCpus`, `totalRamMb`, `freeRamMb`, `passes`,
+`seed`, `singBox` and `target` fields and adds `clockOffsetMs`, `clockGate`, `nicOffload` (per
+adapter, the RSC/LSO/checksum/interrupt-moderation advanced properties), `dynamicMemory` (visible and
+physical RAM, `Win32_ComputerSystem` / `Win32_OperatingSystem`, and the Hyper-V setting when the guest
+exposes it), `productVersions` (path, `FileVersion` and SHA-256 of the WinForward builds, their
+sidecars, the opponent executables and sing-box), `powerPlan` (`powercfg /getactivescheme`),
+`driverVersions` (`driverquery /v` filtered to `ndisrd`, `ProxifierDrv` and `WinDivert`, plus the
+`Get-Service` rows), `snapshotId` (best effort; the guest has no checkpoint identifier) and
+`environmentChanges`. A value the machine cannot provide is `null` with a short reason, never a
+fabricated one. `firewallProfiles` is the state **as found**; disabling the firewall is recorded as an
+`environmentChanges` entry with its `before`, `after` and `when`, so the campaign's own change is never
+mistaken for the machine's environment. The pass loop's teardown runs on every exit path after the
+change: it stops the products and sing-box and restores the firewall to the as-found state, recording
+the restore as a second `environmentChanges` entry.
+
+Every unreadable value carries its reason beside it: `firewallProfilesReason`, `singBoxReason`,
+`snapshotIdReason`, the `reason` inside `nicOffload`, `dynamicMemory`, `powerPlan`, `driverVersions` and
+each `productVersions` entry, and the top-level `unavailable` map for `os`, `build`, `totalRamMb` and
+`freeRamMb`. `snapshotEvidence` keeps the VM id and name when `snapshotId` is null.
+
+`-PreflightOnly` stops after `environment.json` is written, so the gate can be exercised in a short VM
+run without the firewall change or the pass loop. It writes only `environment.json` (no `clock.jsonl`)
+and refuses an `-OutRoot` that already holds `environment.json`, `clock.jsonl` or `pass*`; use a fresh
+directory. A full campaign warns when it reuses such a root and overwrites the two campaign files.
 
 ### The configs and the plan sets
 
@@ -378,7 +449,8 @@ One client run writes one directory. Every JSONL file is one JSON object per lin
 | `proxy-truth.json` | one object | `tcp`, `udp`, `utcp` and `total` — the proxied flows observed in the proxy's log — plus `directLeak` in the dual phase's file |
 | `dual/proxied/`, `dual/direct/` | as a row | the two lanes of the dual phase: one run around the proxy and one configured to go direct, the same workload shape against two targets. Each lane is a full run directory, and `dual/proxy-truth.json` carries the row's flow census plus `directLeak` |
 | `order.txt` | one line | the row ids in the order this pass ran them |
-| `environment.json` | one object | the orchestrator's environment block: start time, OS and build, logical CPUs, visible RAM, pass count, seed, firewall profiles, proxy version and target ports |
+| `environment.json` | one object | the orchestrator's environment block: start time, OS and build, logical CPUs, visible RAM, pass count, seed, firewall profiles as found, the clock policy, median and preflight per-probe samples, NIC offload controls, dynamic-memory evidence, product hashes, power plan, driver and service versions, snapshot evidence, environment changes, proxy version and target ports |
+| `clock.jsonl` | one object per probe | the per-pass clock samples: `pass`, `phase` (`pre` or `post`), `offsetMs` (VM - host), `rttMs`, `vmUtc`, `hostUtc` |
 
 Every ledger record also carries `utc` (absolute wall clock) and `label`; every client record carries
 `type`, and every record written into an arm file except `attempt` carries `arm`.
