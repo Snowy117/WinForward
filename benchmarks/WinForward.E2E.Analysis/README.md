@@ -92,9 +92,11 @@ fails the release tests. It is an example, not a calibration record: the calibra
 
 #### The campaign invocation
 
-The release campaign runs this invocation from the repository root; `publish-campaign.sh` is local
-glue (gitignored, absent from a fresh checkout) that publishes on the VM, downloads the full
-campaign and runs the release analyzer. `--legacy` runs the old analyzer for diagnostics only.
+The release campaign runs this invocation from the repository root; `publish-campaign.sh` is tracked
+and reads the machine paths from `campaign.env`. It downloads the full campaign and runs the release
+analyzer. The downloaded tree carries the `deploy.json` the deploy wrote, and the script prints its
+commit, dirty state, plan set and plan hashes before the analysis. `--legacy` runs the old analyzer
+for diagnostics only.
 
 ```bash
 bash benchmarks/WinForward.E2E/scripts/publish-campaign.sh \
@@ -105,8 +107,8 @@ The script analyses the **full seven-pass tree** with
 `--release --thresholds <abs> --min-passes 6 --discard-pass 1` and does not trim the tree to passes
 2-7. `release-inputs.json` then records `"total": 7, "discarded": [1]` and
 `measured: [2, 3, 4, 5, 6, 7]` with `n: 6`; the discarded pass stays in `--raw` as the provenance the
-record names. The script refuses a tree with no `pass1` rather than silently analysing a different
-pass selection.
+record names. The script refuses a tree missing any of `pass1`…`pass7`, rather than silently
+analysing a trimmed or different pass selection.
 
 **Working directory.** `--thresholds` is opened from the process's working directory as spelled, and
 `caliber.path` is resolved from the same directory. `publish-campaign.sh` therefore changes to the
@@ -347,20 +349,25 @@ Calibration and release are separate nights with separate evidence.
 n = 6 and write `coverage.json` beside it. Archive both files with the calibration tree; they are
 release inputs and are not regenerated from the release data.
 
-**Release night.** Deploy the release caliber and run seven passes — pass 1 is the discarded
-warm-up, passes 2-7 are measured. From the repository root, run the publisher (it publishes on the
-VM, downloads and analyses the **whole** campaign):
+**Release night.** Deploy the release caliber with the tracked `scripts/deploy-campaign.sh` (set
+`WF_PLAN_SET=release`; a dirty worktree is refused unless `--allow-dirty`), and run
+`scripts/verify-vm.ps1` before the first pass. Then run seven passes — pass 1 is the discarded
+warm-up, passes 2-7 are measured. From the repository root, run the publisher (it downloads and
+analyses the **whole** campaign):
 
 ```bash
 bash benchmarks/WinForward.E2E/scripts/publish-campaign.sh \
   <campaign-root> <calibration-archive>/thresholds.json
 ```
 
-The campaign root then holds the legacy documents and the four release documents. Check
-`release-inputs.json` before writing the report: `passes.discarded` is `[1]`, `passes.measured` is
+The campaign root then holds the legacy documents, the four release documents and the downloaded
+`raw/deploy.json`; the deploy record names the deployed commit, its dirty summary, the campaign
+environment hash and the plan hashes. Check `release-inputs.json` before writing the report:
+`passes.discarded` is `[1]`, `passes.measured` is
 `[2, 3, 4, 5, 6, 7]`, `passes.n` is 6 and `passes.insufficient` is false; the `thresholds.sha256`
 and `caliber.sha256` values match the archived files. Archive the four release documents with
-`thresholds.json`, `coverage.json` and the campaign tree (or its manifest), and keep the
+`thresholds.json`, `coverage.json`, `raw/deploy.json` and the campaign tree (or its manifest), and
+keep the
 `sha256sum -c` result with the report. `--legacy` regenerates the legacy documents for diagnostics
 only; they are not the release evidence.
 
@@ -385,6 +392,9 @@ only; they are not the release evidence.
 <raw>/failures.jsonl                       optional append-only campaign failure record
 <raw>/failures.json                        optional same record as one JSON array
 ```
+
+`<raw>/deploy.json` is the deploy record (commit, dirty summary, campaign environment hash and plan
+hashes). The analyzer does not read it; `publish-campaign.sh` prints it before the release run.
 
 Arms are `IDLE`, `LAT`, `LATLOAD`, `DNS`, `DNSALT`, `LOSS`, `REL`, `THRU`, `MIX`, `PERSIST` and
 `BASE`. The stopwatch frequency is derived per run from `(endedTicks - startedTicks) /
