@@ -8,6 +8,7 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
     <ProjectReference Include="../../analyzers/WinForward.Analyzers/WinForward.Analyzers.csproj" />
   </ItemGroup>
 </Project>
