@@ -118,6 +118,73 @@ still support is the verdict's decision, not the input reader's. `band` is the d
 unit `kind` names: `ratio` bands are fractions (±0.18 is ±18 %), `pp` bands are percentage points.
 `business` and `mdd` are report metadata.
 
+### The release comparison and decision model (release-only)
+
+`WinForward.E2E.Analysis.Release.ReleaseComparison` turns the measured passes into the release
+decision. It writes no file: the release tables and verdict are the writer's output, and the legacy
+`tables.md`, `verdict.json` and `plots/SKIPPED.md` are untouched.
+
+The data is the legacy measurement, selected once. `ReleaseDataset.TryRead(campaignRoot, inputs,
+resamples, seed)` loads the tree with the same `CampaignLoader` and reads every metric with
+`MetricCatalogue.PerPassValues`; only `inputs.Passes.Measured` are kept, so the discarded warm-up pass
+never contributes a value. A pass the harness wrote as a JSON `null` is a reason, not a zero.
+
+The family is the pre-registered question, not every row pair:
+
+- The reference row is `thresholds.referenceRow` (`wf-aot-nativeudp`; `RowProfiles.ReferenceRow` is
+  pinned to the same id by a test), and the opponents are `thresholds.opponents`.
+- Per metric, the family is the reference row against **each declared opponent that ran the metric on
+  a comparable traffic path**. A row not named in `opponents` — the other WinForward configurations —
+  is exploratory: it appears in the report with `inFamily: false` and `report-only`, and it is never in
+  the adjustment.
+- `proxifier` does not carry UDP (its row profile says `not-carried`), so it is outside
+  `loss.lossRate` and every other UDP-derived family. The pair is still listed with `inFamily: false`
+  and the reason; the loss family is 2, not 3. TCP metrics such as latency, CPU and memory keep all
+  three declared opponents.
+
+The statistics are a percentile bootstrap over passes, never over samples:
+
+- Each pass contributes the metric's own within-pass summary, which is the value `tables.md` and
+  `verdict.json` already use. A pair's estimate is the ratio `reference / opponent` for a ratio metric,
+  or the difference `reference − opponent` in percentage points for a `pp` metric.
+- The **raw interval** covers 95 %. The **Bonferroni-adjusted interval** covers `1 − 0.05 / m`, where
+  `m` is the number of in-family pairs for that metric; the decision reads the adjusted interval. For
+  the shipped family `m = 2` on loss (97.5 %) and `m = 3` on latency, CPU and memory (98.33 %); `m = 1`
+  makes the two intervals coincide. There is no p-value in the release decision: the report says
+  "Bonferroni-adjusted, family-wise 95 %", not "Holm".
+
+| state | rule |
+|---|---|
+| `different` | the adjusted interval excludes the band. For a ratio, `low > 1 + band` or `high < 1 − band`; for `pp`, `low > band` or `high < −band`. |
+| `inconclusive` | the adjusted interval overlaps the band, inside it or across an edge, or fewer than `passes.required` measured passes contribute. `n < minPasses` makes every pair inconclusive, even a constant one. |
+| `unevaluable` | the interval is degenerate or zero-width, one side has no per-pass value (a missing denominator), or the row cannot carry the metric. A zero-event rate is `unevaluable` and never `same`; REL's 3/n upper bound is reported beside it. |
+| `equivalent` | only for a metric the thresholds file pre-registers in `equivalence.families`, and only when the **unadjusted** 95 % interval lies wholly inside the declared margin. The claim is unadjusted and declared; `different` takes precedence if both could apply. |
+| `report-only` | every exploratory metric and every pair outside the pre-registered family. Values and the raw interval are reported; there is no adjusted interval and no difference or equivalence claim. |
+
+The per-pair states are the decision evidence. One metric-level state summarises them: `different` if
+any in-family pair is different, `equivalent` only if every in-family pair is equivalent, `unevaluable`
+if there is no in-family pair or all are unevaluable, otherwise `inconclusive`.
+
+REL is a capability gate, not a comparison. For `rel.unexpectedEofRate` the release path pools the
+measured passes' `metrics/unexpectedEof` and `metrics/connectAttempts`, reports the rate, `n`, the
+zero-event upper bound `3/n` in percentage points (null when events > 0) and the declared
+threshold (0.25 pp), and returns `pass`, `fail` or `not-measured`. It passes only with zero events and
+`3/n ≤ threshold`; one event fails and reports no upper bound; a zero or missing denominator is
+`not-measured`.
+`rel.fidelityRate` stays exploratory. `capability[...].nFrom`, when declared, has to name
+`connectAttempts`, the denominator the release reader samples; another denominator is `not-measured`
+rather than read from the wrong counter.
+
+The public seam is:
+
+- `ReleaseDataset.TryRead(campaignRoot, inputs, resamples, seed)` — the read-only per-pass dataset.
+- `ReleaseComparison.Evaluate(thresholds, inputs, dataset)` — a `ReleaseComparisonReport` with each
+  metric's role, band, MDD, reference per-pass values and median, family size, per-opponent pairs
+  (`inFamily`, raw and adjusted intervals, state and reason), and the capability results.
+
+The release rules are C#-only and are not compared by the Python oracle. The legacy documents and the
+frozen golden remain byte-identical; the release writer is a later slice.
+
 ### The clock correction (release-only)
 
 The orchestrator measures the VM-to-host clock offset before and after every pass and appends one line

@@ -98,7 +98,7 @@ public sealed record ReleasePasses(
     }
 
     /// <summary>One <c>passN</c> directory's number, when it is spelled that way and above zero.</summary>
-    private static bool TryNumber(string passId, out int number)
+    internal static bool TryNumber(string passId, out int number)
     {
         number = 0;
         if (!passId.StartsWith("pass", StringComparison.Ordinal))

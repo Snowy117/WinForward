@@ -23,6 +23,19 @@ internal sealed record Comparison(
     string Mode,
     bool Degenerate);
 
+/// <summary>One bootstrap interval at a caller-declared level: the point estimate, its edges and whether it moved at all.</summary>
+/// <param name="Estimate">The point estimate: a ratio, or a difference in the metric's own units.</param>
+/// <param name="CiLow">The interval's lower edge.</param>
+/// <param name="CiHigh">The interval's upper edge.</param>
+/// <param name="Mode">How the passes were resampled, printed beside the interval.</param>
+/// <param name="Degenerate">Whether every resample produced the same estimate.</param>
+internal sealed record BootstrapInterval(
+    double Estimate,
+    double CiLow,
+    double CiHigh,
+    string Mode,
+    bool Degenerate);
+
 /// <summary>
 /// The bootstrap every interval and p-value is drawn from: paired ratio or difference statistics over
 /// **passes**, never over samples, resampled <c>--resamples</c> times with a seed derived from the metric
@@ -106,6 +119,67 @@ internal static class BootstrapPair
             equivalence,
             mode,
             estimates[0].Equals(estimates[^1])), Reason: null);
+    }
+
+    /// <summary>
+    /// Bootstraps one pair at a caller-declared level, for the release path's raw and adjusted
+    /// intervals: the same estimates <see cref="Draw"/> draws, with the edges at
+    /// <paramref name="alpha"/> instead of the fixed 5 %.
+    /// </summary>
+    /// <param name="valuesA">The first side's per-pass values.</param>
+    /// <param name="valuesB">The second side's per-pass values.</param>
+    /// <param name="kind"><c>ratio</c> or a difference kind.</param>
+    /// <param name="resamples">How many resamples to draw.</param>
+    /// <param name="seed">The generator seed.</param>
+    /// <param name="alpha">The two-sided tail probability; the interval covers <c>1 - alpha</c>.</param>
+    /// <returns>The interval, or why it cannot be drawn.</returns>
+    internal static Measured<BootstrapInterval?> DrawInterval(
+        IReadOnlyDictionary<string, double> valuesA,
+        IReadOnlyDictionary<string, double> valuesB,
+        string kind,
+        int resamples,
+        int seed,
+        double alpha)
+    {
+        ArgumentNullException.ThrowIfNull(valuesA);
+        ArgumentNullException.ThrowIfNull(valuesB);
+        ArgumentNullException.ThrowIfNull(kind);
+
+        if (!double.IsFinite(alpha) || alpha <= 0.0 || alpha >= 1.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(alpha), alpha, "alpha must be in (0, 1).");
+        }
+        if (resamples < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(resamples), resamples, "at least one resample is needed.");
+        }
+
+        if (valuesA.Count == 0 || valuesB.Count == 0)
+        {
+            return new(Value: null, Reason: "one side has no per-pass value for this metric");
+        }
+
+        var shared = valuesA.Keys.Where(valuesB.ContainsKey).Order(StringComparer.Ordinal).ToList();
+        var paired = shared.Count >= 2 && shared.Count == valuesA.Count && shared.Count == valuesB.Count;
+        var random = new Random(seed);
+        var (estimates, point, mode, error) = string.Equals(kind, "ratio", StringComparison.Ordinal)
+            ? RatioEstimates(valuesA, valuesB, shared, paired, random, resamples)
+            : DifferenceEstimates(valuesA, valuesB, shared, paired, random, resamples);
+        if (error is not null)
+        {
+            return new(Value: null, Reason: error);
+        }
+
+        estimates.Sort();
+        var tail = alpha / 2.0;
+        return new(
+            Value: new BootstrapInterval(
+                point,
+                DescriptiveStats.Quantile(estimates, tail)!.Value,
+                DescriptiveStats.Quantile(estimates, 1.0 - tail)!.Value,
+                mode,
+                estimates[0].Equals(estimates[^1])),
+            Reason: null);
     }
 
     /// <summary>The resampled ratios: in log space when the two sides ran the same passes, else separately.</summary>

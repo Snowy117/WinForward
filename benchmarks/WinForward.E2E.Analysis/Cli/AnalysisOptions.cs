@@ -67,6 +67,26 @@ internal sealed record AnalysisOptions
     internal ReleaseOptions Release { get; private init; } = new();
 
     /// <summary>
+    /// The options one release dataset read needs: the campaign tree, the calibrated warm-up window and
+    /// the bootstrap parameters. The output directory is unused because the read writes nothing, so it is
+    /// the tree itself.
+    /// </summary>
+    /// <param name="raw">The campaign tree to read.</param>
+    /// <param name="warmupSeconds">The warm-up window the release inputs were calibrated with.</param>
+    /// <param name="resamples">How many bootstrap resamples the comparison will draw.</param>
+    /// <param name="seed">The base seed each pair's generator is derived from.</param>
+    /// <returns>The options a <c>ReleaseDataset</c> read passes to the campaign loader.</returns>
+    internal static AnalysisOptions ForReleaseDataset(string raw, double warmupSeconds, int resamples, int seed) =>
+        new()
+        {
+            Raw = raw,
+            Out = raw,
+            WarmupSeconds = warmupSeconds,
+            Resamples = resamples,
+            Seed = seed,
+        };
+
+    /// <summary>
     /// Reads the release vector, then walks the legacy arguments once. Every refusal names the argument
     /// it refuses, on the <paramref name="error"/> channel the caller already reports usage errors on.
     /// </summary>
