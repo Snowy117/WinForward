@@ -44,7 +44,7 @@
   "rows": {
     "wf-aot-opt": {
       "product": "WinForward AOT",
-      "config": "UDP-over-TCP v2 on, DNS local target on (reference configuration)",
+      "config": "UDP-over-TCP v2 on, DNS local target on (the opt-in UoT variant, not the reference configuration)",
       "plan": "full",
       "dual": true,
       "udp53": "direct-local-target",
@@ -52,7 +52,7 @@
     },
     "wf-fdd-opt": {
       "product": "WinForward framework-dependent",
-      "config": "same configuration as wf-aot-opt",
+      "config": "same configuration as wf-aot-opt (the opt-in UoT variant)",
       "plan": "full",
       "dual": true,
       "udp53": "direct-local-target",
@@ -60,9 +60,9 @@
     },
     "wf-aot-nativeudp": {
       "product": "WinForward AOT",
-      "config": "UDP-over-TCP off, everything else identical to wf-aot-opt",
-      "plan": "udp only",
-      "dual": false,
+      "config": "UDP-over-TCP off, DNS local target on (the default native-UDP reference configuration)",
+      "plan": "full",
+      "dual": true,
       "udp53": "direct-local-target",
       "udp": "proxied-native"
     },

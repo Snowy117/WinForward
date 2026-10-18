@@ -1,0 +1,52 @@
+--- analyze.py
++++ analyze.py
+@@ -146,7 +146,7 @@
+ ROW_PROFILES = {
+     "wf-aot-opt": RowProfile(
+         product="WinForward AOT",
+-        config="UDP-over-TCP v2 on, DNS local target on (reference configuration)",
++        config="UDP-over-TCP v2 on, DNS local target on (the opt-in UoT variant, not the reference configuration)",
+         plan="full",
+         dual=True,
+         udp53=UDP53_LOCAL_TARGET,
+@@ -154,7 +154,7 @@
+     ),
+     "wf-fdd-opt": RowProfile(
+         product="WinForward framework-dependent",
+-        config="same configuration as wf-aot-opt",
++        config="same configuration as wf-aot-opt (the opt-in UoT variant)",
+         plan="full",
+         dual=True,
+         udp53=UDP53_LOCAL_TARGET,
+@@ -162,9 +162,9 @@
+     ),
+     "wf-aot-nativeudp": RowProfile(
+         product="WinForward AOT",
+-        config="UDP-over-TCP off, everything else identical to wf-aot-opt",
+-        plan="udp only",
+-        dual=False,
++        config="UDP-over-TCP off, DNS local target on (the default native-UDP reference configuration)",
++        plan="full",
++        dual=True,
+         udp53=UDP53_LOCAL_TARGET,
+         udp=UDP_PROXIED_NATIVE,
+     ),
+@@ -2679,11 +2679,13 @@
+         lines.append("Plan/observation mismatches: " + "; ".join(extra_notes) + ".")
+         lines.append("")
+     lines.append(
+-        "The three WinForward rows are a deliberate design: `wf-aot-nativeudp` differs from `wf-aot-opt` "
+-        "only in the UDP carriage and `wf-aot-dnsrelay` only in the DNS local target, so a difference "
+-        "between `wf-aot-opt` and either is attributable to that one feature. Because a partial row never "
+-        "ran the arms the other rows ran, every comparison involving it is reported as `not measured in "
+-        "this row` and is excluded from the Holm family rather than treated as a missing value or a zero."
++        "The WinForward rows are a deliberate design: `wf-aot-nativeudp` is the default configuration and "
++        "the reference row, `wf-aot-opt` differs from it only in the UDP carriage (the opt-in UoT "
++        "variant) and `wf-aot-dnsrelay` differs from `wf-aot-opt` only in the DNS local target, so a "
++        "difference between the first two is attributable to the UDP carriage and one between "
++        "`wf-aot-opt` and `wf-aot-dnsrelay` to the DNS local target. Because a partial row never ran the "
++        "arms the other rows ran, every comparison involving it is reported as `not measured in this "
++        "row` and is excluded from the Holm family rather than treated as a missing value or a zero."
+     )
+     lines.append("")
+     lines.append(

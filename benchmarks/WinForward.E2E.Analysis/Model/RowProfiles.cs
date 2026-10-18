@@ -150,23 +150,23 @@ internal static class RowProfiles
         {
             ["wf-aot-opt"] = new(
                 "WinForward AOT",
-                "UDP-over-TCP v2 on, DNS local target on (reference configuration)",
+                "UDP-over-TCP v2 on, DNS local target on (the opt-in UoT variant, not the reference configuration)",
                 "full",
                 Dual: true,
                 Udp53LocalTarget,
                 UdpProxiedUtcp),
             ["wf-fdd-opt"] = new(
                 "WinForward framework-dependent",
-                "same configuration as wf-aot-opt",
+                "same configuration as wf-aot-opt (the opt-in UoT variant)",
                 "full",
                 Dual: true,
                 Udp53LocalTarget,
                 UdpProxiedUtcp),
             ["wf-aot-nativeudp"] = new(
                 "WinForward AOT",
-                "UDP-over-TCP off, everything else identical to wf-aot-opt",
-                "udp only",
-                Dual: false,
+                "UDP-over-TCP off, DNS local target on (the default native-UDP reference configuration)",
+                "full",
+                Dual: true,
                 Udp53LocalTarget,
                 UdpProxiedNative),
             ["wf-aot-dnsrelay"] = new(

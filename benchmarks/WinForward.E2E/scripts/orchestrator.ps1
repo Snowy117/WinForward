@@ -6,10 +6,12 @@
   stopped again. One product is loaded at a time because WinForward and ProxiFyre both drive
   NDISAPI, which serves a single client per adapter.
 
-  The matrix is arranged so that each WinForward row differs from the reference row by at most one
-  feature, which is what makes a delta attributable: wf-aot-opt is the reference, wf-fdd-opt changes
-  only the build, wf-aot-nativeudp changes only the UDP carriage, wf-aot-dnsrelay changes only the
-  DNS path. The three partial rows therefore run only the arms the changed feature can move.
+  The matrix is arranged so that each WinForward row changes at most one feature from the row it
+  is paired with, which is what makes a delta attributable: wf-aot-nativeudp, the default
+  configuration, is the reference row and runs the full plan; wf-aot-opt is the UoT variant of
+  that reference; wf-fdd-opt changes only the build relative to wf-aot-opt; wf-aot-dnsrelay
+  changes only the DNS path relative to wf-aot-opt. The partial row therefore runs only the arms
+  the changed feature can move.
 
   A product row that supports it also runs a dual phase: the proxied lane and a second application
   that every product is configured to send direct run at the same time, against two different
@@ -87,7 +89,7 @@ function Get-Products {
         [pscustomobject]@{
             Id = 'wf-aot-nativeudp'; ProcessName = 'WinForward'; Kind = 'process'
             Exe = (Join-Path $aot 'WinForward.exe'); Args = @('run', '--config', (Join-Path $aot 'config-nativeudp.json'))
-            ConfigSource = (Join-Path $aot 'config-nativeudp.json'); Plan = 'udp-plan.json'; Dual = $false
+            ConfigSource = (Join-Path $aot 'config-nativeudp.json'); Plan = 'full-plan.json'; Dual = $true
         }
         [pscustomobject]@{
             Id = 'wf-aot-dnsrelay'; ProcessName = 'WinForward'; Kind = 'process'

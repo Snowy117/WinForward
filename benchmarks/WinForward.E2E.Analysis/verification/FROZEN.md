@@ -15,14 +15,15 @@ Everything below is *frozen*: changing it changes what the C# implementation is 
 
 | Artifact | What it is | sha256 |
 |---|---|---|
-| `synthetic-tree.tar.gz` | the campaign tree both implementations read; its root is the contents of `/tmp/wf-synth` (`raw/`, `ledger-main.jsonl`, `ledger-direct.jsonl`, `plan-1..3.json`) | `723b7378f2f29e9492b9e9a4eedae883516f39af3be44cdd94bc6b584c461902` |
-| `golden/py-tables.md` | the Python reference's `tables.md` on that tree (1245 lines) | `8011d05bdad5dd0b2232a1f9e0bd269a637ad7995299d351dae71a945104ebbc` |
-| `golden/py-verdict.json` | the Python reference's `verdict.json` on that tree (14125 lines) | `2e0e64dada67524502cde8958dafdf6f90b1e54400015dacd89c921d8483c55d` |
+| `synthetic-tree.tar.gz` | the campaign tree both implementations read; its root is the contents of `/tmp/wf-synth` (`raw/`, `ledger-main.jsonl`, `ledger-direct.jsonl`, `plan-1..3.json`) | `cf64369aec9e773232b86011d57882f537119209d13da3ab5582411c65713213` |
+| `golden/py-tables.md` | the Python reference's `tables.md` on that tree (1316 lines) | `76e8bb8f9f91cffeaca7c8cebf09980183640c6ed19482372257bef986d8af74` |
+| `golden/py-verdict.json` | the Python reference's `verdict.json` on that tree (15254 lines) | `e90f75f1b52165708cba1926ce18581a174e3a5808c50c6a25fa5cea98805662` |
 | `plots-SKIPPED.md` | the fixed text the C# analysis writes to `<out>/plots/SKIPPED.md`, unconditionally | `39795a79df7ed8f33a875618553654153e3b1b85009161832052bf28d3144ad4` |
-| `synthetic/make_tree.py` | the generator of the tree | `56a557f76af182c4d7088115acc2b0416647859b4174d3e5b22d117ca57f8e81` |
+| `synthetic/make_tree.py` | the generator of the tree | `7abd23e30722607188fc81820e2d4fd785fd0f92ec06c9049f5f48aa21eefc22` |
 | `check-fixture-drift.py` | the key-set guard between the generator and the harness contract | `598e74460038a875c0e7fe557dcbfbe1596303ceeb665ae1936834a1abf5debc` |
 | `check-boundary-trees.py` | the boundary trees' assertions and their negative controls (§4) | `ac83aa2a1372f37b0c474794ce2d86c6448837fc20c70853338a4b2d79ab5ee2` |
-| `row-profiles.json` | the declared rows and carriage labels `check-fairness.py` asserts against | `f40002095052887a016e5f944fc2366a43e4ab59c2aaf7296ca2480366b884ce` |
+| `row-profiles.json` | the declared rows and carriage labels `check-fairness.py` asserts against | `26fe9dc764f55364cab4061399c4cec7ff8788f98e2445708eb0cbff0c62eee0` |
+| `reference-declaration.patch` | the declaration-only patch that turns the restored reference into the oracle that produced §1 (three `ROW_PROFILES` entries and one §1 paragraph) | `9f8fff1017040399529f642bf4f5c3a5eb4cadf8fd374ec301c160e33d5c252a` |
 
 Frozen on 2026-10-08 (E4-a). The tarball is built with sorted names, a fixed mtime
 (`2026-10-01 00:00:00 UTC`) and zeroed ownership, so regenerating it from the same generator is
@@ -48,6 +49,20 @@ unreadable authority, and the directory the two contract tables are read from) a
 tree from the edited generator reproduced `723b7378…` byte for byte, so the golden below still stands.
 The two contract tables (`contract-inventory.json`, `contract-rename.json`) and `contract-rename.md`
 also live in this directory now rather than in an archived task's `research/`.
+
+**Re-frozen on 2026-10-18** (the default WinForward configuration became the reference row and now
+runs the full plan): `synthetic/make_tree.py` gives `wf-aot-nativeudp` the ten-arm plan and a dual
+phase, so the tree gained that row's arms, its two dual lanes, two new label names per pass (the
+label census goes 37 → 39) and the census records behind them. The golden and the tarball were
+regenerated with the reference restored per §2.1 and patched with `reference-declaration.patch`,
+whose `ROW_PROFILES` entries were updated to the same declarations the analysis now holds — the
+reference's row table is a declaration, not analysis logic, and both copies must agree or the diff
+compares two different designs. The declared semantic change is confined to that row's plan, dual
+phase and labels plus §1's prose; 63 pairs become comparable, and 7 non-row pairs flip
+`inconclusive` → `same` as their CIs cross the band, with the rule unchanged (RNG-driven). The
+invented numbers moved with the generator's RNG stream, which is why every slice was re-established
+rather than one. `oracle-diff.py`, `check-fairness.py` and `check-fixture-drift.py` were re-run on
+the new pair, and §4's boundary hashes were re-measured from the same generator.
 
 **The step IDs are provenance labels, not definitions.** `E4-a`, `E4-b1b`, `E4-c`, `E2-d`, `E3-d` and
 `D6.6`/`D20.1`/`D21.1` name steps and decisions of the archived task
@@ -118,11 +133,19 @@ if the golden ever has to be produced again, restore the file from that commit:
 mkdir -p /tmp/retired-reference
 git show <commit>^:benchmarks/results/2026-10-06-e2e-competitors/analysis/analyze.py \
     > /tmp/retired-reference/analyze.py
+cd /tmp/retired-reference
+patch -p0 < <repo>/benchmarks/WinForward.E2E.Analysis/verification/reference-declaration.patch
 python3 /tmp/retired-reference/analyze.py --raw /tmp/wf-synth/raw --out /tmp/wf-synth/out
 ```
 
-It must be the reference `python-oracle-changes.md` describes, and the run must reproduce the hashes
-in §1; a different file is a different oracle.
+The restored file plus `reference-declaration.patch` (sha256
+`9f8fff1017040399529f642bf4f5c3a5eb4cadf8fd374ec301c160e33d5c252a`) is the oracle that produced
+§1; the patched file's sha256 is
+`c1848bb3894efddb83312ef16099f578da0e72d7bd41676a9b4ed4485c696cf3`. It must be the reference
+`python-oracle-changes.md` describes plus this declaration patch, and the run must reproduce the
+hashes in §1. The unpatched file is the archived reference, not the oracle that produced §1: run on
+the new tree it yields a different golden (`079676ba…` / `549374f6…`) and an undeclared-arm-present
+finding.
 
 ## 3. Re-freezing
 
@@ -159,11 +182,11 @@ in any other directory hashes differently (measured: all five reproduce only und
 
 | Flag | sha256 of the tree tarball | asserted by |
 |---|---|---|
-| `--window-overflow wf-aot-opt` | `d346f89d238102ea13108aae12cab679aeb3949638b179c71f4f6a905a155c19` | the §5 latency cells, recorded in `.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/research/baseline/E4b3-semantic.md` §5 — **no live checker asserts this tree** |
-| `--undecodable 7` | `d3af3e07f934f7d13a6beb19aeebb4d9dbea23bd2a7b91418f3a507437f01039` | `check-fairness.py --tables` (`#11/arms`) |
-| `--truncated-tcp 3` | `14ab9a6a25bc13656ad744e19054444b3f59baecc1ed13a757dcbf1d69402968` | `check-boundary-trees.py` (`#14.7/tcp`) |
-| `--truncated-dns 2` | `f55f897dc801950e8854bbc41ce940c2e0ccadecaa9b94722996adbfb60d3ed9` | `check-boundary-trees.py` (`#14.7/dns`) |
-| `--zero-denominator` | `e83268847ae24e2b17d2c7d348292c2977d913d9bc568f010dcf9d3e7ea56cb4` | `check-boundary-trees.py` (`#zero-denominator/*`) |
+| `--window-overflow wf-aot-opt` | `97b420137c82fdc626f8890f30be780da40ae23e54c0446dbc6e9ae7526f5d33` | the §5 latency cells, recorded in `.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/research/baseline/E4b3-semantic.md` §5 — **no live checker asserts this tree** |
+| `--undecodable 7` | `4d4dd079689d78d35ef29a9718cdd72623c1cdf844a6a237e7bf5656089be62f` | `check-fairness.py --tables` (`#11/arms`) |
+| `--truncated-tcp 3` | `c58d81a807599fd391c9cbdd06ba71026aaa5e8bf4b4b9001b0908ea3a8402dd` | `check-boundary-trees.py` (`#14.7/tcp`) |
+| `--truncated-dns 2` | `ef10c69d6a8855bec1c8bcd48c42d5160777c9dbeb2b4053abc085ad2edcdd3b` | `check-boundary-trees.py` (`#14.7/dns`) |
+| `--zero-denominator` | `408da06a55e7e62191ba36c448f98d9a5d71d7b37fca202c22e90144b99455c7` | `check-boundary-trees.py` (`#zero-denominator/*`) |
 
 `python3 check-boundary-trees.py` builds the truncated-TCP, truncated-DNS and zero-denominator trees
 (rows 3–5) at `/tmp/wf-synth`, runs the built analysis over each and judges the produced documents. It

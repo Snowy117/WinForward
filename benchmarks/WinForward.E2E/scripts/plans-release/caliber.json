@@ -1,0 +1,25 @@
+{
+  "name": "release",
+  "planSet": "plans-release",
+  "plans": [
+    "full-plan.json",
+    "udp-plan.json",
+    "dns-plan.json",
+    "dual-plan.json",
+    "base-plan.json"
+  ],
+  "plan": "full-plan.json",
+  "sha256": "b139226d9f13e8bf9908714c715bdac3fd4d7195c84b159b029398d466e4757f",
+  "seconds": {
+    "IDLE": 30,
+    "LAT": 30,
+    "LATLOAD": 30,
+    "DNS": 30,
+    "DNSALT": 30,
+    "LOSS": 120,
+    "REL": 60,
+    "THRU": 30,
+    "MIX": 60,
+    "PERSIST": 60
+  }
+}

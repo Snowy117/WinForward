@@ -67,7 +67,9 @@ reviews and commits; it does not write code. Every subagent prompt names the tas
 
 - [ ] Target `--inject-delay-ms <n>` (deterministic, per-request stall) and a sensitivity plan that
       runs the reference row without a product.
-- [ ] `stall` (2 s) in the release MIX `modeMix`.
+- [ ] `stall` (2 s) in the MIX `modeMix` of both `plans-release/full-plan.json` and
+      `plans/full-plan.json`, so the release plan stays a duration-only variant; re-hash
+      `plans-release/caliber.json` and keep the README's "only `seconds` changed" claim true.
 - [ ] Tests: injection changes the observed p99.9; the sensitivity row fails when injection is on.
 - [ ] Verify: `dotnet test tests/WinForward.E2E.Tests -c Release`; local self-test; sensitivity run.
 - [ ] Commit `feat(e2e): ...`.
@@ -77,7 +79,9 @@ reviews and commits; it does not write code. Every subagent prompt names the tas
 Split into three commits if the diff is large:
 
 - [ ] B5a: `--thresholds <file>`; primary family and band data; `verdict.json` prints band, MDD,
-      coverage and `min_passes`.
+      coverage and `min_passes`; add a machine-readable reference row (`RowProfiles.ReferenceRow` /
+      `row-profiles.json` `referenceRow`) instead of hardcoding `wf-aot-nativeudp`; validate
+      `plans-release/caliber.json` and print it in the provenance.
 - [ ] B5b: band-aligned `different`; `unevaluable` for degenerate/zero-variance; `same` only in a
       declared TOST family; Holm family = reference vs each opponent; `min_passes` CLI.
 - [ ] B5c: gate-into-verdict (gate failure invalidates the cell); UDP identity checks all prefixes;
@@ -102,7 +106,10 @@ Split into three commits if the diff is large:
       from `.gitignore`.
 - [ ] Parameterize addresses, ports, paths and credential variable names; commit a `campaign.env`
       with variable names only; machine values stay in `AGENTS.local.md`.
-- [ ] `deploy.json` records `commit`, `dirty`, `dirtySummary`, `campaignEnvHash`, plan hashes.
+- [ ] `deploy.json` records `commit`, `dirty`, `dirtySummary`, `campaignEnvHash`, plan hashes and
+      the release `caliber.json` hash.
+- [ ] Stage `plans-release/*` as `C:\wfbench\e2e\{full,udp,dns,dual,base}-plan.json` and stage
+      `caliber.json`; do not stage canonical `plans/` under the release label.
 - [ ] Verify: `bash -n`; `--help`/dry run; `git ls-files` shows the four scripts; a dirty-tree run
       refuses without `--allow-dirty`.
 - [ ] Commit `feat(e2e): ...`.
@@ -134,4 +141,4 @@ Split into three commits if the diff is large:
 - [ ] Update `.trellis/spec/` with any new contract, gate or lesson.
 - [ ] Final gates: `dotnet build WinForward.slnx -c Release`; `dotnet test WinForward.slnx -c Release`;
       `dotnet format ... --verify-no-changes --no-restore`; `jb inspectcode ...` with zero `<Issue>`.
-- [ ] Archive the child tasks and the parent; update the goal to `complete`.
+- [ ] Archive 10-11, the child tasks and the parent; update the goal to `complete`.

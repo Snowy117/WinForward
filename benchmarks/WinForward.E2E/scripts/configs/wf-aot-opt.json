@@ -1,60 +1,66 @@
 {
-  "socks5Servers": [
-    {
-      "name": "main",
-      "host": "127.0.0.1",
-      "port": 1080,
-      "udpOverTcp": true
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information"
     }
-  ],
-  "host": {
-    "fallbackAction": "pass",
-    "rules": [
-      {
-        "process": [
-          "sing-box.exe"
-        ],
-        "action": "pass"
-      },
-      {
-        "process": [
-          "WinForward.E2E.Direct.exe"
-        ],
-        "protocol": [
-          "tcp",
-          "udp"
-        ],
-        "action": "pass"
-      },
-      {
-        "protocol": [
-          "udp"
-        ],
-        "remotePort": [
-          "53"
-        ],
-        "action": "proxy",
-        "target": "dns"
-      },
-      {
-        "process": [
-          "WinForward.E2E.exe"
-        ],
-        "protocol": [
-          "tcp",
-          "udp"
-        ],
-        "action": "proxy",
-        "target": "main"
-      }
-    ]
   },
-  "logLevel": "info",
-  "localTargets": [
-    {
-      "name": "dns",
-      "host": "192.168.100.4",
-      "port": 53
+  "WinForward": {
+    "Socks5Servers": [
+      {
+        "Name": "main",
+        "Host": "127.0.0.1",
+        "Port": 1080,
+        "UdpOverTcp": true
+      }
+    ],
+    "LocalTargets": [
+      {
+        "Name": "dns",
+        "Host": "192.168.100.4",
+        "Port": 53
+      }
+    ],
+    "Host": {
+      "FallbackAction": "pass",
+      "Rules": [
+        {
+          "Process": [
+            "sing-box.exe"
+          ],
+          "Action": "pass"
+        },
+        {
+          "Process": [
+            "WinForward.E2E.Direct.exe"
+          ],
+          "Protocol": [
+            "tcp",
+            "udp"
+          ],
+          "Action": "pass"
+        },
+        {
+          "Protocol": [
+            "udp"
+          ],
+          "RemotePort": [
+            "53"
+          ],
+          "Action": "proxy",
+          "Target": "dns"
+        },
+        {
+          "Process": [
+            "WinForward.E2E.exe"
+          ],
+          "Protocol": [
+            "tcp",
+            "udp"
+          ],
+          "Action": "proxy",
+          "Target": "main"
+        }
+      ]
     }
-  ]
+  }
 }

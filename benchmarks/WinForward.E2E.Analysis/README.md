@@ -99,19 +99,24 @@ of `tables.md` prints it.
 |---|---|---|---|
 | `wf-aot-opt` | full | direct via the local DNS target | proxied (UDP-over-TCP v2) |
 | `wf-fdd-opt` | full | direct via the local DNS target | proxied (UDP-over-TCP v2) |
-| `wf-aot-nativeudp` | udp only (`LAT`, `LATLOAD`, `LOSS`) | direct via the local DNS target | proxied (native relay) |
+| `wf-aot-nativeudp` | full | direct via the local DNS target | proxied (native relay) |
 | `wf-aot-dnsrelay` | dns only | relayed through the proxy | proxied (UDP-over-TCP v2) |
 | `proxifyre` | full | direct via the product's hardcoded port-53 pass-through | proxied (native relay) |
 | `proxifier` | full | direct (the product cannot carry UDP) | not carried (UDP bypassed) |
 | `proxybridge` | full | relayed through the proxy | proxied (native relay) |
 | `control-pre`, `control-post` | BASE only | n/a | n/a |
 
+The default WinForward configuration, `wf-aot-nativeudp`, is the **reference row** and runs the same
+full plan as `wf-aot-opt`, the declared **opt-in UoT variant**; `wf-fdd-opt` is the framework-dependent
+build of that variant's configuration. A delta between `wf-aot-nativeudp` and `wf-aot-opt` is
+attributable to the UDP carriage, and one between `wf-aot-opt` and `wf-fdd-opt` to the
+build: the two clean single-factor comparisons in the campaign.
+
 Two consequences are load-bearing:
 
-- **A partial row is never compared on an arm it did not run.** `wf-aot-nativeudp` runs only
-  `LAT`, `LATLOAD` and `LOSS` (`udp-plan.json`, both latency arms over UDP); `wf-aot-dnsrelay`
-  runs only `DNS` and `DNSALT` (`dns-plan.json`). Every cell and every
-  pairwise comparison involving an arm the row never ran reads `not measured in this row: <arm>
+- **A partial row is never compared on an arm it did not run.** `wf-aot-dnsrelay` runs only
+  `DNS` and `DNSALT` (`dns-plan.json`); every other measured row runs the full plan. Every cell and
+  every pairwise comparison involving an arm the row never ran reads `not measured in this row: <arm>
   is not in the <plan> plan`, and that pair is excluded from the Holm family instead of being
   treated as a missing-at-random value or a zero.
 - **A row that does not carry UDP has no UDP result.** Every Proxifier UDP cell in every table

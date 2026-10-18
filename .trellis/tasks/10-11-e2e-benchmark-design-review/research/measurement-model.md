@@ -63,8 +63,9 @@ decision each estimate supports, and what the device cannot support.
 
 ## What the device cannot support
 
-- A product ranking. The rows are solution bundles; only the build-mode pair is a clean single-factor
-  comparison.
+- A product ranking. The rows are solution bundles. Two single-factor comparisons exist—build
+  mode (`wf-aot-opt` vs `wf-fdd-opt`) and UDP carriage (`wf-aot-nativeudp` vs `wf-aot-opt`)—but only
+  the build-mode pair is a product-level claim, and even it is exploratory.
 - Absolute latency. There is no independent external reference and the sing-box hop is common to the
   measured rows.
 - A default-transport claim for a row that does not run the default full plan.

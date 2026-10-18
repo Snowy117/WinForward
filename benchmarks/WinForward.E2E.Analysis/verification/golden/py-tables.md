@@ -21,6 +21,7 @@ A **correctness failure** means the campaign's answer is wrong rather than slow 
 | pass1 | proxifier | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass1 | proxifyre | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass1 | proxybridge | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
+| pass1 | wf-aot-nativeudp | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass1 | wf-aot-opt | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass1 | wf-fdd-opt | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass2 | control-post | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
@@ -28,6 +29,7 @@ A **correctness failure** means the campaign's answer is wrong rather than slow 
 | pass2 | proxifier | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass2 | proxifyre | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass2 | proxybridge | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
+| pass2 | wf-aot-nativeudp | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass2 | wf-aot-opt | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass2 | wf-fdd-opt | 2 | 64 | 13200 | 0 | present / present | CORRECTNESS FAILURE: the product intercepted 2 direct-path application connection(s) |
 | pass3 | control-post | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
@@ -35,6 +37,7 @@ A **correctness failure** means the campaign's answer is wrong rather than slow 
 | pass3 | proxifier | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass3 | proxifyre | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass3 | proxybridge | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
+| pass3 | wf-aot-nativeudp | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass3 | wf-aot-opt | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 | pass3 | wf-fdd-opt | 0 | 64 | 13200 | 0 | present / present | 0 direct-path interceptions observed |
 
@@ -59,7 +62,7 @@ A reply carrying another flow's connection id validates against that flow's own 
 | pass1 | proxybridge | MIX | udp-identity | HARNESS ERROR — the record is excluded from the affected aggregates | arrived(2401) + late(0) + never(0) + abandonedAtTeardown(0) + corruptDatagrams(0) = 2401 != sent(2400) |
 | pass3 | wf-aot-opt | REL | scheduled-attempts | caveat — the values are kept and every cell that carries them says so | connectAttempts(150) != scheduledAttempts(152): the arm ended with work in flight |
 
-87 record-level identity check(s) **held** and 0 could not be checked (their fields are not published by that record); only the ones that did not hold are listed above.
+99 record-level identity check(s) **held** and 0 could not be checked (their fields are not published by that record); only the ones that did not hold are listed above.
 
 `arrived + late + never + abandonedAtTeardown + corruptDatagrams == sent` is asserted per LOSS, MIX and BASE record; the DNS records are checked for `answered + servfail + timeout + other == sent`, and REL for `connectAttempts == scheduledAttempts`. A **violation** is reported as a harness error and the affected UDP fields are excluded rather than averaged over. A `scheduledAttempts` mismatch means the arm ended with work in flight: its values are kept but every cell that carries them says so.
 
@@ -80,7 +83,7 @@ A reply carrying another flow's connection id validates against that flow's own 
 
 | kind | scope | detail |
 |---|---|---|
-| direct-lane-latency | proxifier | the direct lane's LAT tcp-rtt p50 is 753.6 us against 637.2 us on wf-fdd-opt (18.3 % worse): the direct lane is a property of the path, so the product is interfering with traffic it was configured to leave alone |
+| direct-lane-latency | proxifier | the direct lane's LAT tcp-rtt p50 is 745.7 us against 635.2 us on proxybridge (17.4 % worse): the direct lane is a property of the path, so the product is interfering with traffic it was configured to leave alone |
 | direct-lane-loss | proxifier | the direct lane's LOSS lossRate is 1.2000 pp against 0.0000 pp on proxifyre: the direct lane's loss is the path's, so a product whose direct lane loses more is interfering |
 
 **harness-error (8)**
@@ -120,16 +123,16 @@ Generated from `ROW_PROFILES` in the analysis source, which is the single place 
 | row | product | configuration | plan | arms the plan runs | dual phase | what it does with UDP/53 | what it does with general UDP |
 |---|---|---|---|---|---|---|---|
 | control-pre | none (control block before the product block) | no product loaded | BASE only | BASE | no | n/a (no product loaded: the direct path is the only path) | n/a (no product loaded) |
-| wf-aot-opt | WinForward AOT | UDP-over-TCP v2 on, DNS local target on (reference configuration) | full | IDLE, LAT, LATLOAD, DNS, DNSALT, LOSS, REL, THRU, MIX, PERSIST | yes | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | proxied (UDP-over-TCP v2) |
-| wf-fdd-opt | WinForward framework-dependent | same configuration as wf-aot-opt | full | IDLE, LAT, LATLOAD, DNS, DNSALT, LOSS, REL, THRU, MIX, PERSIST | yes | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | proxied (UDP-over-TCP v2) |
-| wf-aot-nativeudp | WinForward AOT | UDP-over-TCP off, everything else identical to wf-aot-opt | udp only | LAT, LATLOAD, LOSS | no | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | proxied (native UDP relay) |
+| wf-aot-opt | WinForward AOT | UDP-over-TCP v2 on, DNS local target on (the opt-in UoT variant, not the reference configuration) | full | IDLE, LAT, LATLOAD, DNS, DNSALT, LOSS, REL, THRU, MIX, PERSIST | yes | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | proxied (UDP-over-TCP v2) |
+| wf-fdd-opt | WinForward framework-dependent | same configuration as wf-aot-opt (the opt-in UoT variant) | full | IDLE, LAT, LATLOAD, DNS, DNSALT, LOSS, REL, THRU, MIX, PERSIST | yes | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | proxied (UDP-over-TCP v2) |
+| wf-aot-nativeudp | WinForward AOT | UDP-over-TCP off, DNS local target on (the default native-UDP reference configuration) | full | IDLE, LAT, LATLOAD, DNS, DNSALT, LOSS, REL, THRU, MIX, PERSIST | yes | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | proxied (native UDP relay) |
 | wf-aot-dnsrelay | WinForward AOT | DNS local target off, everything else identical to wf-aot-opt | dns only | DNS, DNSALT | no | relayed through the proxy | proxied (UDP-over-TCP v2) |
 | proxifyre | ProxiFyre 2.6.1 | SOCKS5 rule for the client, supportedProtocols TCP+UDP | full | IDLE, LAT, LATLOAD, DNS, DNSALT, LOSS, REL, THRU, MIX, PERSIST | yes | direct via the product's hardcoded port-53 pass-through | proxied (native UDP relay) — except destination port 53 |
 | proxifier | Proxifier 4.14 | SOCKS5 profile, process rules (no UDP support in the product) | full | IDLE, LAT, LATLOAD, DNS, DNSALT, LOSS, REL, THRU, MIX, PERSIST | yes | direct (the product cannot carry UDP at all) | not carried (UDP bypassed) |
 | proxybridge | ProxyBridge 4.0.0 | PROXY rule for the client, DIRECT rule for sing-box | full | IDLE, LAT, LATLOAD, DNS, DNSALT, LOSS, REL, THRU, MIX, PERSIST | yes | relayed through the proxy | proxied (native UDP relay) |
 | control-post | none (control block after the product block) | no product loaded | BASE only | BASE | no | n/a (no product loaded: the direct path is the only path) | n/a (no product loaded) |
 
-The three WinForward rows are a deliberate design: `wf-aot-nativeudp` differs from `wf-aot-opt` only in the UDP carriage and `wf-aot-dnsrelay` only in the DNS local target, so a difference between `wf-aot-opt` and either is attributable to that one feature. Because a partial row never ran the arms the other rows ran, every comparison involving it is reported as `not measured in this row` and is excluded from the Holm family rather than treated as a missing value or a zero.
+The WinForward rows are a deliberate design: `wf-aot-nativeudp` is the default configuration and the reference row, `wf-aot-opt` differs from it only in the UDP carriage (the opt-in UoT variant) and `wf-aot-dnsrelay` differs from `wf-aot-opt` only in the DNS local target, so a difference between the first two is attributable to the UDP carriage and one between `wf-aot-opt` and `wf-aot-dnsrelay` to the DNS local target. Because a partial row never ran the arms the other rows ran, every comparison involving it is reported as `not measured in this row` and is excluded from the Holm family rather than treated as a missing value or a zero.
 
 `DNSALT` targets a port no product special-cases, so it is the arm whose results are comparable across products; the port-53 `DNS` arm is not, because its UDP path differs per row (third column from the right above). `proxifier` cannot proxy UDP at all, so every UDP cell for that row reads `not carried (UDP bypassed)` and the row is excluded from the UDP-accuracy and DNS-latency comparisons; its TCP results are unaffected.
 
@@ -150,11 +153,11 @@ The three WinForward rows are a deliberate design: `wf-aot-nativeudp` differs fr
 | steady-state warmup | 5.0 s of every arm excluded from the memory and CPU steady-state cells |
 | flat mode | no |
 | pass1 run order (order.txt) | control-pre -> wf-aot-opt -> wf-fdd-opt -> wf-aot-nativeudp -> wf-aot-dnsrelay -> proxifyre -> proxifier -> proxybridge -> control-post |
-| pass1 target ledger(s) | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl (7306 record(s), 0 unparsable line(s); attribution: 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it) |
+| pass1 target ledger(s) | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl (8554 record(s), 0 unparsable line(s); attribution: 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-dual-direct, wf-aot-nativeudp-dual-proxied, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it) |
 | pass2 run order (order.txt) | control-pre -> wf-aot-opt -> wf-fdd-opt -> wf-aot-nativeudp -> wf-aot-dnsrelay -> proxifyre -> proxifier -> proxybridge -> control-post |
-| pass2 target ledger(s) | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl (7306 record(s), 0 unparsable line(s); attribution: 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it) |
+| pass2 target ledger(s) | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl (8554 record(s), 0 unparsable line(s); attribution: 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-dual-direct, wf-aot-nativeudp-dual-proxied, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it) |
 | pass3 run order (order.txt) | control-pre -> wf-aot-opt -> wf-fdd-opt -> wf-aot-nativeudp -> wf-aot-dnsrelay -> proxifyre -> proxifier -> proxybridge -> control-post |
-| pass3 target ledger(s) | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl (7306 record(s), 0 unparsable line(s); attribution: 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it) |
+| pass3 target ledger(s) | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl (8554 record(s), 0 unparsable line(s); attribution: 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-dual-direct, wf-aot-nativeudp-dual-proxied, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it) |
 | environment.json: campaign | synthetic-multi-pass |
 | environment.json: host | analysis-host |
 | environment.json: note | generated by make_tree.py |
@@ -164,9 +167,9 @@ The three WinForward rows are a deliberate design: `wf-aot-nativeudp` differs fr
 | arm | field | published value | declared in the plan |
 |---|---|---|---|
 | LOSS | metrics.window | 200.0 [200.0–200.0] ms (n=17) | 200.0 [200.0–200.0] ms (n=18) |
-| MIX | metrics.classes.udp.window | 200.0 [200.0–200.0] ms (n=14) | 200.0 [200.0–200.0] ms (n=15) |
+| MIX | metrics.classes.udp.window | 200.0 [200.0–200.0] ms (n=17) | 200.0 [200.0–200.0] ms (n=18) |
 | BASE | metrics.loss.window | 200.0 [200.0–200.0] ms (n=6) | 200.0 [200.0–200.0] ms (n=6) |
-| any arm (client-side gate) | gates.windowMs | 200.0 [200.0–200.0] ms (n=39) | — |
+| any arm (client-side gate) | gates.windowMs | 200.0 [200.0–200.0] ms (n=42) | — |
 
 `window` is **the plan's declared `lossWindowMs`** (200 ms when the plan declares none). It is a declared, published parameter, not derived from an observed latency: an earlier caption in this analysis claimed `max(200 ms, 5 × observed p99 RTT)` capped at 2000 ms, which was **wrong** and has been removed — the harness publishes `parameters.lossWindowMs` and repeats it as `metrics.window` and `gates.windowMs`, so the arrived/late/never split is reproducible from the record alone. A `null` rate in any table means its denominator was zero (nothing was sent) and is rendered as an empty cell, never as a zero.
 
@@ -174,16 +177,16 @@ The three WinForward rows are a deliberate design: `wf-aot-nativeudp` differs fr
 
 | arm | median [p25–p75] across rows and passes |
 |---|---|
-| IDLE | 10.0 [10.0–10.0] s (n=15) |
+| IDLE | 10.0 [10.0–10.0] s (n=18) |
 | LAT | 30.0 [30.0–30.0] s (n=18) |
 | LATLOAD | 30.0 [30.0–30.0] s (n=18) |
-| DNS | 20.0 [20.0–20.0] s (n=18) |
-| DNSALT | 20.0 [20.0–20.0] s (n=18) |
+| DNS | 20.0 [20.0–20.0] s (n=21) |
+| DNSALT | 20.0 [20.0–20.0] s (n=21) |
 | LOSS | 30.0 [30.0–30.0] s (n=18) |
-| REL | 30.0 [30.0–30.0] s (n=15) |
-| THRU | 20.0 [20.0–20.0] s (n=15) |
-| MIX | 40.0 [40.0–40.0] s (n=15) |
-| PERSIST | 30.0 [30.0–30.0] s (n=15) |
+| REL | 30.0 [30.0–30.0] s (n=18) |
+| THRU | 20.0 [20.0–20.0] s (n=18) |
+| MIX | 40.0 [40.0–40.0] s (n=18) |
+| PERSIST | 30.0 [30.0–30.0] s (n=18) |
 | BASE | 40.0 [40.0–40.0] s (n=6) |
 
 ### Product process sampling
@@ -196,7 +199,7 @@ The three WinForward rows are a deliberate design: `wf-aot-nativeudp` differs fr
 | pass1 | proxifyre | ProxiFyre | ProxiFyre | ProxiFyre x260 | 0 of 260 | 0 | 0 |
 | pass1 | proxybridge | ProxyBridge_CLI | ProxyBridge_CLI | ProxyBridge_CLI x260 | 0 of 260 | 0 | 0 |
 | pass1 | wf-aot-dnsrelay | WinForward | WinForward | WinForward x40 | 0 of 40 | 0 | 0 |
-| pass1 | wf-aot-nativeudp | WinForward | WinForward | WinForward x90 | 0 of 90 | 0 | 0 |
+| pass1 | wf-aot-nativeudp | WinForward | WinForward | WinForward x260 | 0 of 260 | 0 | 0 |
 | pass1 | wf-aot-opt | WinForward | WinForward | WinForward x260 | 0 of 260 | 0 | 0 |
 | pass1 | wf-fdd-opt | WinForward | WinForward | WinForward x260 | 0 of 260 | 0 | 0 |
 | pass2 | control-post | n/a (none configured) | n/a (no non-self samples) | none | n/a | 0 | 0 |
@@ -205,7 +208,7 @@ The three WinForward rows are a deliberate design: `wf-aot-nativeudp` differs fr
 | pass2 | proxifyre | ProxiFyre | ProxiFyre | ProxiFyre x260 | 0 of 260 | 0 | 0 |
 | pass2 | proxybridge | ProxyBridge_CLI | ProxyBridge_CLI | ProxyBridge_CLI x260 | 0 of 260 | 0 | 0 |
 | pass2 | wf-aot-dnsrelay | WinForward | WinForward | WinForward x40 | 0 of 40 | 0 | 0 |
-| pass2 | wf-aot-nativeudp | WinForward | WinForward | WinForward x90 | 0 of 90 | 0 | 0 |
+| pass2 | wf-aot-nativeudp | WinForward | WinForward | WinForward x260 | 0 of 260 | 0 | 0 |
 | pass2 | wf-aot-opt | WinForward | WinForward | WinForward x260 | 0 of 260 | 1 | 1 |
 | pass2 | wf-fdd-opt | WinForward | WinForward | WinForward x260 | 0 of 260 | 0 | 0 |
 | pass3 | control-post | n/a (none configured) | n/a (no non-self samples) | none | n/a | 0 | 0 |
@@ -214,7 +217,7 @@ The three WinForward rows are a deliberate design: `wf-aot-nativeudp` differs fr
 | pass3 | proxifyre | ProxiFyre | ProxiFyre | ProxiFyre x260 | 0 of 260 | 0 | 0 |
 | pass3 | proxybridge | ProxyBridge_CLI | ProxyBridge_CLI | ProxyBridge_CLI x260 | 0 of 260 | 0 | 0 |
 | pass3 | wf-aot-dnsrelay | WinForward | WinForward | WinForward x40 | 0 of 40 | 0 | 0 |
-| pass3 | wf-aot-nativeudp | WinForward | WinForward | WinForward x90 | 0 of 90 | 0 | 0 |
+| pass3 | wf-aot-nativeudp | WinForward | WinForward | WinForward x260 | 0 of 260 | 0 | 0 |
 | pass3 | wf-aot-opt | WinForward | WinForward | WinForward x260 | 0 of 260 | 0 | 0 |
 | pass3 | wf-fdd-opt | WinForward | WinForward | WinForward x260 | 0 of 260 | 0 | 0 |
 
@@ -230,7 +233,7 @@ A sample whose `readError` is true is rejected from every CPU and memory cell, b
 | pass1 | proxifyre | config.synthetic | a499f5b7a0bf | 17 |
 | pass1 | proxybridge | config.synthetic | ab808e956244 | 19 |
 | pass1 | wf-aot-dnsrelay | config.synthetic | cf3bdd125a24 | 27 |
-| pass1 | wf-aot-nativeudp | config.synthetic | f6a8c7aedb17 | 28 |
+| pass1 | wf-aot-nativeudp | config.synthetic | 909703ea3713 | 24 |
 | pass1 | wf-aot-opt | config.synthetic | 13229a248522 | 18 |
 | pass1 | wf-fdd-opt | config.synthetic | c10737a3699b | 18 |
 | pass2 | control-post | config.synthetic | b5d8c77de84d | 25 |
@@ -239,7 +242,7 @@ A sample whose `readError` is true is rejected from every CPU and memory cell, b
 | pass2 | proxifyre | config.synthetic | a499f5b7a0bf | 17 |
 | pass2 | proxybridge | config.synthetic | ab808e956244 | 19 |
 | pass2 | wf-aot-dnsrelay | config.synthetic | cf3bdd125a24 | 27 |
-| pass2 | wf-aot-nativeudp | config.synthetic | f6a8c7aedb17 | 28 |
+| pass2 | wf-aot-nativeudp | config.synthetic | 909703ea3713 | 24 |
 | pass2 | wf-aot-opt | config.synthetic | 13229a248522 | 18 |
 | pass2 | wf-fdd-opt | config.synthetic | c10737a3699b | 18 |
 | pass3 | control-post | config.synthetic | b5d8c77de84d | 25 |
@@ -248,7 +251,7 @@ A sample whose `readError` is true is rejected from every CPU and memory cell, b
 | pass3 | proxifyre | config.synthetic | a499f5b7a0bf | 17 |
 | pass3 | proxybridge | config.synthetic | ab808e956244 | 19 |
 | pass3 | wf-aot-dnsrelay | config.synthetic | cf3bdd125a24 | 27 |
-| pass3 | wf-aot-nativeudp | config.synthetic | f6a8c7aedb17 | 28 |
+| pass3 | wf-aot-nativeudp | config.synthetic | 909703ea3713 | 24 |
 | pass3 | wf-aot-opt | config.synthetic | 13229a248522 | 18 |
 | pass3 | wf-fdd-opt | config.synthetic | c10737a3699b | 18 |
 
@@ -256,69 +259,75 @@ A sample whose `readError` is true is rejected from every CPU and memory cell, b
 
 | pass | run | label | startedUtc | wallSeconds | tick Hz | arms | run failed | notes |
 |---|---|---|---|---|---|---|---|---|
-| pass1 | control-post | control-post-p1 | 2026-10-06T08:34:30.000000+00:00 | 40.0 | 10000000.0 | 1 | no | — |
-| pass1 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T08:32:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass1 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T08:33:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | control-post | control-post-p1 | 2026-10-06T08:39:20.000000+00:00 | 40.0 | 10000000.0 | 1 | no | — |
+| pass1 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T08:37:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T08:38:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass1 | control-pre | control-pre-p1 | 2026-10-06T08:00:00.000000+00:00 | 40.0 | 10000000.0 | 1 | no | — |
-| pass1 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T08:32:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass1 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T08:33:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass1 | proxifier | proxifier-p1 | 2026-10-06T08:21:50.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
-| pass1 | proxifier/proxied | proxifier-dual-proxied | 2026-10-06T08:26:10.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass1 | proxifier/direct | proxifier-dual-direct | 2026-10-06T08:27:10.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass1 | proxifyre | proxifyre-p1 | 2026-10-06T08:15:30.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
-| pass1 | proxifyre/proxied | proxifyre-dual-proxied | 2026-10-06T08:19:50.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass1 | proxifyre/direct | proxifyre-dual-direct | 2026-10-06T08:20:50.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass1 | proxybridge | proxybridge-p1 | 2026-10-06T08:28:10.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
-| pass1 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T08:32:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass1 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T08:33:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass1 | wf-aot-dnsrelay | wf-aot-dnsrelay-p1 | 2026-10-06T08:14:50.000000+00:00 | 40.0 | 10000000.0 | 2 | no | — |
-| pass1 | wf-aot-nativeudp | wf-aot-nativeudp-p1 | 2026-10-06T08:13:20.000000+00:00 | 90.0 | 10000000.0 | 3 | no | — |
+| pass1 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T08:37:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T08:38:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | proxifier | proxifier-p1 | 2026-10-06T08:26:40.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass1 | proxifier/proxied | proxifier-dual-proxied | 2026-10-06T08:31:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | proxifier/direct | proxifier-dual-direct | 2026-10-06T08:32:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | proxifyre | proxifyre-p1 | 2026-10-06T08:20:20.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass1 | proxifyre/proxied | proxifyre-dual-proxied | 2026-10-06T08:24:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | proxifyre/direct | proxifyre-dual-direct | 2026-10-06T08:25:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | proxybridge | proxybridge-p1 | 2026-10-06T08:33:00.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass1 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T08:37:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T08:38:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | wf-aot-dnsrelay | wf-aot-dnsrelay-p1 | 2026-10-06T08:19:40.000000+00:00 | 40.0 | 10000000.0 | 2 | no | — |
+| pass1 | wf-aot-nativeudp | wf-aot-nativeudp-p1 | 2026-10-06T08:13:20.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass1 | wf-aot-nativeudp/proxied | wf-aot-nativeudp-dual-proxied | 2026-10-06T08:17:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass1 | wf-aot-nativeudp/direct | wf-aot-nativeudp-dual-direct | 2026-10-06T08:18:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass1 | wf-aot-opt | wf-aot-opt-p1 | 2026-10-06T08:00:40.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
 | pass1 | wf-aot-opt/proxied | wf-aot-opt-dual-proxied | 2026-10-06T08:05:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass1 | wf-aot-opt/direct | wf-aot-opt-dual-direct | 2026-10-06T08:06:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass1 | wf-fdd-opt | wf-fdd-opt-p1 | 2026-10-06T08:07:00.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
 | pass1 | wf-fdd-opt/proxied | wf-fdd-opt-dual-proxied | 2026-10-06T08:11:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass1 | wf-fdd-opt/direct | wf-fdd-opt-dual-direct | 2026-10-06T08:12:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | control-post | control-post-p2 | 2026-10-06T09:34:30.000000+00:00 | 40.0 | 10000000.0 | 1 | no | — |
-| pass2 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T09:32:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T09:33:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | control-post | control-post-p2 | 2026-10-06T09:39:20.000000+00:00 | 40.0 | 10000000.0 | 1 | no | — |
+| pass2 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T09:37:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T09:38:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass2 | control-pre | control-pre-p2 | 2026-10-06T09:00:00.000000+00:00 | 40.0 | 10000000.0 | 1 | no | — |
-| pass2 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T09:32:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T09:33:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | proxifier | proxifier-p2 | 2026-10-06T09:21:50.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
-| pass2 | proxifier/proxied | proxifier-dual-proxied | 2026-10-06T09:26:10.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | proxifier/direct | proxifier-dual-direct | 2026-10-06T09:27:10.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | proxifyre | proxifyre-p2 | 2026-10-06T09:15:30.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
-| pass2 | proxifyre/proxied | proxifyre-dual-proxied | 2026-10-06T09:19:50.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | proxifyre/direct | proxifyre-dual-direct | 2026-10-06T09:20:50.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | proxybridge | proxybridge-p2 | 2026-10-06T09:28:10.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
-| pass2 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T09:32:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T09:33:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass2 | wf-aot-dnsrelay | wf-aot-dnsrelay-p2 | 2026-10-06T09:14:50.000000+00:00 | 40.0 | 10000000.0 | 2 | no | — |
-| pass2 | wf-aot-nativeudp | wf-aot-nativeudp-p2 | 2026-10-06T09:13:20.000000+00:00 | 90.0 | 10000000.0 | 3 | no | — |
+| pass2 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T09:37:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T09:38:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | proxifier | proxifier-p2 | 2026-10-06T09:26:40.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass2 | proxifier/proxied | proxifier-dual-proxied | 2026-10-06T09:31:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | proxifier/direct | proxifier-dual-direct | 2026-10-06T09:32:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | proxifyre | proxifyre-p2 | 2026-10-06T09:20:20.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass2 | proxifyre/proxied | proxifyre-dual-proxied | 2026-10-06T09:24:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | proxifyre/direct | proxifyre-dual-direct | 2026-10-06T09:25:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | proxybridge | proxybridge-p2 | 2026-10-06T09:33:00.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass2 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T09:37:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T09:38:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | wf-aot-dnsrelay | wf-aot-dnsrelay-p2 | 2026-10-06T09:19:40.000000+00:00 | 40.0 | 10000000.0 | 2 | no | — |
+| pass2 | wf-aot-nativeudp | wf-aot-nativeudp-p2 | 2026-10-06T09:13:20.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass2 | wf-aot-nativeudp/proxied | wf-aot-nativeudp-dual-proxied | 2026-10-06T09:17:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass2 | wf-aot-nativeudp/direct | wf-aot-nativeudp-dual-direct | 2026-10-06T09:18:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass2 | wf-aot-opt | wf-aot-opt-p2 | 2026-10-06T09:00:40.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
 | pass2 | wf-aot-opt/proxied | wf-aot-opt-dual-proxied | 2026-10-06T09:05:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass2 | wf-aot-opt/direct | wf-aot-opt-dual-direct | 2026-10-06T09:06:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass2 | wf-fdd-opt | wf-fdd-opt-p2 | 2026-10-06T09:07:00.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
 | pass2 | wf-fdd-opt/proxied | wf-fdd-opt-dual-proxied | 2026-10-06T09:11:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass2 | wf-fdd-opt/direct | wf-fdd-opt-dual-direct | 2026-10-06T09:12:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | control-post | control-post-p3 | 2026-10-06T10:34:30.000000+00:00 | 40.0 | 10000000.0 | 1 | no | — |
-| pass3 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T10:32:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T10:33:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | control-post | control-post-p3 | 2026-10-06T10:39:20.000000+00:00 | 40.0 | 10000000.0 | 1 | no | — |
+| pass3 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T10:37:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T10:38:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass3 | control-pre | control-pre-p3 | 2026-10-06T10:00:00.000000+00:00 | 40.0 | 10000000.0 | 1 | no | — |
-| pass3 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T10:32:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T10:33:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | proxifier | proxifier-p3 | 2026-10-06T10:21:50.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
-| pass3 | proxifier/proxied | proxifier-dual-proxied | 2026-10-06T10:26:10.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | proxifier/direct | proxifier-dual-direct | 2026-10-06T10:27:10.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | proxifyre | proxifyre-p3 | 2026-10-06T10:15:30.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
-| pass3 | proxifyre/proxied | proxifyre-dual-proxied | 2026-10-06T10:19:50.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | proxifyre/direct | proxifyre-dual-direct | 2026-10-06T10:20:50.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | proxybridge | proxybridge-p3 | 2026-10-06T10:28:10.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
-| pass3 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T10:32:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T10:33:30.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
-| pass3 | wf-aot-dnsrelay | wf-aot-dnsrelay-p3 | 2026-10-06T10:14:50.000000+00:00 | 40.0 | 10000000.0 | 2 | no | — |
-| pass3 | wf-aot-nativeudp | wf-aot-nativeudp-p3 | 2026-10-06T10:13:20.000000+00:00 | 90.0 | 10000000.0 | 3 | no | — |
+| pass3 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T10:37:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T10:38:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | proxifier | proxifier-p3 | 2026-10-06T10:26:40.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass3 | proxifier/proxied | proxifier-dual-proxied | 2026-10-06T10:31:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | proxifier/direct | proxifier-dual-direct | 2026-10-06T10:32:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | proxifyre | proxifyre-p3 | 2026-10-06T10:20:20.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass3 | proxifyre/proxied | proxifyre-dual-proxied | 2026-10-06T10:24:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | proxifyre/direct | proxifyre-dual-direct | 2026-10-06T10:25:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | proxybridge | proxybridge-p3 | 2026-10-06T10:33:00.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass3 | proxybridge/proxied | proxybridge-dual-proxied | 2026-10-06T10:37:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | proxybridge/direct | proxybridge-dual-direct | 2026-10-06T10:38:20.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | wf-aot-dnsrelay | wf-aot-dnsrelay-p3 | 2026-10-06T10:19:40.000000+00:00 | 40.0 | 10000000.0 | 2 | no | — |
+| pass3 | wf-aot-nativeudp | wf-aot-nativeudp-p3 | 2026-10-06T10:13:20.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
+| pass3 | wf-aot-nativeudp/proxied | wf-aot-nativeudp-dual-proxied | 2026-10-06T10:17:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
+| pass3 | wf-aot-nativeudp/direct | wf-aot-nativeudp-dual-direct | 2026-10-06T10:18:40.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass3 | wf-aot-opt | wf-aot-opt-p3 | 2026-10-06T10:00:40.000000+00:00 | 380.0 | 10000000.0 | 10 | no | — |
 | pass3 | wf-aot-opt/proxied | wf-aot-opt-dual-proxied | 2026-10-06T10:05:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
 | pass3 | wf-aot-opt/direct | wf-aot-opt-dual-direct | 2026-10-06T10:06:00.000000+00:00 | 60.0 | 10000000.0 | 2 | no | — |
@@ -340,7 +349,7 @@ Per-pass values, not aggregates: every line is one (pass, row) measurement. `tcp
 | pass1 | proxifyre | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 5 | 0 | 5 flow(s) over 5 UDP-carrying arm(s) | native | native | direct via the product's hardcoded port-53 pass-through | PASS | PASS | — |
 | pass1 | proxybridge | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 6 | 0 | 6 flow(s) over 5 UDP-carrying arm(s) | native | native | relayed through the proxy | PASS | PASS | denominator gaps: LOSS UDP indication |
 | pass1 | wf-aot-dnsrelay | 100% (40/40) | 1 | 1 | 1.0000 | 2 | 0 | 2 | 2 flow(s) over 2 UDP-carrying arm(s) | utcp | utcp | relayed through the proxy | PASS | PASS | denominator gaps: no LAT arm; no LATLOAD arm; no LOSS arm; no MIX arm; no PERSIST arm; no REL arm; no THRU arm |
-| pass1 | wf-aot-nativeudp | 100% (90/90) | 0 | 63 | n/a (no client-side TCP connection counters) | 3 | 3 | 0 | 3 flow(s) over 3 UDP-carrying arm(s) | native | native | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | n/a | n/a | denominator gaps: LAT.tcp.connectAttempts; LATLOAD.tcp.connectAttempts; no DNS arm; no DNSALT arm; no MIX arm; no PERSIST arm; no REL arm; no THRU arm; no client-side TCP connection counters; tcpAttempts terms: n/a; undecidable: tcpGate (n/a (no client-side TCP connection counters)) |
+| pass1 | wf-aot-nativeudp | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 5 | 0 | 5 flow(s) over 5 UDP-carrying arm(s) | native | native | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | PASS | PASS | — |
 | pass1 | wf-aot-opt | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 0 | 5 | 5 flow(s) over 5 UDP-carrying arm(s) | utcp | utcp | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | PASS | PASS | — |
 | pass1 | wf-fdd-opt | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 0 | 5 | 5 flow(s) over 5 UDP-carrying arm(s) | utcp | utcp | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | PASS | PASS | — |
 | pass2 | control-post | n/a (no product process sampled) | 0 | 0 | n/a (no client-side TCP connection counters) | 0 | 0 | 0 | n/a (no UDP-carrying arm) | none | unstated | n/a (no product loaded: the direct path is the only path) | PASS | PASS | control block: flow gates exempt (nothing is loaded); the BASE arm supplies the path-loss floor |
@@ -349,7 +358,7 @@ Per-pass values, not aggregates: every line is one (pass, row) measurement. `tcp
 | pass2 | proxifyre | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 5 | 0 | 5 flow(s) over 5 UDP-carrying arm(s) | native | native | direct via the product's hardcoded port-53 pass-through | PASS | PASS | — |
 | pass2 | proxybridge | 100% (260/260) | 273 | 273 | 1.0000 | 6 | 6 | 0 | 6 flow(s) over 6 UDP-carrying arm(s) | native | native | relayed through the proxy | PASS | PASS | — |
 | pass2 | wf-aot-dnsrelay | 100% (40/40) | 1 | 1 | 1.0000 | 2 | 0 | 2 | 2 flow(s) over 2 UDP-carrying arm(s) | utcp | utcp | relayed through the proxy | PASS | PASS | denominator gaps: no LAT arm; no LATLOAD arm; no LOSS arm; no MIX arm; no PERSIST arm; no REL arm; no THRU arm |
-| pass2 | wf-aot-nativeudp | 100% (90/90) | 0 | 63 | n/a (no client-side TCP connection counters) | 3 | 3 | 0 | 3 flow(s) over 3 UDP-carrying arm(s) | native | native | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | n/a | n/a | denominator gaps: LAT.tcp.connectAttempts; LATLOAD.tcp.connectAttempts; no DNS arm; no DNSALT arm; no MIX arm; no PERSIST arm; no REL arm; no THRU arm; no client-side TCP connection counters; tcpAttempts terms: n/a; undecidable: tcpGate (n/a (no client-side TCP connection counters)) |
+| pass2 | wf-aot-nativeudp | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 5 | 0 | 5 flow(s) over 5 UDP-carrying arm(s) | native | native | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | PASS | PASS | — |
 | pass2 | wf-aot-opt | 100% (259/260) | 273 | 273 | 1.0000 | 5 | 0 | 5 | 5 flow(s) over 5 UDP-carrying arm(s) | utcp | utcp | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | PASS | PASS | — |
 | pass2 | wf-fdd-opt | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 0 | 5 | 5 flow(s) over 5 UDP-carrying arm(s) | utcp | utcp | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | PASS | PASS | — |
 | pass3 | control-post | n/a (no product process sampled) | 0 | 0 | n/a (no client-side TCP connection counters) | 0 | 0 | 0 | n/a (no UDP-carrying arm) | none | unstated | n/a (no product loaded: the direct path is the only path) | PASS | PASS | control block: flow gates exempt (nothing is loaded); the BASE arm supplies the path-loss floor |
@@ -358,7 +367,7 @@ Per-pass values, not aggregates: every line is one (pass, row) measurement. `tcp
 | pass3 | proxifyre | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 5 | 0 | 5 flow(s) over 5 UDP-carrying arm(s) | native | native | direct via the product's hardcoded port-53 pass-through | PASS | PASS | — |
 | pass3 | proxybridge | 100% (260/260) | 273 | 273 | 1.0000 | 6 | 6 | 0 | 6 flow(s) over 6 UDP-carrying arm(s) | native | native | relayed through the proxy | PASS | PASS | — |
 | pass3 | wf-aot-dnsrelay | 100% (40/40) | 1 | 1 | 1.0000 | 2 | 0 | 2 | 2 flow(s) over 2 UDP-carrying arm(s) | utcp | utcp | relayed through the proxy | PASS | PASS | denominator gaps: no LAT arm; no LATLOAD arm; no LOSS arm; no MIX arm; no PERSIST arm; no REL arm; no THRU arm |
-| pass3 | wf-aot-nativeudp | 100% (90/90) | 0 | 63 | n/a (no client-side TCP connection counters) | 3 | 3 | 0 | 3 flow(s) over 3 UDP-carrying arm(s) | native | native | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | n/a | n/a | denominator gaps: LAT.tcp.connectAttempts; LATLOAD.tcp.connectAttempts; no DNS arm; no DNSALT arm; no MIX arm; no PERSIST arm; no REL arm; no THRU arm; no client-side TCP connection counters; tcpAttempts terms: n/a; undecidable: tcpGate (n/a (no client-side TCP connection counters)) |
+| pass3 | wf-aot-nativeudp | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 5 | 0 | 5 flow(s) over 5 UDP-carrying arm(s) | native | native | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | PASS | PASS | — |
 | pass3 | wf-aot-opt | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 0 | 5 | 5 flow(s) over 5 UDP-carrying arm(s) | utcp | utcp | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | PASS | PASS | — |
 | pass3 | wf-fdd-opt | 100% (260/260) | 273 | 273 | 1.0000 | 5 | 0 | 5 | 5 flow(s) over 5 UDP-carrying arm(s) | utcp | utcp | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | PASS | PASS | — |
 
@@ -397,7 +406,7 @@ Every value is one (pass, row) record. A `FAIL` here means the record cannot be 
 | pass1 | proxifyre | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass1 | proxybridge | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | FAIL: LOSS udp-identity (arrived(6001) + late(0) + never(0) + abandonedAtTeardown(0) + corruptDatagrams(0) = 6001 != sent(6000)); MIX udp-identity (arrived(2401) + late(0) + never(0) + abandonedAtTeardown(0) + corruptDatagrams(0) = 2401 != sent(2400)) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: accounting identity (LOSS udp-identity (arrived(6001) + late(0) + never(0) + abandonedAtTeardown(0) + corruptDatagrams(0) = 6001 != sent(6000)); MIX udp-identity (arrived(2401) + late(0) + never(0) + abandonedAtTeardown(0) + corruptDatagrams(0) = 2401 != sent(2400))), BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass1 | wf-aot-dnsrelay | n/a | n/a | n/a | n/a | n/a | n/a | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
-| pass1 | wf-aot-nativeudp | 0 | 0 | 0 | 409600.0 | n/a | 0 zero of 4 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
+| pass1 | wf-aot-nativeudp | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass1 | wf-aot-opt | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass1 | wf-fdd-opt | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass2 | control-post | n/a | n/a | n/a | n/a | n/a | n/a | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
@@ -406,7 +415,7 @@ Every value is one (pass, row) record. A `FAIL` here means the record cannot be 
 | pass2 | proxifyre | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass2 | proxybridge | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass2 | wf-aot-dnsrelay | n/a | n/a | n/a | n/a | n/a | n/a | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
-| pass2 | wf-aot-nativeudp | 0 | 0 | 0 | 409600.0 | n/a | 0 zero of 4 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
+| pass2 | wf-aot-nativeudp | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass2 | wf-aot-opt | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 1 / 1 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: sampling (1 samplerError, 1 rejected sample(s)), BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass2 | wf-fdd-opt | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass3 | control-post | n/a | n/a | n/a | n/a | n/a | n/a | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
@@ -415,7 +424,7 @@ Every value is one (pass, row) record. A `FAIL` here means the record cannot be 
 | pass3 | proxifyre | 2 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: LOSS clientSendLoss (2 == 0), BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass3 | proxybridge | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass3 | wf-aot-dnsrelay | n/a | n/a | n/a | n/a | n/a | n/a | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
-| pass3 | wf-aot-nativeudp | 0 | 0 | 0 | 409600.0 | n/a | 0 zero of 4 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
+| pass3 | wf-aot-nativeudp | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass3 | wf-aot-opt | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 | pass3 | wf-fdd-opt | 0 | 0 | 0 | 409600.0 | 0 | 0 zero of 15 | n/a (no identity published) | 0 / 0 | 0.000 | 0.008 | FAIL | the pass's control block is dirty, so every row in this pass inherits a failed harness floor; failed: BASE floor (control-post) (8.000e-03 < 1e-06) |
 
@@ -426,7 +435,7 @@ Every value is one (pass, row) record. A `FAIL` here means the record cannot be 
 | control-pre | 3 | PASS | FAIL |
 | wf-aot-opt | 3 | PASS | FAIL |
 | wf-fdd-opt | 3 | PASS | FAIL |
-| wf-aot-nativeudp | 3 | n/a | FAIL |
+| wf-aot-nativeudp | 3 | PASS | FAIL |
 | wf-aot-dnsrelay | 3 | PASS | FAIL |
 | proxifyre | 3 | PASS | FAIL |
 | proxifier | 3 | PASS | FAIL |
@@ -440,13 +449,13 @@ Rows are measured programs. Every cell is `median [p25–p75] across passes (n=K
 | row | LAT tcp-rtt p50 (us) | LAT tcp-rtt p99 (us) | LAT udp-rtt p50 (us) | LAT udp lossRate (pp) | LATLOAD tcp-rtt p50 (us) | LATLOAD tcp-rtt p99 (us) | LOSS lossRate (pp) | LOSS corruptRate (pp) | LOSS foreignConnection (count) | REL unexpectedEofRate (pp) | REL fidelityRate (pp) | DNS(53) answerRate (pp) | DNS(53) dns-rtt p50 (us) | DNSALT answerRate (pp) | DNSALT dns-rtt p50 (us) | THRU goodputMbps (Mbps) | MIX udp.lossRate (pp) | PERSIST responseRate (pp) | PERSIST reconnects (count) | steady-state private bytes (MiB) | proxy CPU (%vcpu) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | control-pre | n/a (not measured in this row: LAT is not in the BASE only plan) | n/a (not measured in this row: LAT is not in the BASE only plan) | n/a (not measured in this row: LAT is not in the BASE only plan) | n/a (not measured in this row: LAT is not in the BASE only plan) | n/a (not measured in this row: LATLOAD is not in the BASE only plan) | n/a (not measured in this row: LATLOAD is not in the BASE only plan) | n/a (not measured in this row: LOSS is not in the BASE only plan) | n/a (not measured in this row: LOSS is not in the BASE only plan) | n/a (not measured in this row: LOSS is not in the BASE only plan) | n/a (not measured in this row: REL is not in the BASE only plan) | n/a (not measured in this row: REL is not in the BASE only plan) | n/a (not measured in this row: DNS is not in the BASE only plan) | n/a (not measured in this row: DNS is not in the BASE only plan) | n/a (not measured in this row: DNSALT is not in the BASE only plan) | n/a (not measured in this row: DNSALT is not in the BASE only plan) | n/a (not measured in this row: THRU is not in the BASE only plan) | n/a (not measured in this row: MIX is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (no product process was sampled (run.json samplerProcesses is empty)) | n/a (no product process was sampled (run.json samplerProcesses is empty)) |
-| wf-aot-opt | 648.3 [643.8–657.4] us (n=3) | 2917.2 [2897.2–2958.5] us (n=3) | 680.7 [676.0–690.3] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 898.8 [892.1–902.9] us (n=3) | 4044.6 [4014.3–4063.2] us (n=3) | 0.0000 [0.0000–0.0250] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0 [0–0] (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 8.000 [8.000–8.000] Mbps (n=3) | 0.0000 [0.0000–0.0209] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 0.0 [0.0–0.0] (n=3) | 92.44 [91.88–92.63] MiB (n=3) | 46.01 [45.81–46.03] %vcpu (n=3) |
-| wf-fdd-opt | 637.1 [635.1–637.5] us (n=3) | 2866.8 [2857.8–2868.6] us (n=3) | 668.9 [666.8–669.3] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 905.6 [889.5–908.3] us (n=3) | 4075.3 [4002.6–4087.2] us (n=3) | 0.0000 [0.0000–0.0500] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0 [0–0] (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 8.000 [8.000–8.000] Mbps (n=3) | 0.0000 [0.0000–0.0416] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 0.0 [0.0–0.0] (n=3) | 92.11 [91.85–92.13] MiB (n=3) | 45.98 [45.93–45.99] %vcpu (n=3) |
-| wf-aot-nativeudp | n/a (LAT has no tcp-rtt histogram) | n/a (LAT has no tcp-rtt histogram) | 670.9 [669.9–678.1] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | n/a (LATLOAD has no tcp-rtt histogram) | n/a (LATLOAD has no tcp-rtt histogram) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0 [0–0] (n=3) | n/a (not measured in this row: REL is not in the udp only plan) | n/a (not measured in this row: REL is not in the udp only plan) | n/a (not measured in this row: DNS is not in the udp only plan) | n/a (not measured in this row: DNS is not in the udp only plan) | n/a (not measured in this row: DNSALT is not in the udp only plan) | n/a (not measured in this row: DNSALT is not in the udp only plan) | n/a (not measured in this row: THRU is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | 92.49 [92.21–92.54] MiB (n=3) | 46.59 [46.52–46.63] %vcpu (n=3) |
-| wf-aot-dnsrelay | n/a (not measured in this row: LAT is not in the dns only plan) | n/a (not measured in this row: LAT is not in the dns only plan) | n/a (not measured in this row: LAT is not in the dns only plan) | n/a (not measured in this row: LAT is not in the dns only plan) | n/a (not measured in this row: LATLOAD is not in the dns only plan) | n/a (not measured in this row: LATLOAD is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: REL is not in the dns only plan) | n/a (not measured in this row: REL is not in the dns only plan) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | n/a (not measured in this row: THRU is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | 92.36 [92.00–92.93] MiB (n=3) | 46.26 [46.21–46.27] %vcpu (n=3) |
-| proxifyre | 641.8 [640.9–645.3] us (n=3) | 2888.3 [2884.3–2903.6] us (n=3) | 673.9 [673.0–677.5] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 890.3 [886.1–897.9] us (n=3) | 4006.2 [3987.4–4040.8] us (n=3) | 0.0000 [0.0000–0.2000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0 [0–2] (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 8.000 [8.000–8.000] Mbps (n=3) | 0.0000 [0.0000–0.2083] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 0.0 [0.0–0.0] (n=3) | 92.73 [92.34–93.04] MiB (n=3) | 46.03 [46.00–46.04] %vcpu (n=3) |
-| proxifier | 632.2 [632.1–647.4] us (n=3) | 2844.9 [2844.3–2913.2] us (n=3) | not carried (UDP bypassed) | not carried (UDP bypassed) | 917.6 [902.0–922.2] us (n=3) | 4129.2 [4059.1–4149.7] us (n=3) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | 8.000 [8.000–8.000] Mbps (n=3) | not carried (UDP bypassed) | 100.0000 [96.6667–100.0000] pp (n=3) | 0.0 [0.0–0.5] (n=3) | 92.69 [92.65–93.04] MiB (n=3) | 45.92 [45.89–45.93] %vcpu (n=3) |
-| proxybridge | 655.5 [644.0–659.6] us (n=3) | 2949.8 [2897.9–2968.0] us (n=3) | 688.3 [676.2–692.5] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 883.9 [879.2–895.4] us (n=3) | 3977.6 [3956.4–4029.1] us (n=3) | 0.1000 [0.0500–0.1500] pp (n=2 of 3; 1 unavailable) | 0.0167 [0.0083–0.0250] pp (n=2 of 3; 1 unavailable) | 0 [0–0] (n=2 of 3; 1 unavailable) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 8.000 [8.000–8.000] Mbps (n=3) | 0.0000 [0.0000–0.1042] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 0.0 [0.0–0.0] (n=3) | 92.26 [92.13–92.60] MiB (n=3) | 46.04 [46.04–46.15] %vcpu (n=3) |
+| wf-aot-opt | 657.5 [648.4–658.8] us (n=3) | 2958.6 [2917.9–2964.4] us (n=3) | 690.3 [680.8–691.7] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 886.8 [886.0–900.3] us (n=3) | 3990.4 [3987.2–4051.4] us (n=3) | 0.0000 [0.0000–0.0250] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0 [0–0] (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 8.000 [8.000–8.000] Mbps (n=3) | 0.0000 [0.0000–0.0209] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 0.0 [0.0–0.0] (n=3) | 92.44 [92.27–92.90] MiB (n=3) | 45.99 [45.79–46.00] %vcpu (n=3) |
+| wf-fdd-opt | 647.6 [642.7–652.8] us (n=3) | 2914.1 [2892.3–2937.7] us (n=3) | 680.0 [674.9–685.5] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 894.9 [884.0–900.3] us (n=3) | 4027.2 [3978.1–4051.3] us (n=3) | 0.0000 [0.0000–0.0500] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0 [0–0] (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 8.000 [8.000–8.000] Mbps (n=3) | 0.0000 [0.0000–0.0416] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 0.0 [0.0–0.0] (n=3) | 92.13 [92.12–92.59] MiB (n=3) | 45.96 [45.95–45.97] %vcpu (n=3) |
+| wf-aot-nativeudp | 652.1 [650.6–654.6] us (n=3) | 2934.3 [2927.7–2945.5] us (n=3) | 684.7 [683.1–687.3] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 879.1 [878.4–893.2] us (n=3) | 3956.1 [3952.6–4019.6] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0 [0–0] (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 8.000 [8.000–8.000] Mbps (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 0.0 [0.0–0.0] (n=3) | 92.48 [92.47–92.85] MiB (n=3) | 46.00 [45.98–46.01] %vcpu (n=3) |
+| wf-aot-dnsrelay | n/a (not measured in this row: LAT is not in the dns only plan) | n/a (not measured in this row: LAT is not in the dns only plan) | n/a (not measured in this row: LAT is not in the dns only plan) | n/a (not measured in this row: LAT is not in the dns only plan) | n/a (not measured in this row: LATLOAD is not in the dns only plan) | n/a (not measured in this row: LATLOAD is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: REL is not in the dns only plan) | n/a (not measured in this row: REL is not in the dns only plan) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | n/a (not measured in this row: THRU is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | 92.84 [91.93–92.91] MiB (n=3) | 46.57 [46.41–46.60] %vcpu (n=3) |
+| proxifyre | 642.3 [640.1–646.1] us (n=3) | 2890.2 [2880.6–2907.4] us (n=3) | 674.4 [672.1–678.4] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 893.0 [888.6–893.6] us (n=3) | 4018.4 [3998.8–4021.1] us (n=3) | 0.0000 [0.0000–0.2000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0 [0–2] (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 8.000 [8.000–8.000] Mbps (n=3) | 0.0000 [0.0000–0.2083] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 0.0 [0.0–0.0] (n=3) | 92.21 [91.46–92.53] MiB (n=3) | 45.98 [45.92–45.99] %vcpu (n=3) |
+| proxifier | 665.5 [661.1–666.2] us (n=3) | 2994.8 [2974.8–2998.1] us (n=3) | not carried (UDP bypassed) | not carried (UDP bypassed) | 909.6 [897.1–918.1] us (n=3) | 4093.0 [4037.0–4131.5] us (n=3) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | 8.000 [8.000–8.000] Mbps (n=3) | not carried (UDP bypassed) | 100.0000 [96.6667–100.0000] pp (n=3) | 0.0 [0.0–0.5] (n=3) | 92.13 [91.49–92.38] MiB (n=3) | 46.01 [45.92–46.01] %vcpu (n=3) |
+| proxybridge | 637.5 [637.5–643.6] us (n=3) | 2868.7 [2868.6–2896.2] us (n=3) | 669.4 [669.3–675.8] us (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 894.0 [887.3–906.1] us (n=3) | 4023.2 [3992.8–4077.2] us (n=3) | 0.1000 [0.0500–0.1500] pp (n=2 of 3; 1 unavailable) | 0.0167 [0.0083–0.0250] pp (n=2 of 3; 1 unavailable) | 0 [0–0] (n=2 of 3; 1 unavailable) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 8.000 [8.000–8.000] Mbps (n=3) | 0.0000 [0.0000–0.1042] pp (n=3) | 100.0000 [100.0000–100.0000] pp (n=3) | 0.0 [0.0–0.0] (n=3) | 92.50 [92.46–93.03] MiB (n=3) | 45.89 [45.87–45.89] %vcpu (n=3) |
 | control-post | n/a (not measured in this row: LAT is not in the BASE only plan) | n/a (not measured in this row: LAT is not in the BASE only plan) | n/a (not measured in this row: LAT is not in the BASE only plan) | n/a (not measured in this row: LAT is not in the BASE only plan) | n/a (not measured in this row: LATLOAD is not in the BASE only plan) | n/a (not measured in this row: LATLOAD is not in the BASE only plan) | n/a (not measured in this row: LOSS is not in the BASE only plan) | n/a (not measured in this row: LOSS is not in the BASE only plan) | n/a (not measured in this row: LOSS is not in the BASE only plan) | n/a (not measured in this row: REL is not in the BASE only plan) | n/a (not measured in this row: REL is not in the BASE only plan) | n/a (not measured in this row: DNS is not in the BASE only plan) | n/a (not measured in this row: DNS is not in the BASE only plan) | n/a (not measured in this row: DNSALT is not in the BASE only plan) | n/a (not measured in this row: DNSALT is not in the BASE only plan) | n/a (not measured in this row: THRU is not in the BASE only plan) | n/a (not measured in this row: MIX is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (no product process was sampled (run.json samplerProcesses is empty)) | n/a (no product process was sampled (run.json samplerProcesses is empty)) |
 
 ### Pass counts behind each headline cell
@@ -456,7 +465,7 @@ Rows are measured programs. Every cell is `median [p25–p75] across passes (n=K
 | control-pre | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 of 21 metrics have >= 2 passes |
 | wf-aot-opt | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 21 of 21 metrics have >= 2 passes |
 | wf-fdd-opt | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 21 of 21 metrics have >= 2 passes |
-| wf-aot-nativeudp | 0 | 0 | 3 | 3 | 0 | 0 | 3 | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 | 3 | 7 of 21 metrics have >= 2 passes |
+| wf-aot-nativeudp | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 21 of 21 metrics have >= 2 passes |
 | wf-aot-dnsrelay | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 | 3 | 3 | 3 | 0 | 0 | 0 | 0 | 3 | 3 | 6 of 21 metrics have >= 2 passes |
 | proxifyre | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 21 of 21 metrics have >= 2 passes |
 | proxifier | 3 | 3 | 0 | 0 | 3 | 3 | 0 | 0 | 0 | 3 | 3 | 0 | 0 | 0 | 0 | 3 | 0 | 3 | 3 | 3 | 3 | 11 of 21 metrics have >= 2 passes |
@@ -473,8 +482,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 |---|---|---|---|---|---|---|---|---|---|
 | control-pre | BASE | 20 [20–20] (n=3) | 180.0 [180.0–180.0] us (n=3) | 375.0 [375.0–375.0] us (n=3) | 300.0 [300.0–300.0] us (n=3) | 405.0 [405.0–405.0] us (n=3) | 1300.0 [1300.0–1300.0] us (n=3) | 2080.0 [2080.0–2080.0] us (n=3) | 1820.0 [1820.0–1820.0] us (n=3) |
 | wf-aot-opt | IDLE | n/a (IDLE has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-opt | LAT | 32 [32–32] (n=3) | 272.3 [270.4–276.1] us (n=3) | 567.2 [563.3–575.3] us (n=3) | 453.8 [450.7–460.2] us (n=3) | 612.6 [608.4–621.3] us (n=3) | 1944.8 [1931.5–1972.3] us (n=3) | 3111.6 [3090.4–3155.7] us (n=3) | 2722.7 [2704.1–2761.3] us (n=3) |
-| wf-aot-opt | LATLOAD | 31 [31–31] (n=3) | 377.5 [374.7–379.2] us (n=3) | 786.4 [780.6–790.1] us (n=3) | 629.2 [624.4–632.0] us (n=3) | 849.4 [843.0–853.3] us (n=3) | 2696.4 [2676.2–2708.8] us (n=3) | 4314.2 [4281.9–4334.0] us (n=3) | 3774.9 [3746.7–3792.3] us (n=3) |
+| wf-aot-opt | LAT | 32 [32–32] (n=3) | 276.1 [272.3–276.7] us (n=3) | 575.3 [567.4–576.4] us (n=3) | 460.2 [453.9–461.1] us (n=3) | 621.3 [612.8–622.5] us (n=3) | 1972.4 [1945.3–1976.3] us (n=3) | 3155.8 [3112.4–3162.1] us (n=3) | 2761.3 [2723.4–2766.8] us (n=3) |
+| wf-aot-opt | LATLOAD | 31 [31–31] (n=3) | 372.4 [372.1–378.1] us (n=3) | 775.9 [775.3–787.8] us (n=3) | 620.7 [620.2–630.2] us (n=3) | 838.0 [837.3–850.8] us (n=3) | 2660.3 [2658.1–2700.9] us (n=3) | 4256.4 [4253.0–4321.5] us (n=3) | 3724.4 [3721.4–3781.3] us (n=3) |
 | wf-aot-opt | DNS | n/a (DNS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-opt | DNSALT | n/a (DNSALT has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-opt | LOSS | n/a (LOSS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -483,8 +492,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | wf-aot-opt | MIX | 52 [52–52] (n=3) | 5400.0 [5400.0–5400.0] us (n=3) | 11250.0 [11250.0–11250.0] us (n=3) | 9000.0 [9000.0–9000.0] us (n=3) | 12150.0 [12150.0–12150.0] us (n=3) | 11000.0 [11000.0–11000.0] us (n=3) | 17600.0 [17600.0–17600.0] us (n=3) | 15400.0 [15400.0–15400.0] us (n=3) |
 | wf-aot-opt | PERSIST | n/a (PERSIST has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | IDLE | n/a (IDLE has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-fdd-opt | LAT | 32 [32–32] (n=3) | 267.6 [266.7–267.7] us (n=3) | 557.4 [555.7–557.8] us (n=3) | 445.9 [444.5–446.2] us (n=3) | 602.0 [600.1–602.4] us (n=3) | 1911.2 [1905.2–1912.4] us (n=3) | 3057.9 [3048.3–3059.8] us (n=3) | 2675.6 [2667.3–2677.4] us (n=3) |
-| wf-fdd-opt | LATLOAD | 31 [31–31] (n=3) | 380.4 [373.6–381.5] us (n=3) | 792.4 [778.3–794.7] us (n=3) | 633.9 [622.6–635.8] us (n=3) | 855.8 [840.5–858.3] us (n=3) | 2716.9 [2668.4–2724.8] us (n=3) | 4347.0 [4269.4–4359.7] us (n=3) | 3803.6 [3735.7–3814.8] us (n=3) |
+| wf-fdd-opt | LAT | 32 [32–32] (n=3) | 272.0 [269.9–274.2] us (n=3) | 566.6 [562.4–571.2] us (n=3) | 453.3 [449.9–457.0] us (n=3) | 612.0 [607.4–616.9] us (n=3) | 1942.7 [1928.2–1958.5] us (n=3) | 3108.4 [3085.1–3133.6] us (n=3) | 2719.8 [2699.5–2741.9] us (n=3) |
+| wf-fdd-opt | LATLOAD | 31 [31–31] (n=3) | 375.9 [371.3–378.1] us (n=3) | 783.1 [773.5–787.7] us (n=3) | 626.5 [618.8–630.2] us (n=3) | 845.7 [835.4–850.8] us (n=3) | 2684.8 [2652.1–2700.8] us (n=3) | 4295.7 [4243.3–4321.4] us (n=3) | 3758.8 [3712.9–3781.2] us (n=3) |
 | wf-fdd-opt | DNS | n/a (DNS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | DNSALT | n/a (DNSALT has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | LOSS | n/a (LOSS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -492,14 +501,21 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | wf-fdd-opt | THRU | n/a (THRU has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | MIX | 52 [52–52] (n=3) | 5400.0 [5400.0–5400.0] us (n=3) | 11250.0 [11250.0–11250.0] us (n=3) | 9000.0 [9000.0–9000.0] us (n=3) | 12150.0 [12150.0–12150.0] us (n=3) | 11000.0 [11000.0–11000.0] us (n=3) | 17600.0 [17600.0–17600.0] us (n=3) | 15400.0 [15400.0–15400.0] us (n=3) |
 | wf-fdd-opt | PERSIST | n/a (PERSIST has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-nativeudp | LAT | n/a (LAT has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-nativeudp | LATLOAD | n/a (LATLOAD has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | IDLE | n/a (IDLE has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | LAT | 32 [32–32] (n=3) | 273.9 [273.3–274.9] us (n=3) | 570.6 [569.3–572.7] us (n=3) | 456.4 [455.4–458.2] us (n=3) | 616.2 [614.8–618.6] us (n=3) | 1956.2 [1951.8–1963.7] us (n=3) | 3129.9 [3122.9–3141.9] us (n=3) | 2738.7 [2732.5–2749.2] us (n=3) |
+| wf-aot-nativeudp | LATLOAD | 31 [31–31] (n=3) | 369.2 [368.9–375.2] us (n=3) | 769.2 [768.6–781.6] us (n=3) | 615.4 [614.8–625.3] us (n=3) | 830.8 [830.0–844.1] us (n=3) | 2637.4 [2635.1–2679.7] us (n=3) | 4219.8 [4216.1–4287.5] us (n=3) | 3692.4 [3689.1–3751.6] us (n=3) |
+| wf-aot-nativeudp | DNS | n/a (DNS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | DNSALT | n/a (DNSALT has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-nativeudp | LOSS | n/a (LOSS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | REL | 150 [150–150] (n=3) | 330.0 [330.0–330.0] us (n=3) | 687.5 [687.5–687.5] us (n=3) | 550.0 [550.0–550.0] us (n=3) | 742.5 [742.5–742.5] us (n=3) | 1400.0 [1400.0–1400.0] us (n=3) | 2240.0 [2240.0–2240.0] us (n=3) | 1960.0 [1960.0–1960.0] us (n=3) |
+| wf-aot-nativeudp | THRU | n/a (THRU has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | MIX | 52 [52–52] (n=3) | 5400.0 [5400.0–5400.0] us (n=3) | 11250.0 [11250.0–11250.0] us (n=3) | 9000.0 [9000.0–9000.0] us (n=3) | 12150.0 [12150.0–12150.0] us (n=3) | 11000.0 [11000.0–11000.0] us (n=3) | 17600.0 [17600.0–17600.0] us (n=3) | 15400.0 [15400.0–15400.0] us (n=3) |
+| wf-aot-nativeudp | PERSIST | n/a (PERSIST has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-dnsrelay | DNS | n/a (DNS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-dnsrelay | DNSALT | n/a (DNSALT has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | IDLE | n/a (IDLE has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| proxifyre | LAT | 32 [32–32] (n=3) | 269.6 [269.2–271.0] us (n=3) | 561.6 [560.8–564.6] us (n=3) | 449.3 [448.7–451.7] us (n=3) | 606.5 [605.7–609.8] us (n=3) | 1925.5 [1922.8–1935.8] us (n=3) | 3080.8 [3076.5–3097.2] us (n=3) | 2695.7 [2692.0–2710.1] us (n=3) |
-| proxifyre | LATLOAD | 31 [31–31] (n=3) | 373.9 [372.2–377.1] us (n=3) | 779.0 [775.3–785.7] us (n=3) | 623.2 [620.3–628.6] us (n=3) | 841.3 [837.3–848.6] us (n=3) | 2670.8 [2658.2–2693.8] us (n=3) | 4273.3 [4253.2–4310.1] us (n=3) | 3739.1 [3721.5–3771.4] us (n=3) |
+| proxifyre | LAT | 32 [32–32] (n=3) | 269.8 [268.9–271.4] us (n=3) | 562.0 [560.1–565.3] us (n=3) | 449.6 [448.1–452.3] us (n=3) | 606.9 [604.9–610.5] us (n=3) | 1926.8 [1920.4–1938.2] us (n=3) | 3082.9 [3072.7–3101.2] us (n=3) | 2697.5 [2688.6–2713.5] us (n=3) |
+| proxifyre | LATLOAD | 31 [31–31] (n=3) | 375.0 [373.2–375.3] us (n=3) | 781.4 [777.5–781.9] us (n=3) | 625.1 [622.0–625.5] us (n=3) | 843.9 [839.7–844.4] us (n=3) | 2678.9 [2665.9–2680.8] us (n=3) | 4286.3 [4265.4–4289.2] us (n=3) | 3750.5 [3732.2–3753.1] us (n=3) |
 | proxifyre | DNS | n/a (DNS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | DNSALT | n/a (DNSALT has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | LOSS | n/a (LOSS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -508,8 +524,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | proxifyre | MIX | 52 [52–52] (n=3) | 5400.0 [5400.0–5400.0] us (n=3) | 11250.0 [11250.0–11250.0] us (n=3) | 9000.0 [9000.0–9000.0] us (n=3) | 12150.0 [12150.0–12150.0] us (n=3) | 11000.0 [11000.0–11000.0] us (n=3) | 17600.0 [17600.0–17600.0] us (n=3) | 15400.0 [15400.0–15400.0] us (n=3) |
 | proxifyre | PERSIST | n/a (PERSIST has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifier | IDLE | n/a (IDLE has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| proxifier | LAT | 32 [32–32] (n=3) | 265.5 [265.5–271.9] us (n=3) | 553.2 [553.1–566.5] us (n=3) | 442.5 [442.4–453.2] us (n=3) | 597.4 [597.3–611.8] us (n=3) | 1896.6 [1896.2–1942.2] us (n=3) | 3034.6 [3033.9–3107.5] us (n=3) | 2655.2 [2654.7–2719.0] us (n=3) |
-| proxifier | LATLOAD | 31 [31–31] (n=3) | 385.4 [378.9–387.3] us (n=3) | 802.9 [789.3–806.9] us (n=3) | 642.3 [631.4–645.5] us (n=3) | 867.1 [852.4–871.4] us (n=3) | 2752.8 [2706.1–2766.5] us (n=3) | 4404.4 [4329.8–4426.4] us (n=3) | 3853.9 [3788.5–3873.1] us (n=3) |
+| proxifier | LAT | 32 [32–32] (n=3) | 279.5 [277.6–279.8] us (n=3) | 582.3 [578.4–583.0] us (n=3) | 465.9 [462.7–466.4] us (n=3) | 628.9 [624.7–629.6] us (n=3) | 1996.5 [1983.2–1998.7] us (n=3) | 3194.4 [3173.1–3198.0] us (n=3) | 2795.1 [2776.5–2798.2] us (n=3) |
+| proxifier | LATLOAD | 31 [31–31] (n=3) | 382.0 [376.8–385.6] us (n=3) | 795.9 [785.0–803.4] us (n=3) | 636.7 [628.0–642.7] us (n=3) | 859.5 [847.8–867.6] us (n=3) | 2728.7 [2691.4–2754.4] us (n=3) | 4365.9 [4306.2–4407.0] us (n=3) | 3820.1 [3767.9–3856.1] us (n=3) |
 | proxifier | DNS | n/a (DNS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifier | DNSALT | n/a (DNSALT has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifier | LOSS | n/a (LOSS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -518,8 +534,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | proxifier | MIX | 52 [52–52] (n=3) | 5400.0 [5400.0–5400.0] us (n=3) | 11250.0 [11250.0–11250.0] us (n=3) | 9000.0 [9000.0–9000.0] us (n=3) | 12150.0 [12150.0–12150.0] us (n=3) | 11000.0 [11000.0–11000.0] us (n=3) | 17600.0 [17600.0–17600.0] us (n=3) | 15400.0 [15400.0–15400.0] us (n=3) |
 | proxifier | PERSIST | n/a (PERSIST has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxybridge | IDLE | n/a (IDLE has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| proxybridge | LAT | 32 [32–32] (n=3) | 275.3 [270.5–277.0] us (n=3) | 573.6 [563.5–577.1] us (n=3) | 458.9 [450.8–461.7] us (n=3) | 619.5 [608.6–623.3] us (n=3) | 1966.5 [1931.9–1978.7] us (n=3) | 3146.4 [3091.1–3165.9] us (n=3) | 2753.1 [2704.7–2770.1] us (n=3) |
-| proxybridge | LATLOAD | 31 [31–31] (n=3) | 371.2 [369.3–376.1] us (n=3) | 773.4 [769.3–783.4] us (n=3) | 618.7 [615.4–626.8] us (n=3) | 835.3 [830.8–846.1] us (n=3) | 2651.8 [2637.6–2686.1] us (n=3) | 4242.8 [4220.1–4297.7] us (n=3) | 3712.5 [3692.6–3760.5] us (n=3) |
+| proxybridge | LAT | 32 [32–32] (n=3) | 267.7 [267.7–270.3] us (n=3) | 557.8 [557.8–563.1] us (n=3) | 446.2 [446.2–450.5] us (n=3) | 602.4 [602.4–608.2] us (n=3) | 1912.5 [1912.4–1930.8] us (n=3) | 3060.0 [3059.8–3089.2] us (n=3) | 2677.5 [2677.3–2703.1] us (n=3) |
+| proxybridge | LATLOAD | 31 [31–31] (n=3) | 375.5 [372.7–380.5] us (n=3) | 782.3 [776.4–792.8] us (n=3) | 625.8 [621.1–634.2] us (n=3) | 844.9 [838.5–856.2] us (n=3) | 2682.1 [2661.8–2718.2] us (n=3) | 4291.4 [4259.0–4349.1] us (n=3) | 3755.0 [3726.6–3805.4] us (n=3) |
 | proxybridge | DNS | n/a (DNS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxybridge | DNSALT | n/a (DNSALT has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxybridge | LOSS | n/a (LOSS has no tcp-connect histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -535,8 +551,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 |---|---|---|---|---|---|---|---|---|---|
 | control-pre | BASE | 400 [400–400] (n=3) | 372.0 [372.0–372.0] us (n=3) | 775.0 [775.0–775.0] us (n=3) | 620.0 [620.0–620.0] us (n=3) | 837.0 [837.0–837.0] us (n=3) | 1000.0 [1000.0–1000.0] us (n=3) | 1600.0 [1600.0–1600.0] us (n=3) | 1400.0 [1400.0–1400.0] us (n=3) |
 | wf-aot-opt | IDLE | n/a (IDLE has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-opt | LAT | 600 [600–600] (n=3) | 389.0 [386.3–394.5] us (n=3) | 810.3 [804.8–821.8] us (n=3) | 648.3 [643.8–657.4] us (n=3) | 875.1 [869.2–887.6] us (n=3) | 2917.2 [2897.2–2958.5] us (n=3) | 4667.5 [4635.5–4733.6] us (n=3) | 4084.0 [4056.1–4141.9] us (n=3) |
-| wf-aot-opt | LATLOAD | 6000 [6000–6000] (n=3) | 539.3 [535.2–541.8] us (n=3) | 1123.5 [1115.1–1128.7] us (n=3) | 898.8 [892.1–902.9] us (n=3) | 1213.4 [1204.3–1219.0] us (n=3) | 4044.6 [4014.3–4063.2] us (n=3) | 6471.3 [6422.8–6501.1] us (n=3) | 5662.4 [5620.0–5688.4] us (n=3) |
+| wf-aot-opt | LAT | 600 [600–600] (n=3) | 394.5 [389.1–395.3] us (n=3) | 821.8 [810.5–823.5] us (n=3) | 657.5 [648.4–658.8] us (n=3) | 887.6 [875.4–889.3] us (n=3) | 2958.6 [2917.9–2964.4] us (n=3) | 4733.7 [4668.7–4743.1] us (n=3) | 4142.0 [4085.1–4150.2] us (n=3) |
+| wf-aot-opt | LATLOAD | 6000 [6000–6000] (n=3) | 532.1 [531.6–540.2] us (n=3) | 1108.4 [1107.5–1125.4] us (n=3) | 886.8 [886.0–900.3] us (n=3) | 1197.1 [1196.2–1215.4] us (n=3) | 3990.4 [3987.2–4051.4] us (n=3) | 6384.6 [6379.5–6482.3] us (n=3) | 5586.5 [5582.0–5672.0] us (n=3) |
 | wf-aot-opt | DNS | n/a (DNS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-opt | DNSALT | n/a (DNSALT has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-opt | LOSS | n/a (LOSS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -545,8 +561,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | wf-aot-opt | MIX | 292 [292–292] (n=3) | 360.0 [360.0–360.0] us (n=3) | 750.0 [750.0–750.0] us (n=3) | 600.0 [600.0–600.0] us (n=3) | 810.0 [810.0–810.0] us (n=3) | 5000.0 [5000.0–5000.0] us (n=3) | 8000.0 [8000.0–8000.0] us (n=3) | 7000.0 [7000.0–7000.0] us (n=3) |
 | wf-aot-opt | PERSIST | 15 [15–15] (n=3) | 312.0 [312.0–312.0] us (n=3) | 650.0 [650.0–650.0] us (n=3) | 520.0 [520.0–520.0] us (n=3) | 702.0 [702.0–702.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | 10880.0 [10880.0–10880.0] us (n=3) | 9520.0 [9520.0–9520.0] us (n=3) |
 | wf-fdd-opt | IDLE | n/a (IDLE has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-fdd-opt | LAT | 600 [600–600] (n=3) | 382.2 [381.0–382.5] us (n=3) | 796.3 [793.8–796.8] us (n=3) | 637.1 [635.1–637.5] us (n=3) | 860.0 [857.3–860.6] us (n=3) | 2866.8 [2857.8–2868.6] us (n=3) | 4586.8 [4572.5–4589.8] us (n=3) | 4013.4 [4000.9–4016.0] us (n=3) |
-| wf-fdd-opt | LATLOAD | 6000 [6000–6000] (n=3) | 543.4 [533.7–545.0] us (n=3) | 1132.0 [1111.8–1135.3] us (n=3) | 905.6 [889.5–908.3] us (n=3) | 1222.6 [1200.8–1226.2] us (n=3) | 4075.3 [4002.6–4087.2] us (n=3) | 6520.5 [6404.1–6539.6] us (n=3) | 5705.4 [5603.6–5722.1] us (n=3) |
+| wf-fdd-opt | LAT | 600 [600–600] (n=3) | 388.6 [385.6–391.7] us (n=3) | 809.5 [803.4–816.0] us (n=3) | 647.6 [642.7–652.8] us (n=3) | 874.2 [867.7–881.3] us (n=3) | 2914.1 [2892.3–2937.7] us (n=3) | 4662.6 [4627.7–4700.4] us (n=3) | 4079.8 [4049.2–4112.8] us (n=3) |
+| wf-fdd-opt | LATLOAD | 6000 [6000–6000] (n=3) | 537.0 [530.4–540.2] us (n=3) | 1118.7 [1105.0–1125.4] us (n=3) | 894.9 [884.0–900.3] us (n=3) | 1208.2 [1193.4–1215.4] us (n=3) | 4027.2 [3978.1–4051.3] us (n=3) | 6443.6 [6365.0–6482.0] us (n=3) | 5638.1 [5569.4–5671.8] us (n=3) |
 | wf-fdd-opt | DNS | n/a (DNS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | DNSALT | n/a (DNSALT has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | LOSS | n/a (LOSS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -554,14 +570,21 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | wf-fdd-opt | THRU | n/a (THRU has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | MIX | 292 [292–292] (n=3) | 360.0 [360.0–360.0] us (n=3) | 750.0 [750.0–750.0] us (n=3) | 600.0 [600.0–600.0] us (n=3) | 810.0 [810.0–810.0] us (n=3) | 5000.0 [5000.0–5000.0] us (n=3) | 8000.0 [8000.0–8000.0] us (n=3) | 7000.0 [7000.0–7000.0] us (n=3) |
 | wf-fdd-opt | PERSIST | 15 [15–15] (n=3) | 312.0 [312.0–312.0] us (n=3) | 650.0 [650.0–650.0] us (n=3) | 520.0 [520.0–520.0] us (n=3) | 702.0 [702.0–702.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | 10880.0 [10880.0–10880.0] us (n=3) | 9520.0 [9520.0–9520.0] us (n=3) |
-| wf-aot-nativeudp | LAT | n/a (LAT has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-nativeudp | LATLOAD | n/a (LATLOAD has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | IDLE | n/a (IDLE has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | LAT | 600 [600–600] (n=3) | 391.2 [390.4–392.7] us (n=3) | 815.1 [813.3–818.2] us (n=3) | 652.1 [650.6–654.6] us (n=3) | 880.3 [878.3–883.7] us (n=3) | 2934.3 [2927.7–2945.5] us (n=3) | 4694.9 [4684.3–4712.8] us (n=3) | 4108.0 [4098.8–4123.7] us (n=3) |
+| wf-aot-nativeudp | LATLOAD | 6000 [6000–6000] (n=3) | 527.5 [527.0–535.9] us (n=3) | 1098.9 [1097.9–1116.5] us (n=3) | 879.1 [878.4–893.2] us (n=3) | 1186.8 [1185.8–1205.9] us (n=3) | 3956.1 [3952.6–4019.6] us (n=3) | 6329.8 [6324.1–6431.3] us (n=3) | 5538.5 [5533.6–5627.4] us (n=3) |
+| wf-aot-nativeudp | DNS | n/a (DNS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | DNSALT | n/a (DNSALT has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-nativeudp | LOSS | n/a (LOSS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | REL | n/a (REL has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | THRU | n/a (THRU has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | MIX | 292 [292–292] (n=3) | 360.0 [360.0–360.0] us (n=3) | 750.0 [750.0–750.0] us (n=3) | 600.0 [600.0–600.0] us (n=3) | 810.0 [810.0–810.0] us (n=3) | 5000.0 [5000.0–5000.0] us (n=3) | 8000.0 [8000.0–8000.0] us (n=3) | 7000.0 [7000.0–7000.0] us (n=3) |
+| wf-aot-nativeudp | PERSIST | 15 [15–15] (n=3) | 312.0 [312.0–312.0] us (n=3) | 650.0 [650.0–650.0] us (n=3) | 520.0 [520.0–520.0] us (n=3) | 702.0 [702.0–702.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | 10880.0 [10880.0–10880.0] us (n=3) | 9520.0 [9520.0–9520.0] us (n=3) |
 | wf-aot-dnsrelay | DNS | n/a (DNS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-dnsrelay | DNSALT | n/a (DNSALT has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | IDLE | n/a (IDLE has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| proxifyre | LAT | 600 [600–600] (n=3) | 385.1 [384.6–387.2] us (n=3) | 802.3 [801.2–806.6] us (n=3) | 641.8 [640.9–645.3] us (n=3) | 866.5 [865.3–871.1] us (n=3) | 2888.3 [2884.3–2903.6] us (n=3) | 4621.2 [4614.8–4645.8] us (n=3) | 4043.6 [4038.0–4065.1] us (n=3) |
-| proxifyre | LATLOAD | 6000 [6000–6000] (n=3) | 534.2 [531.6–538.8] us (n=3) | 1112.8 [1107.6–1122.4] us (n=3) | 890.3 [886.1–897.9] us (n=3) | 1201.9 [1196.2–1212.2] us (n=3) | 4006.2 [3987.4–4040.8] us (n=3) | 6409.9 [6379.8–6465.2] us (n=3) | 5608.7 [5582.3–5657.1] us (n=3) |
+| proxifyre | LAT | 600 [600–600] (n=3) | 385.4 [384.1–387.6] us (n=3) | 802.8 [800.2–807.6] us (n=3) | 642.3 [640.1–646.1] us (n=3) | 867.1 [864.2–872.2] us (n=3) | 2890.2 [2880.6–2907.4] us (n=3) | 4624.3 [4609.0–4651.8] us (n=3) | 4046.3 [4032.9–4070.3] us (n=3) |
+| proxifyre | LATLOAD | 6000 [6000–6000] (n=3) | 535.8 [533.2–536.1] us (n=3) | 1116.2 [1110.8–1117.0] us (n=3) | 893.0 [888.6–893.6] us (n=3) | 1205.5 [1199.6–1206.3] us (n=3) | 4018.4 [3998.8–4021.1] us (n=3) | 6429.4 [6398.1–6433.8] us (n=3) | 5625.7 [5598.3–5629.6] us (n=3) |
 | proxifyre | DNS | n/a (DNS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | DNSALT | n/a (DNSALT has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | LOSS | n/a (LOSS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -570,8 +593,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | proxifyre | MIX | 292 [292–292] (n=3) | 360.0 [360.0–360.0] us (n=3) | 750.0 [750.0–750.0] us (n=3) | 600.0 [600.0–600.0] us (n=3) | 810.0 [810.0–810.0] us (n=3) | 5000.0 [5000.0–5000.0] us (n=3) | 8000.0 [8000.0–8000.0] us (n=3) | 7000.0 [7000.0–7000.0] us (n=3) |
 | proxifyre | PERSIST | 15 [15–15] (n=3) | 312.0 [312.0–312.0] us (n=3) | 650.0 [650.0–650.0] us (n=3) | 520.0 [520.0–520.0] us (n=3) | 702.0 [702.0–702.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | 10880.0 [10880.0–10880.0] us (n=3) | 9520.0 [9520.0–9520.0] us (n=3) |
 | proxifier | IDLE | n/a (IDLE has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| proxifier | LAT | 600 [600–600] (n=3) | 379.3 [379.2–388.4] us (n=3) | 790.2 [790.1–809.2] us (n=3) | 632.2 [632.1–647.4] us (n=3) | 853.5 [853.3–874.0] us (n=3) | 2844.9 [2844.3–2913.2] us (n=3) | 4551.8 [4550.8–4661.2] us (n=3) | 3982.9 [3982.0–4078.5] us (n=3) |
-| proxifier | LATLOAD | 6000 [6000–6000] (n=3) | 550.6 [541.2–553.3] us (n=3) | 1147.0 [1127.5–1152.7] us (n=3) | 917.6 [902.0–922.2] us (n=3) | 1238.8 [1217.7–1244.9] us (n=3) | 4129.2 [4059.1–4149.7] us (n=3) | 6606.7 [6494.6–6639.5] us (n=3) | 5780.8 [5682.8–5809.6] us (n=3) |
+| proxifier | LAT | 600 [600–600] (n=3) | 399.3 [396.6–399.7] us (n=3) | 831.9 [826.3–832.8] us (n=3) | 665.5 [661.1–666.2] us (n=3) | 898.4 [892.4–899.4] us (n=3) | 2994.8 [2974.8–2998.1] us (n=3) | 4791.7 [4759.7–4797.0] us (n=3) | 4192.7 [4164.7–4197.3] us (n=3) |
+| proxifier | LATLOAD | 6000 [6000–6000] (n=3) | 545.7 [538.3–550.9] us (n=3) | 1136.9 [1121.4–1147.6] us (n=3) | 909.6 [897.1–918.1] us (n=3) | 1227.9 [1211.1–1239.5] us (n=3) | 4093.0 [4037.0–4131.5] us (n=3) | 6548.8 [6459.3–6610.5] us (n=3) | 5730.2 [5651.9–5784.1] us (n=3) |
 | proxifier | DNS | n/a (DNS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifier | DNSALT | n/a (DNSALT has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifier | LOSS | n/a (LOSS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -580,8 +603,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | proxifier | MIX | 292 [292–292] (n=3) | 360.0 [360.0–360.0] us (n=3) | 750.0 [750.0–750.0] us (n=3) | 600.0 [600.0–600.0] us (n=3) | 810.0 [810.0–810.0] us (n=3) | 5000.0 [5000.0–5000.0] us (n=3) | 8000.0 [8000.0–8000.0] us (n=3) | 7000.0 [7000.0–7000.0] us (n=3) |
 | proxifier | PERSIST | 15 [14–15] (n=3) | 312.0 [312.0–312.0] us (n=3) | 650.0 [650.0–650.0] us (n=3) | 520.0 [520.0–520.0] us (n=3) | 702.0 [702.0–702.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | 10880.0 [10880.0–10880.0] us (n=3) | 9520.0 [9520.0–9520.0] us (n=3) |
 | proxybridge | IDLE | n/a (IDLE has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| proxybridge | LAT | 600 [600–600] (n=3) | 393.3 [386.4–395.7] us (n=3) | 819.4 [805.0–824.4] us (n=3) | 655.5 [644.0–659.6] us (n=3) | 884.9 [869.4–890.4] us (n=3) | 2949.8 [2897.9–2968.0] us (n=3) | 4719.6 [4636.6–4748.8] us (n=3) | 4129.7 [4057.1–4155.2] us (n=3) |
-| proxybridge | LATLOAD | 6000 [6000–6000] (n=3) | 530.4 [527.5–537.2] us (n=3) | 1104.9 [1099.0–1119.2] us (n=3) | 883.9 [879.2–895.4] us (n=3) | 1193.3 [1186.9–1208.7] us (n=3) | 3977.6 [3956.4–4029.1] us (n=3) | 6364.2 [6330.2–6446.6] us (n=3) | 5568.7 [5538.9–5640.8] us (n=3) |
+| proxybridge | LAT | 600 [600–600] (n=3) | 382.5 [382.5–386.2] us (n=3) | 796.9 [796.8–804.5] us (n=3) | 637.5 [637.5–643.6] us (n=3) | 860.6 [860.6–868.9] us (n=3) | 2868.7 [2868.6–2896.2] us (n=3) | 4590.0 [4589.7–4633.9] us (n=3) | 4016.2 [4016.0–4054.6] us (n=3) |
+| proxybridge | LATLOAD | 6000 [6000–6000] (n=3) | 536.4 [532.4–543.6] us (n=3) | 1117.6 [1109.1–1132.6] us (n=3) | 894.0 [887.3–906.1] us (n=3) | 1207.0 [1197.8–1223.2] us (n=3) | 4023.2 [3992.8–4077.2] us (n=3) | 6437.1 [6388.4–6523.6] us (n=3) | 5632.5 [5589.9–5708.1] us (n=3) |
 | proxybridge | DNS | n/a (DNS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxybridge | DNSALT | n/a (DNSALT has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxybridge | LOSS | n/a (LOSS has no tcp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -597,8 +620,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 |---|---|---|---|---|---|---|---|---|---|
 | control-pre | BASE | 400 [400–400] (n=3) | 384.0 [384.0–384.0] us (n=3) | 800.0 [800.0–800.0] us (n=3) | 640.0 [640.0–640.0] us (n=3) | 864.0 [864.0–864.0] us (n=3) | 2400.0 [2400.0–2400.0] us (n=3) | 3840.0 [3840.0–3840.0] us (n=3) | 3360.0 [3360.0–3360.0] us (n=3) |
 | wf-aot-opt | IDLE | n/a (IDLE has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-opt | LAT | 600 [600–600] (n=3) | 408.4 [405.6–414.2] us (n=3) | 850.8 [845.0–862.9] us (n=3) | 680.7 [676.0–690.3] us (n=3) | 918.9 [912.6–931.9] us (n=3) | 3241.3 [3219.1–3287.2] us (n=3) | 5186.1 [5150.6–5259.6] us (n=3) | 4537.8 [4506.8–4602.1] us (n=3) |
-| wf-aot-opt | LATLOAD | 6000 [6000–6000] (n=3) | 566.2 [562.0–568.8] us (n=3) | 1179.7 [1170.8–1185.1] us (n=3) | 943.7 [936.7–948.1] us (n=3) | 1274.0 [1264.5–1279.9] us (n=3) | 4494.0 [4460.3–4514.6] us (n=3) | 7190.4 [7136.5–7223.4] us (n=3) | 6291.6 [6244.4–6320.5] us (n=3) |
+| wf-aot-opt | LAT | 600 [600–600] (n=3) | 414.2 [408.5–415.0] us (n=3) | 862.9 [851.1–864.6] us (n=3) | 690.3 [680.8–691.7] us (n=3) | 932.0 [919.1–933.8] us (n=3) | 3287.3 [3242.1–3293.8] us (n=3) | 5259.7 [5187.4–5270.1] us (n=3) | 4602.2 [4539.0–4611.3] us (n=3) |
+| wf-aot-opt | LATLOAD | 6000 [6000–6000] (n=3) | 558.7 [558.2–567.2] us (n=3) | 1163.9 [1162.9–1181.7] us (n=3) | 931.1 [930.3–945.3] us (n=3) | 1257.0 [1256.0–1276.2] us (n=3) | 4433.8 [4430.2–4501.6] us (n=3) | 7094.0 [7088.3–7202.5] us (n=3) | 6207.3 [6202.3–6302.2] us (n=3) |
 | wf-aot-opt | DNS | n/a (DNS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-opt | DNSALT | n/a (DNSALT has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-opt | LOSS | n/a (LOSS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -607,8 +630,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | wf-aot-opt | MIX | 2400 [2400–2400] (n=3) | 372.0 [372.0–372.0] us (n=3) | 775.0 [775.0–775.0] us (n=3) | 620.0 [620.0–620.0] us (n=3) | 837.0 [837.0–837.0] us (n=3) | 1000.0 [1000.0–1000.0] us (n=3) | 1600.0 [1600.0–1600.0] us (n=3) | 1400.0 [1400.0–1400.0] us (n=3) |
 | wf-aot-opt | PERSIST | n/a (PERSIST has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | IDLE | n/a (IDLE has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-fdd-opt | LAT | 600 [600–600] (n=3) | 401.3 [400.1–401.6] us (n=3) | 836.1 [833.5–836.7] us (n=3) | 668.9 [666.8–669.3] us (n=3) | 903.0 [900.2–903.6] us (n=3) | 3185.3 [3175.3–3187.3] us (n=3) | 5096.4 [5080.5–5099.7] us (n=3) | 4459.4 [4445.5–4462.3] us (n=3) |
-| wf-fdd-opt | LATLOAD | 6000 [6000–6000] (n=3) | 570.5 [560.4–572.2] us (n=3) | 1188.6 [1167.4–1192.1] us (n=3) | 950.9 [933.9–953.7] us (n=3) | 1283.7 [1260.8–1287.5] us (n=3) | 4528.1 [4447.3–4541.4] us (n=3) | 7245.0 [7115.7–7266.2] us (n=3) | 6339.4 [6226.2–6357.9] us (n=3) |
+| wf-fdd-opt | LAT | 600 [600–600] (n=3) | 408.0 [404.9–411.3] us (n=3) | 850.0 [843.6–856.8] us (n=3) | 680.0 [674.9–685.5] us (n=3) | 917.9 [911.1–925.4] us (n=3) | 3237.9 [3213.7–3264.2] us (n=3) | 5180.7 [5141.8–5222.7] us (n=3) | 4533.1 [4499.1–4569.8] us (n=3) |
+| wf-fdd-opt | LATLOAD | 6000 [6000–6000] (n=3) | 563.8 [556.9–567.2] us (n=3) | 1174.6 [1160.3–1181.6] us (n=3) | 939.7 [928.2–945.3] us (n=3) | 1268.6 [1253.1–1276.2] us (n=3) | 4474.7 [4420.1–4501.4] us (n=3) | 7159.5 [7072.2–7202.3] us (n=3) | 6264.6 [6188.2–6302.0] us (n=3) |
 | wf-fdd-opt | DNS | n/a (DNS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | DNSALT | n/a (DNSALT has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | LOSS | n/a (LOSS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -616,14 +639,21 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | wf-fdd-opt | THRU | n/a (THRU has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | MIX | 2400 [2400–2400] (n=3) | 372.0 [372.0–372.0] us (n=3) | 775.0 [775.0–775.0] us (n=3) | 620.0 [620.0–620.0] us (n=3) | 837.0 [837.0–837.0] us (n=3) | 1000.0 [1000.0–1000.0] us (n=3) | 1600.0 [1600.0–1600.0] us (n=3) | 1400.0 [1400.0–1400.0] us (n=3) |
 | wf-fdd-opt | PERSIST | n/a (PERSIST has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-nativeudp | LAT | 600 [600–600] (n=3) | 402.6 [401.9–406.8] us (n=3) | 838.7 [837.4–847.6] us (n=3) | 670.9 [669.9–678.1] us (n=3) | 905.8 [904.4–915.4] us (n=3) | 3194.9 [3190.0–3228.9] us (n=3) | 5111.8 [5104.0–5166.2] us (n=3) | 4472.8 [4466.0–4520.5] us (n=3) |
-| wf-aot-nativeudp | LATLOAD | 6000 [6000–6000] (n=3) | 573.6 [568.9–575.8] us (n=3) | 1194.9 [1185.3–1199.6] us (n=3) | 956.0 [948.2–959.7] us (n=3) | 1290.5 [1280.1–1295.6] us (n=3) | 4552.1 [4515.4–4569.9] us (n=3) | 7283.4 [7224.6–7311.9] us (n=3) | 6373.0 [6321.5–6397.9] us (n=3) |
+| wf-aot-nativeudp | IDLE | n/a (IDLE has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | LAT | 600 [600–600] (n=3) | 410.8 [409.9–412.4] us (n=3) | 855.8 [853.9–859.1] us (n=3) | 684.7 [683.1–687.3] us (n=3) | 924.3 [922.2–927.8] us (n=3) | 3260.3 [3253.0–3272.8] us (n=3) | 5216.6 [5204.8–5236.5] us (n=3) | 4564.5 [4554.2–4581.9] us (n=3) |
+| wf-aot-nativeudp | LATLOAD | 6000 [6000–6000] (n=3) | 553.9 [553.4–562.7] us (n=3) | 1153.9 [1152.8–1172.4] us (n=3) | 923.1 [922.3–937.9] us (n=3) | 1246.2 [1245.1–1266.2] us (n=3) | 4395.7 [4391.8–4466.2] us (n=3) | 7033.1 [7026.8–7145.9] us (n=3) | 6153.9 [6148.5–6252.7] us (n=3) |
+| wf-aot-nativeudp | DNS | n/a (DNS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | DNSALT | n/a (DNSALT has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-nativeudp | LOSS | n/a (LOSS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | REL | n/a (REL has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | THRU | n/a (THRU has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | MIX | 2400 [2400–2400] (n=3) | 372.0 [372.0–372.0] us (n=3) | 775.0 [775.0–775.0] us (n=3) | 620.0 [620.0–620.0] us (n=3) | 837.0 [837.0–837.0] us (n=3) | 1000.0 [1000.0–1000.0] us (n=3) | 1600.0 [1600.0–1600.0] us (n=3) | 1400.0 [1400.0–1400.0] us (n=3) |
+| wf-aot-nativeudp | PERSIST | n/a (PERSIST has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-dnsrelay | DNS | n/a (DNS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-dnsrelay | DNSALT | n/a (DNSALT has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | IDLE | n/a (IDLE has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| proxifyre | LAT | 600 [600–600] (n=3) | 404.4 [403.8–406.5] us (n=3) | 842.4 [841.2–846.9] us (n=3) | 673.9 [673.0–677.5] us (n=3) | 909.8 [908.5–914.6] us (n=3) | 3209.2 [3204.7–3226.3] us (n=3) | 5134.7 [5127.6–5162.0] us (n=3) | 4492.9 [4486.6–4516.8] us (n=3) |
-| proxifyre | LATLOAD | 6000 [6000–6000] (n=3) | 560.9 [558.2–565.7] us (n=3) | 1168.5 [1163.0–1178.6] us (n=3) | 934.8 [930.4–942.8] us (n=3) | 1262.0 [1256.0–1272.8] us (n=3) | 4451.3 [4430.4–4489.7] us (n=3) | 7122.1 [7088.6–7183.6] us (n=3) | 6231.9 [6202.6–6285.6] us (n=3) |
+| proxifyre | LAT | 600 [600–600] (n=3) | 404.6 [403.3–407.0] us (n=3) | 843.0 [840.2–848.0] us (n=3) | 674.4 [672.1–678.4] us (n=3) | 910.4 [907.4–915.8] us (n=3) | 3211.3 [3200.7–3230.4] us (n=3) | 5138.1 [5121.1–5168.6] us (n=3) | 4495.9 [4481.0–4522.6] us (n=3) |
+| proxifyre | LATLOAD | 6000 [6000–6000] (n=3) | 562.6 [559.8–563.0] us (n=3) | 1172.0 [1166.3–1172.8] us (n=3) | 937.6 [933.1–938.3] us (n=3) | 1265.8 [1259.6–1266.7] us (n=3) | 4464.9 [4443.1–4467.9] us (n=3) | 7143.8 [7109.0–7148.7] us (n=3) | 6250.8 [6220.3–6255.1] us (n=3) |
 | proxifyre | DNS | n/a (DNS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | DNSALT | n/a (DNSALT has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | LOSS | n/a (LOSS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -642,8 +672,8 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | proxifier | MIX | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) |
 | proxifier | PERSIST | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) | not carried (UDP bypassed) |
 | proxybridge | IDLE | n/a (IDLE has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| proxybridge | LAT | 600 [600–600] (n=3) | 413.0 [405.7–415.5] us (n=3) | 860.3 [845.2–865.7] us (n=3) | 688.3 [676.2–692.5] us (n=3) | 929.2 [912.8–934.9] us (n=3) | 3277.5 [3219.9–3297.8] us (n=3) | 5244.0 [5151.8–5276.5] us (n=3) | 4588.5 [4507.8–4616.9] us (n=3) |
-| proxybridge | LATLOAD | 6000 [6000–6000] (n=3) | 556.9 [553.9–564.1] us (n=3) | 1160.1 [1153.9–1175.2] us (n=3) | 928.1 [923.2–940.1] us (n=3) | 1253.0 [1246.3–1269.2] us (n=3) | 4419.6 [4396.0–4476.8] us (n=3) | 7071.4 [7033.5–7162.9] us (n=3) | 6187.4 [6154.3–6267.5] us (n=3) |
+| proxybridge | LAT | 600 [600–600] (n=3) | 401.6 [401.6–405.5] us (n=3) | 836.7 [836.7–844.7] us (n=3) | 669.4 [669.3–675.8] us (n=3) | 903.6 [903.6–912.3] us (n=3) | 3187.5 [3187.3–3218.0] us (n=3) | 5100.0 [5099.7–5148.7] us (n=3) | 4462.5 [4462.2–4505.1] us (n=3) |
+| proxybridge | LATLOAD | 6000 [6000–6000] (n=3) | 563.2 [559.0–570.8] us (n=3) | 1173.4 [1164.6–1189.2] us (n=3) | 938.7 [931.6–951.4] us (n=3) | 1267.3 [1257.7–1284.3] us (n=3) | 4470.2 [4436.4–4530.3] us (n=3) | 7152.3 [7098.3–7248.4] us (n=3) | 6258.3 [6211.0–6342.4] us (n=3) |
 | proxybridge | DNS | n/a (DNS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxybridge | DNSALT | n/a (DNSALT has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxybridge | LOSS | n/a (LOSS has no udp-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -678,9 +708,16 @@ Percentiles are read straight from the harness's histograms (`minUs`, `meanUs`, 
 | wf-fdd-opt | THRU | n/a (THRU has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-fdd-opt | MIX | 16 [16–16] (n=3) | 900.0 [900.0–900.0] us (n=3) | 1875.0 [1875.0–1875.0] us (n=3) | 1500.0 [1500.0–1500.0] us (n=3) | 2025.0 [2025.0–2025.0] us (n=3) | 5000.0 [5000.0–5000.0] us (n=3) | 8000.0 [8000.0–8000.0] us (n=3) | 7000.0 [7000.0–7000.0] us (n=3) |
 | wf-fdd-opt | PERSIST | n/a (PERSIST has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | IDLE | n/a (IDLE has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-nativeudp | LAT | n/a (LAT has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-nativeudp | LATLOAD | n/a (LATLOAD has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | DNS | 1000 [1000–1000] (n=3) | 420.0 [420.0–420.0] us (n=3) | 875.0 [875.0–875.0] us (n=3) | 700.0 [700.0–700.0] us (n=3) | 945.0 [945.0–945.0] us (n=3) | 1300.0 [1300.0–1300.0] us (n=3) | 2080.0 [2080.0–2080.0] us (n=3) | 1820.0 [1820.0–1820.0] us (n=3) |
+| wf-aot-nativeudp | DNSALT | 1000 [1000–1000] (n=3) | 420.0 [420.0–420.0] us (n=3) | 875.0 [875.0–875.0] us (n=3) | 700.0 [700.0–700.0] us (n=3) | 945.0 [945.0–945.0] us (n=3) | 1300.0 [1300.0–1300.0] us (n=3) | 2080.0 [2080.0–2080.0] us (n=3) | 1820.0 [1820.0–1820.0] us (n=3) |
 | wf-aot-nativeudp | LOSS | n/a (LOSS has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | REL | n/a (REL has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | THRU | n/a (THRU has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | MIX | 16 [16–16] (n=3) | 900.0 [900.0–900.0] us (n=3) | 1875.0 [1875.0–1875.0] us (n=3) | 1500.0 [1500.0–1500.0] us (n=3) | 2025.0 [2025.0–2025.0] us (n=3) | 5000.0 [5000.0–5000.0] us (n=3) | 8000.0 [8000.0–8000.0] us (n=3) | 7000.0 [7000.0–7000.0] us (n=3) |
+| wf-aot-nativeudp | PERSIST | n/a (PERSIST has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-dnsrelay | DNS | 1000 [1000–1000] (n=3) | 420.0 [420.0–420.0] us (n=3) | 875.0 [875.0–875.0] us (n=3) | 700.0 [700.0–700.0] us (n=3) | 945.0 [945.0–945.0] us (n=3) | 1300.0 [1300.0–1300.0] us (n=3) | 2080.0 [2080.0–2080.0] us (n=3) | 1820.0 [1820.0–1820.0] us (n=3) |
 | wf-aot-dnsrelay | DNSALT | 1000 [1000–1000] (n=3) | 420.0 [420.0–420.0] us (n=3) | 875.0 [875.0–875.0] us (n=3) | 700.0 [700.0–700.0] us (n=3) | 945.0 [945.0–945.0] us (n=3) | 1300.0 [1300.0–1300.0] us (n=3) | 2080.0 [2080.0–2080.0] us (n=3) | 1820.0 [1820.0–1820.0] us (n=3) |
 | proxifyre | IDLE | n/a (IDLE has no dns-rtt histogram) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
@@ -722,61 +759,68 @@ Per (row, arm). `proxy %vCPU` and `generator %vCPU` are computed **per process i
 | row | arm | proxy %vCPU | proxy %machine | generator %vCPU | headroom % | CPU ms / 1000 tx | CPU ms / 1000 datagrams | identities used/total | restarts | rejected samples | tx denominator | datagram denominator |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | control-pre | BASE | n/a (no product process was sampled) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-opt | IDLE | 4.38 [4.19–4.79] % (n=3) | 0.547 [0.523–0.599] % (n=3) | 2.51 [2.48–2.68] % (n=3) | 99.15 [99.07–99.17] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
-| wf-aot-opt | LAT | 47.42 [47.33–47.75] % (n=3) | 5.927 [5.916–5.969] % (n=3) | 31.98 [31.93–32.08] % (n=3) | 90.05 [90.03–90.07] % (n=3) | 11459.5000 [11437.2083–11539.6667] ms (n=3) | 22919.0000 [22874.4167–23079.3333] ms (n=3) | 1/1 | 0 | 1 | tcp.sent + udp.sent | udp.sent |
-| wf-aot-opt | LATLOAD | 47.52 [47.51–47.64] % (n=3) | 5.940 [5.939–5.955] % (n=3) | 31.92 [31.90–32.04] % (n=3) | 90.04 [90.04–90.06] % (n=3) | 1148.3333 [1148.1333–1151.3458] ms (n=3) | 2296.6667 [2296.2667–2302.6917] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
-| wf-aot-opt | DNS | 47.52 [47.39–47.61] % (n=3) | 5.940 [5.924–5.951] % (n=3) | 32.27 [31.95–32.37] % (n=3) | 90.00 [90.00–90.07] % (n=3) | 9028.2000 [9003.8500–9046.0500] ms (n=3) | 11285.2500 [11254.8125–11307.5625] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| wf-aot-opt | DNSALT | 47.64 [47.46–47.72] % (n=3) | 5.955 [5.933–5.965] % (n=3) | 32.05 [31.87–32.22] % (n=3) | 90.06 [90.03–90.07] % (n=3) | 9051.5000 [9018.2500–9066.6000] ms (n=3) | 11314.3750 [11272.8125–11333.2500] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| wf-aot-opt | LOSS | 47.44 [47.31–47.46] % (n=3) | 5.930 [5.914–5.933] % (n=3) | 32.08 [32.07–32.11] % (n=3) | 90.06 [90.06–90.07] % (n=3) | 2292.8333 [2286.5667–2294.0333] ms (n=3) | 2292.8333 [2286.5667–2294.0333] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
-| wf-aot-opt | REL | 47.23 [45.95–47.41] % (n=3) | 5.904 [5.744–5.926] % (n=3) | 31.88 [31.88–31.89] % (n=3) | 90.11 [90.09–90.27] % (n=3) | 91310.6667 [88836.0000–91652.6667] ms (n=3) | n/a (no datagram denominator) | 1/1, 2/2 | 1 | 0 | connectAttempts | n/a |
-| wf-aot-opt | THRU | 47.51 [47.51–47.68] % (n=3) | 5.938 [5.938–5.959] % (n=3) | 32.05 [31.73–32.22] % (n=3) | 90.01 [90.01–90.07] % (n=3) | 1880.5000 [1880.4687–1887.1667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
-| wf-aot-opt | MIX | 47.48 [47.30–47.71] % (n=3) | 5.935 [5.913–5.964] % (n=3) | 32.00 [31.85–32.10] % (n=3) | 90.10 [90.04–90.11] % (n=3) | 6019.8309 [5997.5130–6049.3010] ms (n=3) | 7715.4167 [7686.8125–7753.1875] ms (n=3) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | udp.sent |
-| wf-aot-opt | PERSIST | 47.62 [47.40–47.82] % (n=3) | 5.952 [5.925–5.977] % (n=3) | 32.11 [31.96–32.20] % (n=3) | 90.02 [90.02–90.05] % (n=3) | 920573.3333 [916416.6667–924456.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
-| wf-fdd-opt | IDLE | 4.15 [4.11–4.95] % (n=3) | 0.519 [0.513–0.619] % (n=3) | 3.03 [3.00–3.09] % (n=3) | 99.09 [99.00–99.10] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
-| wf-fdd-opt | LAT | 47.52 [47.48–47.56] % (n=3) | 5.940 [5.936–5.944] % (n=3) | 31.93 [31.82–32.04] % (n=3) | 90.07 [90.06–90.08] % (n=3) | 11483.8333 [11475.4167–11492.5417] ms (n=3) | 22967.6667 [22950.8333–22985.0833] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
-| wf-fdd-opt | LATLOAD | 47.47 [47.44–47.62] % (n=3) | 5.934 [5.930–5.952] % (n=3) | 31.87 [31.82–31.90] % (n=3) | 90.07 [90.07–90.08] % (n=3) | 1147.3083 [1146.3708–1150.7625] ms (n=3) | 2294.6167 [2292.7417–2301.5250] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
-| wf-fdd-opt | DNS | 47.50 [47.40–47.62] % (n=3) | 5.937 [5.925–5.952] % (n=3) | 32.01 [31.87–32.01] % (n=3) | 90.07 [90.06–90.08] % (n=3) | 9024.7000 [9006.1000–9047.0500] ms (n=3) | 11280.8750 [11257.6250–11308.8125] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| wf-fdd-opt | DNSALT | 47.45 [47.31–47.64] % (n=3) | 5.931 [5.914–5.955] % (n=3) | 31.72 [31.63–32.03] % (n=3) | 90.08 [90.05–90.11] % (n=3) | 9015.3000 [8989.6000–9051.7500] ms (n=3) | 11269.1250 [11237.0000–11314.6875] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| wf-fdd-opt | LOSS | 47.51 [47.48–47.56] % (n=3) | 5.939 [5.936–5.945] % (n=3) | 31.97 [31.96–32.03] % (n=3) | 90.06 [90.05–90.07] % (n=3) | 2296.2833 [2295.0750–2298.5917] ms (n=3) | 2296.2833 [2295.0750–2298.5917] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
-| wf-fdd-opt | REL | 47.38 [47.23–47.59] % (n=3) | 5.922 [5.903–5.949] % (n=3) | 31.98 [31.94–32.03] % (n=3) | 90.08 [90.05–90.10] % (n=3) | 91596.6667 [91305.0000–92012.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | connectAttempts | n/a |
-| wf-fdd-opt | THRU | 47.21 [47.16–47.41] % (n=3) | 5.901 [5.895–5.927] % (n=3) | 31.73 [31.71–32.06] % (n=3) | 90.08 [90.07–90.12] % (n=3) | 1868.7708 [1866.8021–1876.7396] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
-| wf-fdd-opt | MIX | 47.41 [47.20–47.45] % (n=3) | 5.926 [5.900–5.931] % (n=3) | 32.16 [32.12–32.24] % (n=3) | 90.04 [90.04–90.08] % (n=3) | 6010.5657 [5984.2978–6016.1573] ms (n=3) | 7703.5417 [7669.8750–7710.7083] ms (n=3) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | udp.sent |
-| wf-fdd-opt | PERSIST | 47.73 [47.67–47.74] % (n=3) | 5.966 [5.959–5.967] % (n=3) | 31.82 [31.71–31.87] % (n=3) | 90.06 [90.05–90.08] % (n=3) | 922746.6667 [921633.3333–922903.3333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
-| wf-aot-nativeudp | LAT | 47.68 [47.64–47.74] % (n=3) | 5.960 [5.955–5.968] % (n=3) | 31.87 [31.78–31.97] % (n=3) | 90.04 [90.04–90.06] % (n=3) | 23044.8333 [23027.0833–23074.8333] ms (n=3) | 23044.8333 [23027.0833–23074.8333] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
-| wf-aot-nativeudp | LATLOAD | 47.70 [47.44–47.87] % (n=3) | 5.962 [5.930–5.983] % (n=3) | 32.00 [31.94–32.02] % (n=3) | 90.04 [90.02–90.07] % (n=3) | 2305.4667 [2293.0917–2313.5333] ms (n=3) | 2305.4667 [2293.0917–2313.5333] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
-| wf-aot-nativeudp | LOSS | 47.56 [47.30–47.84] % (n=3) | 5.945 [5.913–5.980] % (n=3) | 32.02 [31.91–32.17] % (n=3) | 90.05 [90.00–90.10] % (n=3) | 2298.5833 [2286.2083–2312.1833] ms (n=3) | 2298.5833 [2286.2083–2312.1833] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
-| wf-aot-dnsrelay | DNS | 47.56 [47.46–47.60] % (n=3) | 5.945 [5.932–5.951] % (n=3) | 31.87 [31.67–31.90] % (n=3) | 90.06 [90.06–90.10] % (n=3) | 9035.7000 [9017.4000–9044.9500] ms (n=3) | 11294.6250 [11271.7500–11306.1875] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| wf-aot-dnsrelay | DNSALT | 47.39 [47.36–47.39] % (n=3) | 5.923 [5.920–5.924] % (n=3) | 31.77 [31.58–32.00] % (n=3) | 90.10 [90.08–90.13] % (n=3) | 9003.2000 [8998.9000–9004.8000] ms (n=3) | 11254.0000 [11248.6250–11256.0000] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| proxifyre | IDLE | 4.58 [4.07–4.76] % (n=3) | 0.573 [0.508–0.595] % (n=3) | 2.86 [2.62–2.90] % (n=3) | 99.13 [99.08–99.16] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
-| proxifyre | LAT | 47.21 [47.15–47.34] % (n=3) | 5.901 [5.894–5.918] % (n=3) | 32.28 [32.13–32.29] % (n=3) | 90.08 [90.05–90.09] % (n=3) | 11408.2500 [11394.1667–11440.7083] ms (n=3) | 22816.5000 [22788.3333–22881.4167] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
-| proxifyre | LATLOAD | 47.74 [47.64–47.91] % (n=3) | 5.967 [5.955–5.989] % (n=3) | 32.08 [32.01–32.16] % (n=3) | 90.00 [90.00–90.02] % (n=3) | 1153.6500 [1151.3667–1157.9250] ms (n=3) | 2307.3000 [2302.7333–2315.8500] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
-| proxifyre | DNS | 47.44 [47.41–47.45] % (n=3) | 5.930 [5.926–5.931] % (n=3) | 32.24 [32.10–32.26] % (n=3) | 90.04 [90.04–90.06] % (n=3) | 9014.0000 [9007.7000–9014.6000] ms (n=3) | 11267.5000 [11259.6250–11268.2500] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| proxifyre | DNSALT | 47.79 [47.70–47.83] % (n=3) | 5.974 [5.962–5.979] % (n=3) | 31.94 [31.85–31.96] % (n=3) | 90.03 [90.03–90.05] % (n=3) | 9080.6000 [9062.8000–9087.4500] ms (n=3) | 11350.7500 [11328.5000–11359.3125] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| proxifyre | LOSS | 47.74 [47.70–47.82] % (n=3) | 5.967 [5.963–5.978] % (n=3) | 32.22 [31.95–32.34] % (n=3) | 90.01 [89.99–90.03] % (n=3) | 2307.2333 [2305.7333–2311.3167] ms (n=3) | 2307.2333 [2305.7333–2311.3167] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
-| proxifyre | REL | 47.53 [47.42–47.61] % (n=3) | 5.941 [5.927–5.951] % (n=3) | 31.99 [31.90–32.08] % (n=3) | 90.04 [90.04–90.08] % (n=3) | 91894.6667 [91677.0000–92040.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | connectAttempts | n/a |
-| proxifyre | THRU | 47.97 [47.71–47.98] % (n=3) | 5.996 [5.963–5.997] % (n=3) | 31.82 [31.82–31.94] % (n=3) | 90.03 [90.01–90.06] % (n=3) | 1898.8125 [1888.4167–1899.1562] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
-| proxifyre | MIX | 47.38 [47.28–47.42] % (n=3) | 5.922 [5.910–5.927] % (n=3) | 32.10 [32.00–32.22] % (n=3) | 90.06 [90.06–90.08] % (n=3) | 6006.8921 [5994.4896–6012.2237] ms (n=3) | 7698.8333 [7682.9375–7705.6667] ms (n=3) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | udp.sent |
-| proxifyre | PERSIST | 47.42 [47.28–47.53] % (n=3) | 5.927 [5.910–5.942] % (n=3) | 32.15 [31.99–32.23] % (n=3) | 90.09 [90.05–90.09] % (n=3) | 916773.3333 [914093.3333–919006.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
-| proxifier | IDLE | 4.20 [4.14–4.38] % (n=3) | 0.525 [0.517–0.548] % (n=3) | 3.06 [2.85–3.10] % (n=3) | 99.10 [99.07–99.12] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
-| proxifier | LAT | 47.44 [47.30–47.48] % (n=3) | 5.930 [5.913–5.935] % (n=3) | 32.07 [31.94–32.14] % (n=3) | 90.08 [90.06–90.09] % (n=3) | 22928.8333 [22862.5833–22950.1667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | tcp.sent + udp.sent | n/a |
-| proxifier | LATLOAD | 47.54 [47.46–47.56] % (n=3) | 5.943 [5.933–5.945] % (n=3) | 32.07 [32.01–32.12] % (n=3) | 90.06 [90.05–90.06] % (n=3) | 2297.8833 [2294.1167–2298.7500] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | tcp.sent + udp.sent | n/a |
-| proxifier | DNS | 47.45 [47.24–47.60] % (n=3) | 5.932 [5.906–5.951] % (n=3) | 31.99 [31.84–32.09] % (n=3) | 90.11 [90.06–90.11] % (n=3) | 9016.4000 [8976.4500–9044.8000] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | sent (queries) | n/a |
-| proxifier | DNSALT | 47.67 [47.50–47.85] % (n=3) | 5.959 [5.938–5.982] % (n=3) | 31.89 [31.86–32.02] % (n=3) | 90.05 [90.04–90.06] % (n=3) | 9057.3000 [9025.9000–9092.1500] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | sent (queries) | n/a |
-| proxifier | LOSS | 47.08 [47.03–47.24] % (n=3) | 5.885 [5.878–5.905] % (n=3) | 32.00 [31.73–32.06] % (n=3) | 90.11 [90.09–90.15] % (n=3) | 2275.6833 [2272.9500–2283.3917] ms (n=3) | 2275.6833 [2272.9500–2283.3917] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
-| proxifier | REL | 47.43 [47.34–47.50] % (n=3) | 5.929 [5.918–5.938] % (n=3) | 31.99 [31.81–31.99] % (n=3) | 90.09 [90.08–90.10] % (n=3) | 91697.3333 [91531.3333–91837.3333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | connectAttempts | n/a |
-| proxifier | THRU | 47.25 [47.24–47.27] % (n=3) | 5.906 [5.906–5.909] % (n=3) | 32.18 [31.98–32.24] % (n=3) | 90.07 [90.06–90.09] % (n=3) | 1870.1250 [1870.1146–1871.0521] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
-| proxifier | MIX | 47.46 [47.32–47.51] % (n=3) | 5.933 [5.915–5.939] % (n=3) | 31.91 [31.84–32.03] % (n=3) | 90.07 [90.06–90.10] % (n=3) | 27382.9882 [27300.3698–27411.2426] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | n/a |
-| proxifier | PERSIST | 47.70 [47.67–47.73] % (n=3) | 5.963 [5.959–5.966] % (n=3) | 32.09 [31.85–32.19] % (n=3) | 90.02 [90.01–90.06] % (n=3) | 922240.0000 [921633.3333–922796.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
-| proxybridge | IDLE | 4.91 [4.25–5.11] % (n=3) | 0.614 [0.531–0.638] % (n=3) | 3.00 [2.92–3.22] % (n=3) | 99.01 [98.96–99.10] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
-| proxybridge | LAT | 47.64 [47.64–47.72] % (n=3) | 5.955 [5.954–5.965] % (n=3) | 32.13 [32.08–32.13] % (n=3) | 90.03 [90.03–90.03] % (n=3) | 11513.5000 [11511.8750–11531.7083] ms (n=3) | 23027.0000 [23023.7500–23063.4167] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
-| proxybridge | LATLOAD | 47.37 [47.27–47.54] % (n=3) | 5.921 [5.909–5.942] % (n=3) | 32.09 [32.08–32.22] % (n=3) | 90.07 [90.03–90.08] % (n=3) | 1144.6833 [1142.3458–1148.8750] ms (n=3) | 2289.3667 [2284.6917–2297.7500] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
-| proxybridge | DNS | 47.67 [47.37–48.13] % (n=3) | 5.958 [5.922–6.016] % (n=3) | 32.23 [32.17–32.34] % (n=3) | 90.01 [89.96–90.04] % (n=3) | 9056.7000 [9001.2500–9144.3500] ms (n=3) | 11320.8750 [11251.5625–11430.4375] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| proxybridge | DNSALT | 47.87 [47.71–48.15] % (n=3) | 5.984 [5.963–6.019] % (n=3) | 32.18 [32.14–32.28] % (n=3) | 89.97 [89.95–90.01] % (n=3) | 9095.7000 [9064.1000–9149.0500] ms (n=3) | 11369.6250 [11330.1250–11436.3125] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
-| proxybridge | LOSS | 47.45 [47.36–47.46] % (n=3) | 5.931 [5.920–5.932] % (n=3) | 32.17 [32.06–32.18] % (n=3) | 90.05 [90.05–90.07] % (n=3) | 2289.4917 [2287.0875–2291.8958] ms (n=2) | 2289.4917 [2287.0875–2291.8958] ms (n=2) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
-| proxybridge | REL | 47.82 [47.59–47.82] % (n=3) | 5.977 [5.949–5.978] % (n=3) | 32.12 [32.00–32.20] % (n=3) | 90.04 [90.02–90.04] % (n=3) | 92447.3333 [92007.3333–92454.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | connectAttempts | n/a |
-| proxybridge | THRU | 47.26 [47.21–47.40] % (n=3) | 5.908 [5.902–5.925] % (n=3) | 31.84 [31.77–32.13] % (n=3) | 90.12 [90.06–90.13] % (n=3) | 1870.7500 [1868.9167–1876.2083] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
-| proxybridge | MIX | 47.65 [47.58–47.77] % (n=3) | 5.956 [5.948–5.971] % (n=3) | 32.03 [32.02–32.09] % (n=3) | 90.04 [90.03–90.04] % (n=3) | 6071.0988 [6047.5130–16780.5198] ms (n=3) | 7750.8958 [7735.7813–7766.0104] ms (n=2) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | udp.sent |
-| proxybridge | PERSIST | 48.04 [47.89–48.05] % (n=3) | 6.005 [5.986–6.007] % (n=3) | 32.06 [32.02–32.21] % (n=3) | 89.99 [89.97–90.01] % (n=3) | 928773.3333 [925883.3333–929006.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
+| wf-aot-opt | IDLE | 4.29 [4.14–4.70] % (n=3) | 0.536 [0.518–0.587] % (n=3) | 2.80 [2.65–2.99] % (n=3) | 99.11 [99.04–99.15] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
+| wf-aot-opt | LAT | 47.25 [47.24–47.41] % (n=3) | 5.906 [5.905–5.927] % (n=3) | 32.04 [32.01–32.06] % (n=3) | 90.08 [90.07–90.09] % (n=3) | 11417.8333 [11416.3750–11458.2500] ms (n=3) | 22835.6667 [22832.7500–22916.5000] ms (n=3) | 1/1 | 0 | 1 | tcp.sent + udp.sent | udp.sent |
+| wf-aot-opt | LATLOAD | 47.58 [47.25–47.67] % (n=3) | 5.948 [5.906–5.959] % (n=3) | 31.88 [31.74–31.92] % (n=3) | 90.06 [90.05–90.12] % (n=3) | 1149.9250 [1141.8417–1152.1417] ms (n=3) | 2299.8500 [2283.6833–2304.2833] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
+| wf-aot-opt | DNS | 47.26 [47.25–47.28] % (n=3) | 5.908 [5.907–5.910] % (n=3) | 32.05 [31.84–32.08] % (n=3) | 90.08 [90.08–90.11] % (n=3) | 8979.5000 [8977.9500–8982.9500] ms (n=3) | 11224.3750 [11222.4375–11228.6875] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| wf-aot-opt | DNSALT | 47.45 [47.43–47.54] % (n=3) | 5.931 [5.928–5.943] % (n=3) | 31.99 [31.87–32.19] % (n=3) | 90.07 [90.03–90.09] % (n=3) | 9015.3000 [9011.1500–9033.4000] ms (n=3) | 11269.1250 [11263.9375–11291.7500] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| wf-aot-opt | LOSS | 47.58 [47.51–47.60] % (n=3) | 5.947 [5.938–5.950] % (n=3) | 31.99 [31.93–32.04] % (n=3) | 90.06 [90.05–90.07] % (n=3) | 2299.5500 [2296.1917–2300.6333] ms (n=3) | 2299.5500 [2296.1917–2300.6333] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
+| wf-aot-opt | REL | 47.23 [46.06–47.51] % (n=3) | 5.904 [5.758–5.939] % (n=3) | 31.85 [31.82–31.87] % (n=3) | 90.11 [90.08–90.26] % (n=3) | 91310.6667 [89059.0000–91850.6667] ms (n=3) | n/a (no datagram denominator) | 1/1, 2/2 | 1 | 0 | connectAttempts | n/a |
+| wf-aot-opt | THRU | 47.84 [47.55–47.95] % (n=3) | 5.981 [5.943–5.993] % (n=3) | 32.06 [32.05–32.06] % (n=3) | 90.01 [90.00–90.05] % (n=3) | 1893.8333 [1882.0000–1897.8333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
+| wf-aot-opt | MIX | 47.48 [47.39–47.50] % (n=3) | 5.935 [5.924–5.938] % (n=3) | 31.86 [31.78–32.04] % (n=3) | 90.10 [90.07–90.10] % (n=3) | 6019.8309 [6008.5338–6023.0332] ms (n=3) | 7715.4167 [7700.9375–7719.5208] ms (n=3) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | udp.sent |
+| wf-aot-opt | PERSIST | 47.53 [47.51–47.77] % (n=3) | 5.941 [5.939–5.972] % (n=3) | 31.97 [31.89–32.11] % (n=3) | 90.03 [90.02–90.05] % (n=3) | 918913.3333 [918613.3333–923626.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
+| wf-fdd-opt | IDLE | 4.04 [3.92–4.05] % (n=3) | 0.505 [0.490–0.507] % (n=3) | 2.97 [2.90–3.05] % (n=3) | 99.12 [99.11–99.15] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
+| wf-fdd-opt | LAT | 47.53 [47.38–47.56] % (n=3) | 5.941 [5.923–5.945] % (n=3) | 31.72 [31.63–31.91] % (n=3) | 90.09 [90.07–90.12] % (n=3) | 11485.2500 [11450.2917–11493.2500] ms (n=3) | 22970.5000 [22900.5833–22986.5000] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
+| wf-fdd-opt | LATLOAD | 47.41 [47.41–47.50] % (n=3) | 5.927 [5.926–5.938] % (n=3) | 32.00 [31.94–32.13] % (n=3) | 90.07 [90.05–90.08] % (n=3) | 1145.8333 [1145.6333–1148.0292] ms (n=3) | 2291.6667 [2291.2667–2296.0583] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
+| wf-fdd-opt | DNS | 47.54 [47.41–47.64] % (n=3) | 5.942 [5.926–5.954] % (n=3) | 31.98 [31.86–32.18] % (n=3) | 90.07 [90.04–90.08] % (n=3) | 9032.0000 [9007.1000–9050.7000] ms (n=3) | 11290.0000 [11258.8750–11313.3750] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| wf-fdd-opt | DNSALT | 47.45 [47.31–47.69] % (n=3) | 5.931 [5.913–5.961] % (n=3) | 32.33 [32.19–32.33] % (n=3) | 90.03 [90.00–90.06] % (n=3) | 9015.3000 [8988.4500–9061.1000] ms (n=3) | 11269.1250 [11235.5625–11326.3750] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| wf-fdd-opt | LOSS | 47.51 [47.40–47.57] % (n=3) | 5.939 [5.926–5.946] % (n=3) | 31.97 [31.84–32.01] % (n=3) | 90.06 [90.05–90.09] % (n=3) | 2296.2833 [2291.2083–2298.9833] ms (n=3) | 2296.2833 [2291.2083–2298.9833] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
+| wf-fdd-opt | REL | 47.38 [47.31–47.63] % (n=3) | 5.922 [5.913–5.954] % (n=3) | 31.98 [31.97–32.01] % (n=3) | 90.08 [90.05–90.09] % (n=3) | 91596.6667 [91458.3333–92085.3333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | connectAttempts | n/a |
+| wf-fdd-opt | THRU | 47.63 [47.42–47.64] % (n=3) | 5.953 [5.927–5.955] % (n=3) | 32.40 [32.18–32.41] % (n=3) | 90.05 [90.02–90.05] % (n=3) | 1885.1875 [1876.9792–1885.6042] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
+| wf-fdd-opt | MIX | 47.49 [47.47–47.52] % (n=3) | 5.937 [5.933–5.940] % (n=3) | 32.16 [32.08–32.17] % (n=3) | 90.04 [90.04–90.06] % (n=3) | 6021.7490 [6018.1892–6024.7399] ms (n=3) | 7717.8750 [7713.3125–7721.7083] ms (n=3) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | udp.sent |
+| wf-fdd-opt | PERSIST | 47.43 [47.36–47.58] % (n=3) | 5.928 [5.919–5.947] % (n=3) | 31.97 [31.90–32.00] % (n=3) | 90.07 [90.06–90.08] % (n=3) | 916920.0000 [915543.3333–919833.3333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
+| wf-aot-nativeudp | IDLE | 4.05 [3.98–4.28] % (n=3) | 0.506 [0.498–0.535] % (n=3) | 2.80 [2.76–2.98] % (n=3) | 99.11 [99.10–99.13] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
+| wf-aot-nativeudp | LAT | 47.49 [47.47–47.54] % (n=3) | 5.937 [5.934–5.942] % (n=3) | 32.00 [31.94–32.02] % (n=3) | 90.07 [90.06–90.07] % (n=3) | 11477.3333 [11472.9583–11488.6250] ms (n=3) | 22954.6667 [22945.9167–22977.2500] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
+| wf-aot-nativeudp | LATLOAD | 47.64 [47.61–47.79] % (n=3) | 5.955 [5.951–5.974] % (n=3) | 32.21 [32.12–32.26] % (n=3) | 90.01 [89.99–90.03] % (n=3) | 1151.2583 [1150.5583–1154.9708] ms (n=3) | 2302.5167 [2301.1167–2309.9417] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
+| wf-aot-nativeudp | DNS | 47.44 [47.27–47.47] % (n=3) | 5.930 [5.909–5.934] % (n=3) | 31.94 [31.88–31.95] % (n=3) | 90.08 [90.08–90.10] % (n=3) | 9014.2000 [8981.7000–9019.8500] ms (n=3) | 11267.7500 [11227.1250–11274.8125] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| wf-aot-nativeudp | DNSALT | 47.49 [47.31–47.60] % (n=3) | 5.936 [5.913–5.950] % (n=3) | 31.96 [31.83–32.02] % (n=3) | 90.05 [90.05–90.10] % (n=3) | 9022.5000 [8988.1000–9043.5000] ms (n=3) | 11278.1250 [11235.1250–11304.3750] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| wf-aot-nativeudp | LOSS | 47.46 [47.45–47.66] % (n=3) | 5.932 [5.932–5.958] % (n=3) | 32.05 [31.92–32.09] % (n=3) | 90.05 [90.05–90.06] % (n=3) | 2293.7167 [2293.5833–2303.7083] ms (n=3) | 2293.7167 [2293.5833–2303.7083] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
+| wf-aot-nativeudp | REL | 47.24 [47.17–47.42] % (n=3) | 5.905 [5.896–5.928] % (n=3) | 32.26 [32.16–32.28] % (n=3) | 90.08 [90.05–90.08] % (n=3) | 91333.3333 [91187.0000–91687.0000] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | connectAttempts | n/a |
+| wf-aot-nativeudp | THRU | 47.60 [47.30–47.81] % (n=3) | 5.950 [5.912–5.976] % (n=3) | 32.30 [32.06–32.47] % (n=3) | 89.97 [89.97–90.06] % (n=3) | 1884.1250 [1872.1250–1892.3333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
+| wf-aot-nativeudp | MIX | 47.58 [47.51–47.65] % (n=3) | 5.947 [5.939–5.956] % (n=3) | 31.92 [31.90–31.99] % (n=3) | 90.06 [90.04–90.07] % (n=3) | 6032.3147 [6024.3173–6041.6125] ms (n=3) | 7731.4167 [7721.1667–7743.3333] ms (n=3) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | udp.sent |
+| wf-aot-nativeudp | PERSIST | 47.53 [47.46–47.60] % (n=3) | 5.941 [5.933–5.950] % (n=3) | 32.07 [31.87–32.08] % (n=3) | 90.07 [90.05–90.08] % (n=3) | 918866.6667 [917596.6667–920260.0000] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
+| wf-aot-dnsrelay | DNS | 48.11 [47.98–48.19] % (n=3) | 6.013 [5.998–6.024] % (n=3) | 32.01 [31.89–32.15] % (n=3) | 89.99 [89.98–89.99] % (n=3) | 9140.2000 [9116.4500–9156.6000] ms (n=3) | 11425.2500 [11395.5625–11445.7500] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| wf-aot-dnsrelay | DNSALT | 47.41 [47.24–47.45] % (n=3) | 5.926 [5.905–5.931] % (n=3) | 31.84 [31.75–31.97] % (n=3) | 90.10 [90.09–90.11] % (n=3) | 9007.1000 [8976.2500–9015.5500] ms (n=3) | 11258.8750 [11220.3125–11269.4375] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| proxifyre | IDLE | 4.21 [3.98–4.49] % (n=3) | 0.526 [0.498–0.561] % (n=3) | 3.05 [2.83–3.08] % (n=3) | 99.09 [99.09–99.12] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
+| proxifyre | LAT | 47.52 [47.50–47.58] % (n=3) | 5.941 [5.937–5.948] % (n=3) | 32.25 [32.12–32.30] % (n=3) | 90.03 [90.02–90.04] % (n=3) | 11485.0833 [11478.5000–11498.6250] ms (n=3) | 22970.1667 [22957.0000–22997.2500] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
+| proxifyre | LATLOAD | 47.50 [47.39–47.66] % (n=3) | 5.938 [5.924–5.958] % (n=3) | 31.99 [31.96–32.09] % (n=3) | 90.06 [90.03–90.08] % (n=3) | 1147.9833 [1145.3167–1151.8875] ms (n=3) | 2295.9667 [2290.6333–2303.7750] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
+| proxifyre | DNS | 47.11 [47.10–47.25] % (n=3) | 5.889 [5.888–5.907] % (n=3) | 31.76 [31.56–31.91] % (n=3) | 90.14 [90.11–90.17] % (n=3) | 8950.9000 [8949.3000–8978.4000] ms (n=3) | 11188.6250 [11186.6250–11223.0000] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| proxifyre | DNSALT | 47.83 [47.72–48.00] % (n=3) | 5.978 [5.965–5.999] % (n=3) | 31.77 [31.72–31.81] % (n=3) | 90.04 [90.02–90.07] % (n=3) | 9087.2000 [9067.0000–9119.2000] ms (n=3) | 11359.0000 [11333.7500–11399.0000] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| proxifyre | LOSS | 47.40 [47.32–47.43] % (n=3) | 5.925 [5.915–5.929] % (n=3) | 32.06 [31.98–32.17] % (n=3) | 90.07 [90.06–90.07] % (n=3) | 2290.9833 [2287.0583–2292.5083] ms (n=3) | 2290.9833 [2287.0583–2292.5083] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
+| proxifyre | REL | 47.66 [47.34–47.78] % (n=3) | 5.958 [5.918–5.973] % (n=3) | 32.18 [32.16–32.20] % (n=3) | 90.01 [90.00–90.06] % (n=3) | 92143.3333 [91531.0000–92379.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | connectAttempts | n/a |
+| proxifyre | THRU | 47.22 [47.13–47.39] % (n=3) | 5.903 [5.891–5.924] % (n=3) | 32.09 [32.06–32.22] % (n=3) | 90.08 [90.06–90.08] % (n=3) | 1869.1250 [1865.5833–1875.9271] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
+| proxifyre | MIX | 47.30 [47.28–47.31] % (n=3) | 5.913 [5.910–5.913] % (n=3) | 32.14 [32.05–32.27] % (n=3) | 90.07 [90.05–90.08] % (n=3) | 5997.1391 [5994.7497–5998.0819] ms (n=3) | 7686.3333 [7683.2708–7687.5417] ms (n=3) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | udp.sent |
+| proxifyre | PERSIST | 47.70 [47.51–47.88] % (n=3) | 5.962 [5.939–5.985] % (n=3) | 31.80 [31.76–31.93] % (n=3) | 90.07 [90.03–90.09] % (n=3) | 922106.6667 [918526.6667–925693.3333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
+| proxifier | IDLE | 4.48 [4.07–4.91] % (n=3) | 0.560 [0.509–0.614] % (n=3) | 2.80 [2.72–2.94] % (n=3) | 99.11 [99.03–99.15] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
+| proxifier | LAT | 47.51 [47.39–47.54] % (n=3) | 5.939 [5.923–5.942] % (n=3) | 31.89 [31.83–32.01] % (n=3) | 90.07 [90.06–90.10] % (n=3) | 22965.1667 [22903.4167–22975.8333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | tcp.sent + udp.sent | n/a |
+| proxifier | LATLOAD | 47.50 [47.50–47.70] % (n=3) | 5.937 [5.937–5.963] % (n=3) | 32.25 [32.17–32.28] % (n=3) | 90.02 [90.00–90.04] % (n=3) | 2295.7333 [2295.6167–2305.5667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | tcp.sent + udp.sent | n/a |
+| proxifier | DNS | 47.76 [47.57–47.83] % (n=3) | 5.970 [5.946–5.978] % (n=3) | 32.00 [31.78–32.09] % (n=3) | 90.01 [90.01–90.07] % (n=3) | 9073.7000 [9037.7000–9086.8500] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | sent (queries) | n/a |
+| proxifier | DNSALT | 47.62 [47.35–47.72] % (n=3) | 5.953 [5.918–5.965] % (n=3) | 31.95 [31.67–32.12] % (n=3) | 90.05 [90.02–90.12] % (n=3) | 9048.7000 [8995.9000–9066.6500] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | sent (queries) | n/a |
+| proxifier | LOSS | 47.16 [47.13–47.21] % (n=3) | 5.896 [5.891–5.902] % (n=3) | 32.13 [32.07–32.17] % (n=3) | 90.09 [90.08–90.10] % (n=3) | 2279.6167 [2277.9333–2281.9500] ms (n=3) | 2279.6167 [2277.9333–2281.9500] ms (n=3) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
+| proxifier | REL | 47.66 [47.51–47.68] % (n=3) | 5.957 [5.939–5.960] % (n=3) | 32.15 [31.98–32.28] % (n=3) | 90.03 [90.02–90.05] % (n=3) | 92140.0000 [91859.6667–92182.3333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | connectAttempts | n/a |
+| proxifier | THRU | 47.60 [47.40–47.80] % (n=3) | 5.950 [5.925–5.975] % (n=3) | 32.16 [31.95–32.40] % (n=3) | 90.03 [90.00–90.06] % (n=3) | 1884.0833 [1876.0937–1892.0208] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
+| proxifier | MIX | 47.44 [47.37–47.61] % (n=3) | 5.930 [5.921–5.951] % (n=3) | 31.99 [31.97–32.10] % (n=3) | 90.04 [90.04–90.07] % (n=3) | 27367.7515 [27329.5118–27465.0148] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | n/a |
+| proxifier | PERSIST | 47.30 [47.29–47.32] % (n=3) | 5.912 [5.911–5.915] % (n=3) | 32.10 [32.09–32.20] % (n=3) | 90.07 [90.06–90.07] % (n=3) | 914440.0000 [914260.0000–914823.3333] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
+| proxybridge | IDLE | 4.12 [4.09–4.27] % (n=3) | 0.515 [0.511–0.533] % (n=3) | 2.69 [2.37–3.03] % (n=3) | 99.16 [99.11–99.18] % (n=3) | n/a (no denominator) | n/a (no datagram denominator) | 1/1 | 0 | 0 | n/a | n/a |
+| proxybridge | LAT | 47.39 [47.35–47.52] % (n=3) | 5.924 [5.919–5.939] % (n=3) | 32.23 [32.11–32.24] % (n=3) | 90.04 [90.03–90.07] % (n=3) | 11453.1667 [11443.1667–11482.8750] ms (n=3) | 22906.3333 [22886.3333–22965.7500] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
+| proxybridge | LATLOAD | 47.12 [47.09–47.30] % (n=3) | 5.890 [5.886–5.912] % (n=3) | 32.06 [31.88–32.15] % (n=3) | 90.10 [90.09–90.11] % (n=3) | 1138.7167 [1137.9417–1143.0167] ms (n=3) | 2277.4333 [2275.8833–2286.0333] ms (n=3) | 1/1 | 0 | 0 | tcp.sent + udp.sent | udp.sent |
+| proxybridge | DNS | 47.59 [47.36–47.67] % (n=3) | 5.949 [5.920–5.958] % (n=3) | 31.81 [31.64–32.00] % (n=3) | 90.08 [90.04–90.13] % (n=3) | 9042.0000 [8997.9500–9056.7500] ms (n=3) | 11302.5000 [11247.4375–11320.9375] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| proxybridge | DNSALT | 47.25 [47.19–47.56] % (n=3) | 5.906 [5.898–5.945] % (n=3) | 32.06 [31.92–32.21] % (n=3) | 90.06 [90.04–90.09] % (n=3) | 8977.6000 [8965.1500–9037.1000] ms (n=3) | 11222.0000 [11206.4375–11296.3750] ms (n=3) | 1/1 | 0 | 0 | sent (queries) | udp.sent (queries) |
+| proxybridge | LOSS | 47.60 [47.52–47.75] % (n=3) | 5.950 [5.940–5.969] % (n=3) | 32.31 [32.18–32.32] % (n=3) | 90.03 [90.00–90.04] % (n=3) | 2307.8833 [2304.2167–2311.5500] ms (n=2) | 2307.8833 [2304.2167–2311.5500] ms (n=2) | 1/1 | 0 | 0 | sent (datagrams) | sent (datagrams) |
+| proxybridge | REL | 47.46 [47.28–47.49] % (n=3) | 5.932 [5.910–5.936] % (n=3) | 31.88 [31.74–32.03] % (n=3) | 90.09 [90.09–90.10] % (n=3) | 91749.3333 [91403.6667–91814.0000] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | connectAttempts | n/a |
+| proxybridge | THRU | 46.99 [46.87–47.22] % (n=3) | 5.873 [5.859–5.902] % (n=3) | 31.91 [31.82–32.10] % (n=3) | 90.14 [90.09–90.16] % (n=3) | 1859.9375 [1855.2708–1868.9375] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | frames | n/a |
+| proxybridge | MIX | 47.34 [47.31–47.40] % (n=3) | 5.918 [5.914–5.925] % (n=3) | 31.91 [31.78–31.92] % (n=3) | 90.09 [90.08–90.11] % (n=3) | 6002.4057 [5998.7321–16692.4751] ms (n=3) | 7688.3750 [7686.0208–7690.7292] ms (n=2) | 1/1 | 0 | 0 | page.messages + bulk.frames + dns.sent + udp.sent | udp.sent |
+| proxybridge | PERSIST | 47.40 [47.39–47.62] % (n=3) | 5.926 [5.923–5.953] % (n=3) | 32.02 [31.88–32.19] % (n=3) | 90.08 [90.03–90.09] % (n=3) | 916480.0000 [916136.6667–920686.6667] ms (n=3) | n/a (no datagram denominator) | 1/1 | 0 | 0 | requests | n/a |
 | control-post | BASE | n/a (no product process was sampled) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 
 **CPU scope: user-mode only — no kernel-mode work outside the process.** Every cell above is the sampled process's own `Process.TotalProcessorTime`: the time the operating system charges to *that process's* threads, its user time plus the privileged time those threads spend in system calls. Work the product causes in kernel mode outside those threads is measured nowhere in this table: interrupt, DPC and ISR time in a kernel data path, packets a driver serves on behalf of other processes, and machine-wide CPU are all outside the number. A kernel-heavy product can therefore show a low cell here while still costing the machine real CPU; compare the columns as equally-scoped process CPU, never as a product's total cost.
@@ -790,13 +834,13 @@ Steady state = the product's own readable samples after the first 5.0 s of each 
 | row | passes | steady samples/pass | private p50 | private p95 | working set p50 | working set p95 | peak working set | slope all arms (MiB/min) | slope verdict | slope MIX (MiB/min) | slope MIX verdict |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | control-pre | 0 | n/a (no steady-state product samples) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-opt | 3 | 210 [210–210] (n=3) | 92.44 [91.88–92.63] MiB (n=3) | 94.63 [94.03–94.72] MiB (n=3) | 46.22 [45.94–46.32] MiB (n=3) | 47.31 [47.02–47.36] MiB (n=3) | 47.35 [47.28–47.40] MiB (n=3) | 0.034 [-0.022–0.151] MiB/min (n=3) | mixed across passes: does not leak (CI includes zero) [-0.10–0.17]; does not leak (CI includes zero) [-0.22–0.07]; leaks (CI above zero) [0.17–0.37] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
-| wf-fdd-opt | 3 | 210 [210–210] (n=3) | 92.11 [91.85–92.13] MiB (n=3) | 94.34 [93.53–94.42] MiB (n=3) | 46.06 [45.93–46.06] MiB (n=3) | 47.17 [46.77–47.21] MiB (n=3) | 47.21 [47.07–47.25] MiB (n=3) | -0.286 [-0.406–-0.237] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-0.30–-0.07]; does not leak (CI below zero) [-0.39–-0.18]; does not leak (CI below zero) [-0.64–-0.41] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
-| wf-aot-nativeudp | 3 | 75 [75–75] (n=3) | 92.49 [92.21–92.54] MiB (n=3) | 94.17 [93.13–94.51] MiB (n=3) | 46.25 [46.10–46.27] MiB (n=3) | 47.09 [46.56–47.25] MiB (n=3) | 47.12 [46.60–47.29] MiB (n=3) | -1.418 [-1.764–-1.077] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-0.83–-0.64]; does not leak (CI below zero) [-1.94–-0.90]; does not leak (CI below zero) [-2.98–-1.24] | n/a (no MIX samples) | n/a |
-| wf-aot-dnsrelay | 3 | 30 [30–30] (n=3) | 92.36 [92.00–92.93] MiB (n=3) | 93.44 [93.17–93.54] MiB (n=3) | 46.18 [46.00–46.46] MiB (n=3) | 46.72 [46.59–46.77] MiB (n=3) | 46.74 [46.61–46.79] MiB (n=3) | 5.359 [2.391–5.838] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-0.71–-0.44]; leaks (CI above zero) [4.50–6.22]; leaks (CI above zero) [5.30–7.33] | n/a (no MIX samples) | n/a |
-| proxifyre | 3 | 210 [210–210] (n=3) | 92.73 [92.34–93.04] MiB (n=3) | 94.58 [94.55–94.65] MiB (n=3) | 46.37 [46.17–46.52] MiB (n=3) | 47.29 [47.27–47.33] MiB (n=3) | 47.34 [47.33–47.37] MiB (n=3) | -0.196 [-0.240–0.120] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-0.37–-0.03]; does not leak (CI below zero) [-0.44–-0.12]; leaks (CI above zero) [0.28–0.59] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
-| proxifier | 3 | 210 [210–210] (n=3) | 92.69 [92.65–93.04] MiB (n=3) | 94.73 [94.56–94.73] MiB (n=3) | 46.34 [46.32–46.52] MiB (n=3) | 47.36 [47.28–47.37] MiB (n=3) | 47.41 [47.33–47.41] MiB (n=3) | 0.261 [0.203–0.379] MiB/min (n=3) | mixed across passes: leaks (CI above zero) [0.01–0.28]; leaks (CI above zero) [0.11–0.41]; leaks (CI above zero) [0.32–0.67] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
-| proxybridge | 3 | 210 [210–210] (n=3) | 92.26 [92.13–92.60] MiB (n=3) | 94.64 [94.32–94.67] MiB (n=3) | 46.13 [46.07–46.30] MiB (n=3) | 47.32 [47.16–47.33] MiB (n=3) | 47.37 [47.21–47.38] MiB (n=3) | -0.039 [-0.172–0.193] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-0.46–-0.15]; does not leak (CI includes zero) [-0.15–0.07]; leaks (CI above zero) [0.26–0.59] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
+| wf-aot-opt | 3 | 210 [210–210] (n=3) | 92.44 [92.27–92.90] MiB (n=3) | 94.57 [94.01–94.59] MiB (n=3) | 46.22 [46.13–46.45] MiB (n=3) | 47.29 [47.00–47.29] MiB (n=3) | 47.34 [47.28–47.34] MiB (n=3) | 0.160 [0.072–0.214] MiB/min (n=3) | mixed across passes: does not leak (CI includes zero) [-0.15–0.12]; leaks (CI above zero) [0.03–0.29]; leaks (CI above zero) [0.17–0.37] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
+| wf-fdd-opt | 3 | 210 [210–210] (n=3) | 92.13 [92.12–92.59] MiB (n=3) | 94.42 [94.38–94.51] MiB (n=3) | 46.07 [46.06–46.29] MiB (n=3) | 47.21 [47.19–47.26] MiB (n=3) | 47.26 [47.23–47.31] MiB (n=3) | -0.153 [-0.339–-0.042] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-0.29–-0.01]; does not leak (CI below zero) [-0.64–-0.41]; does not leak (CI includes zero) [-0.08–0.21] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
+| wf-aot-nativeudp | 3 | 210 [210–210] (n=3) | 92.48 [92.47–92.85] MiB (n=3) | 94.51 [94.49–94.62] MiB (n=3) | 46.24 [46.23–46.43] MiB (n=3) | 47.25 [47.25–47.31] MiB (n=3) | 47.31 [47.30–47.36] MiB (n=3) | -0.138 [-0.351–0.007] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-0.25–-0.02]; does not leak (CI below zero) [-0.69–-0.44]; leaks (CI above zero) [0.01–0.30] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
+| wf-aot-dnsrelay | 3 | 30 [30–30] (n=3) | 92.84 [91.93–92.91] MiB (n=3) | 93.30 [92.56–93.68] MiB (n=3) | 46.42 [45.97–46.46] MiB (n=3) | 46.65 [46.28–46.84] MiB (n=3) | 46.67 [46.30–46.86] MiB (n=3) | -1.491 [-2.697–2.306] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-1.78–-1.20]; does not leak (CI below zero) [-4.59–-3.21]; leaks (CI above zero) [5.12–7.09] | n/a (no MIX samples) | n/a |
+| proxifyre | 3 | 210 [210–210] (n=3) | 92.21 [91.46–92.53] MiB (n=3) | 93.06 [92.98–93.90] MiB (n=3) | 46.10 [45.73–46.26] MiB (n=3) | 46.53 [46.49–46.95] MiB (n=3) | 46.62 [46.60–47.01] MiB (n=3) | -0.059 [-0.060–0.000188] MiB/min (n=3) | mixed across passes: does not leak (CI includes zero) [-0.00–0.12]; does not leak (CI includes zero) [-0.16–0.04]; does not leak (CI includes zero) [-0.20–0.09] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
+| proxifier | 3 | 210 [210–210] (n=3) | 92.13 [91.49–92.38] MiB (n=3) | 94.07 [93.23–94.18] MiB (n=3) | 46.06 [45.74–46.19] MiB (n=3) | 47.04 [46.61–47.09] MiB (n=3) | 47.08 [46.66–47.13] MiB (n=3) | 0.260 [-0.015–0.274] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-0.42–-0.16]; leaks (CI above zero) [0.18–0.40]; leaks (CI above zero) [0.20–0.32] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
+| proxybridge | 3 | 210 [210–210] (n=3) | 92.50 [92.46–93.03] MiB (n=3) | 94.56 [94.40–94.70] MiB (n=3) | 46.25 [46.23–46.52] MiB (n=3) | 47.28 [47.20–47.35] MiB (n=3) | 47.33 [47.25–47.40] MiB (n=3) | 0.060 [-0.099–0.074] MiB/min (n=3) | mixed across passes: does not leak (CI below zero) [-0.38–-0.14]; does not leak (CI includes zero) [-0.03–0.21]; does not leak (CI includes zero) [-0.07–0.19] | 0.234 [0.234–0.234] MiB/min (n=3) | leaks (CI above zero) [0.23–0.23] |
 | control-post | 0 | n/a (no steady-state product samples) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 
 ## 8. UDP accuracy detail
@@ -812,7 +856,7 @@ Arms that carry the full UDP classification: `LOSS` (whole arm) and `MIX` (`metr
 | wf-fdd-opt | LOSS | 3 | proxied (UDP-over-TCP v2) | 6000 [6000–6000] (n=3) | 6000 [5997–6000] (n=3) | 0 [0–1] (n=3) | 0 [0–2] (n=3) | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 | 0.0000 [0.0000–0.0500] % (n=3) | 0.0000 [0.0000–0.0500] % (n=3) | < 3/6000 = 0.0500 % | < 3/6000 = 0.0500 % | < 3/6000 | 200.0 [200.0–200.0] (n=3) | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) |
 | wf-fdd-opt | MIX | 3 | proxied (UDP-over-TCP v2) | 2400 [2400–2400] (n=3) | 2400 [2399–2400] (n=3) | 0 [0–0.5] (n=3) | 0 [0–0.5] (n=3) | < 3/2400 | < 3/2400 | < 3/2400 | < 3/2400 | < 3/2400 | < 3/2400 | 0.0000 [0.0000–0.0416] % (n=3) | n/a (MIX does not publish strictLossRate) | n/a (MIX does not publish corruptRate) | n/a (MIX does not publish reorderRate) | 0 [0–0] (n=3) | 200.0 [200.0–200.0] (n=3) | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) |
 | wf-aot-nativeudp | LOSS | 3 | proxied (native UDP relay) | 6000 [6000–6000] (n=3) | 6000 [6000–6000] (n=3) | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 = 0.0500 % | < 3/6000 = 0.0500 % | < 3/6000 = 0.0500 % | < 3/6000 = 0.0500 % | < 3/6000 | 200.0 [200.0–200.0] (n=3) | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) |
-| wf-aot-nativeudp | MIX | 0 | proxied (native UDP relay) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) | n/a (not measured in this row: MIX is not in the udp only plan) |
+| wf-aot-nativeudp | MIX | 3 | proxied (native UDP relay) | 2400 [2400–2400] (n=3) | 2400 [2400–2400] (n=3) | < 3/2400 | < 3/2400 | < 3/2400 | < 3/2400 | < 3/2400 | < 3/2400 | < 3/2400 | < 3/2400 | < 3/2400 = 0.1250 % | n/a (MIX does not publish strictLossRate) | n/a (MIX does not publish corruptRate) | n/a (MIX does not publish reorderRate) | 0 [0–0] (n=3) | 200.0 [200.0–200.0] (n=3) | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) |
 | wf-aot-dnsrelay | LOSS | 0 | proxied (UDP-over-TCP v2) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) | n/a (not measured in this row: LOSS is not in the dns only plan) |
 | wf-aot-dnsrelay | MIX | 0 | proxied (UDP-over-TCP v2) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) | n/a (not measured in this row: MIX is not in the dns only plan) |
 | proxifyre | LOSS | 3 | proxied (native UDP relay) | 6000 [6000–6000] (n=3) | 5998 [5987–5999] (n=3) | 0 [0–5] (n=3) | 0 [0–7] (n=3) | < 3/6000 | < 3/6000 | < 3/6000 | < 3/6000 | 0 [0–2] (n=3) | 0 [0–1] (n=3) | 0.0000 [0.0000–0.2000] % (n=3) | 0.0000 [0.0000–0.2000] % (n=3) | < 3/6000 = 0.0500 % | < 3/6000 = 0.0500 % | 0 [0–1] (n=3) | 200.0 [200.0–225.0] (n=3) | direct via the product's hardcoded port-53 pass-through |
@@ -831,7 +875,7 @@ Arms that carry the full UDP classification: `LOSS` (whole arm) and `MIX` (`metr
 | control-pre | n/a | n/a | n/a | n/a |
 | wf-aot-opt | 6000 [6000–6000] (n=3) | 6000 [6000–6000] (n=3) | 2400 [2400–2400] (n=3) | n/a |
 | wf-fdd-opt | 6000 [6000–6000] (n=3) | 6000 [6000–6000] (n=3) | 2400 [2400–2400] (n=3) | n/a |
-| wf-aot-nativeudp | 6000 [6000–6000] (n=3) | 6000 [6000–6000] (n=3) | n/a | n/a |
+| wf-aot-nativeudp | 6000 [6000–6000] (n=3) | 6000 [6000–6000] (n=3) | 2400 [2400–2400] (n=3) | n/a |
 | wf-aot-dnsrelay | n/a | n/a | n/a | n/a |
 | proxifyre | 6000 [6000–6000] (n=3) | 6000 [6000–6000] (n=3) | 2400 [2400–2400] (n=3) | n/a |
 | proxifier | 6000 [6000–6000] (n=3) | 6000 [6000–6000] (n=3) | 2400 [2400–2400] (n=3) | n/a |
@@ -849,7 +893,7 @@ Arms that carry the full UDP classification: `LOSS` (whole arm) and `MIX` (`metr
 | control-pre | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | not measured in this row: DNS is not in the BASE only plan |
 | wf-aot-opt | 53 | 40053 | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | port-53 arm is not cross-product comparable (direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy)); use DNSALT |
 | wf-fdd-opt | 53 | 40053 | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | port-53 arm is not cross-product comparable (direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy)); use DNSALT |
-| wf-aot-nativeudp | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | not measured in this row: DNS is not in the udp only plan |
+| wf-aot-nativeudp | 53 | 40053 | direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy) | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | port-53 arm is not cross-product comparable (direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy)); use DNSALT |
 | wf-aot-dnsrelay | 53 | 40053 | relayed through the proxy | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | comparable on DNSALT |
 | proxifyre | 53 | 40053 | direct via the product's hardcoded port-53 pass-through | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | 80.0 % | 100.0000 [100.0000–100.0000] pp (n=3) | 700.0 [700.0–700.0] us (n=3) | port-53 arm is not cross-product comparable (direct via the product's hardcoded port-53 pass-through); use DNSALT |
 | proxifier | 53 | 40053 | direct (the product cannot carry UDP at all) | 80.0 % | not carried (UDP bypassed) | not carried (UDP bypassed) | 80.0 % | not carried (UDP bypassed) | not carried (UDP bypassed) | excluded from DNS-latency comparisons: UDP bypassed |
@@ -865,7 +909,7 @@ Arms that carry the full UDP classification: `LOSS` (whole arm) and `MIX` (`metr
 | control-pre | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) | n/a (not measured in this row: PERSIST is not in the BASE only plan) |
 | wf-aot-opt | 15.0 [15.0–15.0] (n=3) | 15.0 [15.0–15.0] (n=3) | 100.0 [100.0–100.0] % (n=3) | 0.0 [0.0–0.0] (n=3) | pass1: yes; pass2: yes; pass3: yes | 3.0 [3.0–3.0] s (n=3) | 3.0 [3.0–3.0] s (n=3) | 520.0 [520.0–520.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | held the connection across the idle gap |
 | wf-fdd-opt | 15.0 [15.0–15.0] (n=3) | 15.0 [15.0–15.0] (n=3) | 100.0 [100.0–100.0] % (n=3) | 0.0 [0.0–0.0] (n=3) | pass1: yes; pass2: yes; pass3: yes | 3.0 [3.0–3.0] s (n=3) | 3.0 [3.0–3.0] s (n=3) | 520.0 [520.0–520.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | held the connection across the idle gap |
-| wf-aot-nativeudp | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) | n/a (not measured in this row: PERSIST is not in the udp only plan) |
+| wf-aot-nativeudp | 15.0 [15.0–15.0] (n=3) | 15.0 [15.0–15.0] (n=3) | 100.0 [100.0–100.0] % (n=3) | 0.0 [0.0–0.0] (n=3) | pass1: yes; pass2: yes; pass3: yes | 3.0 [3.0–3.0] s (n=3) | 3.0 [3.0–3.0] s (n=3) | 520.0 [520.0–520.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | held the connection across the idle gap |
 | wf-aot-dnsrelay | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) | n/a (not measured in this row: PERSIST is not in the dns only plan) |
 | proxifyre | 15.0 [15.0–15.0] (n=3) | 15.0 [15.0–15.0] (n=3) | 100.0 [100.0–100.0] % (n=3) | 0.0 [0.0–0.0] (n=3) | pass1: yes; pass2: yes; pass3: yes | 3.0 [3.0–3.0] s (n=3) | 3.0 [3.0–3.0] s (n=3) | 520.0 [520.0–520.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | held the connection across the idle gap |
 | proxifier | 15.0 [15.0–15.0] (n=3) | 15.0 [14.5–15.0] (n=3) | 100.0 [96.7–100.0] % (n=3) | 0.0 [0.0–0.5] (n=3) | pass1: NO; pass2: yes; pass3: yes | 3.0 [3.0–3.0] s (n=3) | 3.0 [3.0–3.2] s (n=3) | 520.0 [520.0–520.0] us (n=3) | 6800.0 [6800.0–6800.0] us (n=3) | BROKE THE IDLE CONNECTION in pass1; reconnects>0 |
@@ -881,7 +925,7 @@ From the `REL` arm. Outcome rates divide by `metrics.connectAttempts` (never by 
 | control-pre | 0 | n/a (not measured in this row: REL is not in the BASE only plan) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | wf-aot-opt | 3 | 50.0000 [50.0000–50.0000] % (n=3) | 24.6667 [24.6667–24.6667] % (n=3) | 25.3333 [25.3333–25.3333] % (n=3) | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | 150.0 [150.0–150.0] (n=3) | 150.0 [150.0–151.0] (n=3) | pass3: connectAttempts 150 != scheduledAttempts 152, work in flight at teardown | 0.520 [0.520–0.520] ms (n=3) | 0.840 [0.840–0.840] ms (n=3) |
 | wf-fdd-opt | 3 | 50.0000 [50.0000–50.0000] % (n=3) | 24.6667 [24.6667–24.6667] % (n=3) | 25.3333 [25.3333–25.3333] % (n=3) | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | 150.0 [150.0–150.0] (n=3) | 150.0 [150.0–150.0] (n=3) | connectAttempts == scheduledAttempts | 0.520 [0.520–0.520] ms (n=3) | 0.840 [0.840–0.840] ms (n=3) |
-| wf-aot-nativeudp | 0 | n/a (not measured in this row: REL is not in the udp only plan) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-nativeudp | 3 | 50.0000 [50.0000–50.0000] % (n=3) | 24.6667 [24.6667–24.6667] % (n=3) | 25.3333 [25.3333–25.3333] % (n=3) | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | 150.0 [150.0–150.0] (n=3) | 150.0 [150.0–150.0] (n=3) | connectAttempts == scheduledAttempts | 0.520 [0.520–0.520] ms (n=3) | 0.840 [0.840–0.840] ms (n=3) |
 | wf-aot-dnsrelay | 0 | n/a (not measured in this row: REL is not in the dns only plan) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | proxifyre | 3 | 50.0000 [50.0000–50.0000] % (n=3) | 24.6667 [24.6667–24.6667] % (n=3) | 25.3333 [25.3333–25.3333] % (n=3) | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | 150.0 [150.0–150.0] (n=3) | 150.0 [150.0–150.0] (n=3) | connectAttempts == scheduledAttempts | 0.520 [0.520–0.520] ms (n=3) | 0.840 [0.840–0.840] ms (n=3) |
 | proxifier | 3 | 50.0000 [50.0000–50.0000] % (n=3) | 24.6667 [24.6667–24.6667] % (n=3) | 25.3333 [25.3333–25.3333] % (n=3) | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | < 3/150 = 2.0000 % | 150.0 [150.0–150.0] (n=3) | 150.0 [150.0–150.0] (n=3) | connectAttempts == scheduledAttempts | 0.520 [0.520–0.520] ms (n=3) | 0.840 [0.840–0.840] ms (n=3) |
@@ -895,13 +939,13 @@ Each full-plan row that supports it runs a second phase in `dual/`: a `proxied` 
 | row | passes | directLeak | proxied LAT tcp-rtt p50 | direct LAT tcp-rtt p50 | direct / best - 1 | proxied LOSS lossRate | direct LOSS lossRate | direct - best (pp) | shape | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
 | control-pre | 0 | n/a (no dual phase: the row's plan is BASE only) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| wf-aot-opt | 3 | 0 | 646.4 [644.2–655.8] us (n=3) | 664.1 [657.7–667.7] us (n=3) | 4.22 % | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 | declared parameters match | no leak observed; direct lane within the pre-declared band of the best row |
-| wf-fdd-opt | 3 | 2 | 662.9 [648.2–664.6] us (n=3) | 637.2 [634.6–642.4] us (n=3) | 0.00 % | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 | declared parameters match | CORRECTNESS FAILURE: directLeak=2 |
-| wf-aot-nativeudp | 0 | n/a (no dual phase: the row's plan is udp only) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| wf-aot-opt | 3 | 0 | 639.9 [638.5–643.2] us (n=3) | 654.7 [653.0–656.0] us (n=3) | 3.07 % | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 | declared parameters match | no leak observed; direct lane within the pre-declared band of the best row |
+| wf-fdd-opt | 3 | 2 | 642.4 [638.0–649.2] us (n=3) | 647.5 [642.7–652.3] us (n=3) | 1.94 % | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 | declared parameters match | CORRECTNESS FAILURE: directLeak=2 |
+| wf-aot-nativeudp | 3 | 0 | 645.8 [639.8–657.4] us (n=3) | 637.7 [634.6–641.9] us (n=3) | 0.39 % | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 | declared parameters match | no leak observed; direct lane within the pre-declared band of the best row |
 | wf-aot-dnsrelay | 0 | n/a (no dual phase: the row's plan is dns only) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| proxifyre | 3 | 0 | 649.7 [641.0–654.1] us (n=3) | 650.9 [647.0–652.2] us (n=3) | 2.16 % | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 | declared parameters match | no leak observed; direct lane within the pre-declared band of the best row |
-| proxifier | 3 | 0 | 654.1 [650.9–656.5] us (n=3) | 753.6 [744.4–758.0] us (n=3) | 18.27 % | 0.0000 [0.0000–0.0000] pp (n=3) | 1.2000 [1.2000–1.2000] pp (n=3) | 1.2000 | declared parameters match | PATH INTERFERENCE: the direct lane is 18.3 % slower than the best direct lane |
-| proxybridge | 3 | 0 | 667.5 [657.6–667.9] us (n=3) | 642.1 [641.7–653.9] us (n=3) | 0.77 % | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 | declared parameters match | no leak observed; direct lane within the pre-declared band of the best row |
+| proxifyre | 3 | 0 | 665.0 [659.3–665.5] us (n=3) | 652.3 [645.2–653.8] us (n=3) | 2.68 % | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 | declared parameters match | no leak observed; direct lane within the pre-declared band of the best row |
+| proxifier | 3 | 0 | 639.3 [638.9–643.9] us (n=3) | 745.7 [743.0–750.1] us (n=3) | 17.40 % | 0.0000 [0.0000–0.0000] pp (n=3) | 1.2000 [1.2000–1.2000] pp (n=3) | 1.2000 | declared parameters match | PATH INTERFERENCE: the direct lane is 17.4 % slower than the best direct lane |
+| proxybridge | 3 | 0 | 636.7 [633.7–650.1] us (n=3) | 635.2 [631.5–638.3] us (n=3) | 0.00 % | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 [0.0000–0.0000] pp (n=3) | 0.0000 | declared parameters match | no leak observed; direct lane within the pre-declared band of the best row |
 | control-post | 0 | n/a (no dual phase: the row's plan is BASE only) | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 
 ## 13. Control block comparison (`control-pre` vs `control-post`)
@@ -932,9 +976,9 @@ The ledger is the target's own account of what arrived, written independently of
 
 | pass | ledger | records | record types | labels | attribution used | unparsable |
 |---|---|---|---|---|---|---|
-| pass1 | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl | 7306 | dnsSummary=6, error=3, targetSummary=3, tcp=5161, tcpSummary=3, udpSummary=2130 | control-post-p1 x40, control-post-p2 x40, control-post-p3 x40, control-pre-p1 x40 … (37 labels in all) | 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it | 0 |
-| pass2 | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl | 7306 | dnsSummary=6, error=3, targetSummary=3, tcp=5161, tcpSummary=3, udpSummary=2130 | control-post-p1 x40, control-post-p2 x40, control-post-p3 x40, control-pre-p1 x40 … (37 labels in all) | 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it | 0 |
-| pass3 | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl | 7306 | dnsSummary=6, error=3, targetSummary=3, tcp=5161, tcpSummary=3, udpSummary=2130 | control-post-p1 x40, control-post-p2 x40, control-post-p3 x40, control-pre-p1 x40 … (37 labels in all) | 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it | 0 |
+| pass1 | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl | 8554 | dnsSummary=6, error=3, targetSummary=3, tcp=6169, tcpSummary=3, udpSummary=2370 | control-post-p1 x40, control-post-p2 x40, control-post-p3 x40, control-pre-p1 x40 … (39 labels in all) | 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-dual-direct, wf-aot-nativeudp-dual-proxied, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it | 0 |
+| pass2 | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl | 8554 | dnsSummary=6, error=3, targetSummary=3, tcp=6169, tcpSummary=3, udpSummary=2370 | control-post-p1 x40, control-post-p2 x40, control-post-p3 x40, control-pre-p1 x40 … (39 labels in all) | 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-dual-direct, wf-aot-nativeudp-dual-proxied, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it | 0 |
+| pass3 | /tmp/wf-synth/ledger-main.jsonl, /tmp/wf-synth/ledger-direct.jsonl | 8554 | dnsSummary=6, error=3, targetSummary=3, tcp=6169, tcpSummary=3, udpSummary=2370 | control-post-p1 x40, control-post-p2 x40, control-post-p3 x40, control-pre-p1 x40 … (39 labels in all) | 2 ledger(s); the ledger's own label (control-post-p1, control-post-p2, control-post-p3, control-pre-p1, control-pre-p2, control-pre-p3, pass1-target, pass2-target, pass3-target, proxifier-dual-direct, proxifier-dual-proxied, proxifier-p1, proxifier-p2, proxifier-p3, proxifyre-dual-direct, proxifyre-dual-proxied, proxifyre-p1, proxifyre-p2, proxifyre-p3, proxybridge-dual-direct, proxybridge-dual-proxied, proxybridge-p1, proxybridge-p2, proxybridge-p3, wf-aot-nativeudp-dual-direct, wf-aot-nativeudp-dual-proxied, wf-aot-nativeudp-p1, wf-aot-nativeudp-p2, wf-aot-nativeudp-p3, wf-aot-opt-dual-direct, wf-aot-opt-dual-proxied, wf-aot-opt-p1, wf-aot-opt-p2, wf-aot-opt-p3, wf-fdd-opt-dual-direct, wf-fdd-opt-dual-proxied, wf-fdd-opt-p1, wf-fdd-opt-p2, wf-fdd-opt-p3) selects the run, then the arm's UTC window bounds it | 0 |
 
 ### 14.2 Client vs target accounting, per (pass, run, arm)
 
@@ -986,9 +1030,18 @@ The ledger is the target's own account of what arrived, written independently of
 | pass1 | proxybridge/proxied | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
 | pass1 | proxybridge/direct | LAT | 32 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:40077 | 0 |
 | pass1 | proxybridge/direct | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:40077 | 0 |
-| pass1 | wf-aot-nativeudp | LAT | 0 | n/a | n/a | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
-| pass1 | wf-aot-nativeudp | LATLOAD | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
-| pass1 | wf-aot-nativeudp | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass1 | wf-aot-nativeudp | IDLE | 1 | n/a | n/a | 0 | n/a | n/a | 0 | — | 0 |
+| pass1 | wf-aot-nativeudp | LAT | 33 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
+| pass1 | wf-aot-nativeudp | LATLOAD | 31 | 31 | ok | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass1 | wf-aot-nativeudp | LOSS | 1 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass1 | wf-aot-nativeudp | REL | 151 | 150 | ok | 0 | n/a | n/a | 0 | — | 0 |
+| pass1 | wf-aot-nativeudp | THRU | 5 | 4 | ok | 0 | n/a | n/a | 0 | — | 0 |
+| pass1 | wf-aot-nativeudp | MIX | 55 | 54 | ok | 2400.0 | 2400 | ok (±60) | 1 | 192.168.77.2:51234 | 0 |
+| pass1 | wf-aot-nativeudp | PERSIST | 1 | 1 | ok | 0 | n/a | n/a | 0 | — | 0 |
+| pass1 | wf-aot-nativeudp/proxied | LAT | 32 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
+| pass1 | wf-aot-nativeudp/proxied | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass1 | wf-aot-nativeudp/direct | LAT | 32 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:40077 | 0 |
+| pass1 | wf-aot-nativeudp/direct | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:40077 | 0 |
 | pass1 | wf-aot-opt | IDLE | 1 | n/a | n/a | 0 | n/a | n/a | 0 | — | 0 |
 | pass1 | wf-aot-opt | LAT | 33 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
 | pass1 | wf-aot-opt | LATLOAD | 31 | 31 | ok | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
@@ -1059,9 +1112,18 @@ The ledger is the target's own account of what arrived, written independently of
 | pass2 | proxybridge/proxied | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
 | pass2 | proxybridge/direct | LAT | 32 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:40077 | 0 |
 | pass2 | proxybridge/direct | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:40077 | 0 |
-| pass2 | wf-aot-nativeudp | LAT | 0 | n/a | n/a | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
-| pass2 | wf-aot-nativeudp | LATLOAD | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
-| pass2 | wf-aot-nativeudp | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass2 | wf-aot-nativeudp | IDLE | 1 | n/a | n/a | 0 | n/a | n/a | 0 | — | 0 |
+| pass2 | wf-aot-nativeudp | LAT | 33 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
+| pass2 | wf-aot-nativeudp | LATLOAD | 31 | 31 | ok | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass2 | wf-aot-nativeudp | LOSS | 1 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass2 | wf-aot-nativeudp | REL | 151 | 150 | ok | 0 | n/a | n/a | 0 | — | 0 |
+| pass2 | wf-aot-nativeudp | THRU | 5 | 4 | ok | 0 | n/a | n/a | 0 | — | 0 |
+| pass2 | wf-aot-nativeudp | MIX | 55 | 54 | ok | 2400.0 | 2400 | ok (±60) | 1 | 192.168.77.2:51234 | 0 |
+| pass2 | wf-aot-nativeudp | PERSIST | 1 | 1 | ok | 0 | n/a | n/a | 0 | — | 0 |
+| pass2 | wf-aot-nativeudp/proxied | LAT | 32 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
+| pass2 | wf-aot-nativeudp/proxied | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass2 | wf-aot-nativeudp/direct | LAT | 32 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:40077 | 0 |
+| pass2 | wf-aot-nativeudp/direct | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:40077 | 0 |
 | pass2 | wf-aot-opt | IDLE | 1 | n/a | n/a | 0 | n/a | n/a | 0 | — | 0 |
 | pass2 | wf-aot-opt | LAT | 33 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
 | pass2 | wf-aot-opt | LATLOAD | 31 | 31 | ok | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
@@ -1132,9 +1194,18 @@ The ledger is the target's own account of what arrived, written independently of
 | pass3 | proxybridge/proxied | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
 | pass3 | proxybridge/direct | LAT | 32 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:40077 | 0 |
 | pass3 | proxybridge/direct | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:40077 | 0 |
-| pass3 | wf-aot-nativeudp | LAT | 0 | n/a | n/a | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
-| pass3 | wf-aot-nativeudp | LATLOAD | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
-| pass3 | wf-aot-nativeudp | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass3 | wf-aot-nativeudp | IDLE | 1 | n/a | n/a | 0 | n/a | n/a | 0 | — | 0 |
+| pass3 | wf-aot-nativeudp | LAT | 33 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
+| pass3 | wf-aot-nativeudp | LATLOAD | 31 | 31 | ok | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass3 | wf-aot-nativeudp | LOSS | 1 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass3 | wf-aot-nativeudp | REL | 151 | 150 | ok | 0 | n/a | n/a | 0 | — | 0 |
+| pass3 | wf-aot-nativeudp | THRU | 5 | 4 | ok | 0 | n/a | n/a | 0 | — | 0 |
+| pass3 | wf-aot-nativeudp | MIX | 55 | 54 | ok | 2400.0 | 2400 | ok (±60) | 1 | 192.168.77.2:51234 | 0 |
+| pass3 | wf-aot-nativeudp | PERSIST | 1 | 1 | ok | 0 | n/a | n/a | 0 | — | 0 |
+| pass3 | wf-aot-nativeudp/proxied | LAT | 32 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
+| pass3 | wf-aot-nativeudp/proxied | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
+| pass3 | wf-aot-nativeudp/direct | LAT | 32 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:40077 | 0 |
+| pass3 | wf-aot-nativeudp/direct | LOSS | 0 | n/a | n/a | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:40077 | 0 |
 | pass3 | wf-aot-opt | IDLE | 1 | n/a | n/a | 0 | n/a | n/a | 0 | — | 0 |
 | pass3 | wf-aot-opt | LAT | 33 | 32 | ok | 600.0 | 600 | ok (±20) | 1 | 192.168.77.2:51234 | 0 |
 | pass3 | wf-aot-opt | LATLOAD | 31 | 31 | ok | 6000.0 | 6000 | ok (±200) | 1 | 192.168.77.2:51234 | 0 |
@@ -1169,7 +1240,7 @@ The ledger is the target's own account of what arrived, written independently of
 | pass1 | proxifier | proxied:LAT, proxied:LOSS | 1 | LAT, LATLOAD, LOSS, MIX, direct:LAT, direct:LOSS | 2 | none | disjoint |
 | pass1 | proxifyre | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass1 | proxybridge | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
-| pass1 | wf-aot-nativeudp | LAT, LATLOAD, LOSS | 1 | — | 0 | none | disjoint |
+| pass1 | wf-aot-nativeudp | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass1 | wf-aot-opt | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass1 | wf-fdd-opt | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass2 | control-post | proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
@@ -1177,7 +1248,7 @@ The ledger is the target's own account of what arrived, written independently of
 | pass2 | proxifier | proxied:LAT, proxied:LOSS | 1 | LAT, LATLOAD, LOSS, MIX, direct:LAT, direct:LOSS | 2 | none | disjoint |
 | pass2 | proxifyre | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass2 | proxybridge | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
-| pass2 | wf-aot-nativeudp | LAT, LATLOAD, LOSS | 1 | — | 0 | none | disjoint |
+| pass2 | wf-aot-nativeudp | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass2 | wf-aot-opt | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass2 | wf-fdd-opt | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | 192.168.77.2:51234 | CORRECTNESS FAILURE: an endpoint served both a proxied and a direct-path window |
 | pass3 | control-post | proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
@@ -1185,7 +1256,7 @@ The ledger is the target's own account of what arrived, written independently of
 | pass3 | proxifier | proxied:LAT, proxied:LOSS | 1 | LAT, LATLOAD, LOSS, MIX, direct:LAT, direct:LOSS | 2 | none | disjoint |
 | pass3 | proxifyre | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass3 | proxybridge | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
-| pass3 | wf-aot-nativeudp | LAT, LATLOAD, LOSS | 1 | — | 0 | none | disjoint |
+| pass3 | wf-aot-nativeudp | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass3 | wf-aot-opt | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 | pass3 | wf-fdd-opt | LAT, LATLOAD, LOSS, MIX, proxied:LAT, proxied:LOSS | 1 | direct:LAT, direct:LOSS | 1 | none | disjoint |
 
@@ -1195,8 +1266,8 @@ A datagram that arrives from an endpoint the row's configured path does not use 
 
 | pass | dns port | ledger UDP queries | client UDP queries | check | ledger TCP queries | client TCP queries | check |
 |---|---|---|---|---|---|---|---|
-| all passes | 40053 | 14400 | 14400 | ok (±144) | 3600 | 3600 | ok |
-| all passes | 53 | 14640 | 14640 | ok (±146) | 3600 | 3600 | ok |
+| all passes | 40053 | 16800 | 16800 | ok (±168) | 4200 | 4200 | ok |
+| all passes | 53 | 17088 | 17088 | ok (±171) | 4200 | 4200 | ok |
 
 The target writes one `dnsSummary` per listener at shutdown, so it covers the ledger's whole lifetime: for a campaign ledger that is every pass, and the client column is summed over every pass to match, while a one-pass ledger simply covers that pass. The client column adds up every DNS and DNSALT arm that targeted that port, dual lanes included, plus the MIX arm's DNS class, which queries the run's own DNS port. A port the ledger reports that no client arm used says `no client counterpart`.
 
@@ -1204,9 +1275,9 @@ The target writes one `dnsSummary` per listener at shutdown, so it covers the le
 
 | pass | target clean | client expected clean | target reset | client expected reset | target partialFin | client expected partialFin | target halfClose | client expected halfClose |
 |---|---|---|---|---|---|---|---|---|
-| pass1 | 1320 | 375 | 1306 | 185 | 1275 | n/a | 1260 | n/a |
-| pass2 | 1320 | 375 | 1306 | 185 | 1275 | n/a | 1260 | n/a |
-| pass3 | 1320 | 375 | 1306 | 185 | 1275 | n/a | 1260 | n/a |
+| pass1 | 1578 | 450 | 1561 | 222 | 1524 | n/a | 1506 | n/a |
+| pass2 | 1578 | 450 | 1561 | 222 | 1524 | n/a | 1506 | n/a |
+| pass3 | 1578 | 450 | 1561 | 222 | 1524 | n/a | 1506 | n/a |
 
 The target's verdict and the client's own expectation are two independent readings of the same connection; a large difference is a fidelity question for the report, not a gate.
 
@@ -1222,7 +1293,7 @@ What every row actually contributed, so a reader can see exactly which cells abo
 | pass1 | proxifyre | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass1 | proxybridge | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass1 | wf-aot-dnsrelay | DNS, DNSALT | 2/2 | — | — | 40 | 40 | 0 | 0 | yes | n/a | 1 | — |
-| pass1 | wf-aot-nativeudp | LAT, LATLOAD, LOSS | 3/3 | — | — | 90 | 90 | 0 | 0 | yes | n/a | 1 | — |
+| pass1 | wf-aot-nativeudp | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass1 | wf-aot-opt | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass1 | wf-fdd-opt | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass2 | control-post | BASE | 1/1 | — | — | 0 | 0 | 0 | 0 | yes | proxied, direct | 1 | — |
@@ -1231,7 +1302,7 @@ What every row actually contributed, so a reader can see exactly which cells abo
 | pass2 | proxifyre | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass2 | proxybridge | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass2 | wf-aot-dnsrelay | DNS, DNSALT | 2/2 | — | — | 40 | 40 | 0 | 0 | yes | n/a | 1 | — |
-| pass2 | wf-aot-nativeudp | LAT, LATLOAD, LOSS | 3/3 | — | — | 90 | 90 | 0 | 0 | yes | n/a | 1 | — |
+| pass2 | wf-aot-nativeudp | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass2 | wf-aot-opt | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 1 | 1 | yes | proxied, direct | 1 | — |
 | pass2 | wf-fdd-opt | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass3 | control-post | BASE | 1/1 | — | — | 0 | 0 | 0 | 0 | yes | proxied, direct | 1 | — |
@@ -1240,6 +1311,6 @@ What every row actually contributed, so a reader can see exactly which cells abo
 | pass3 | proxifyre | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass3 | proxybridge | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass3 | wf-aot-dnsrelay | DNS, DNSALT | 2/2 | — | — | 40 | 40 | 0 | 0 | yes | n/a | 1 | — |
-| pass3 | wf-aot-nativeudp | LAT, LATLOAD, LOSS | 3/3 | — | — | 90 | 90 | 0 | 0 | yes | n/a | 1 | — |
+| pass3 | wf-aot-nativeudp | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass3 | wf-aot-opt | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |
 | pass3 | wf-fdd-opt | DNS, DNSALT, IDLE, LAT, LATLOAD, LOSS, MIX, PERSIST, REL, THRU | 10/10 | — | — | 260 | 260 | 0 | 0 | yes | proxied, direct | 1 | — |

@@ -64,6 +64,7 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `selftest-plan` |
 | `scripts/plans-short/` | the same arm shapes at short durations and lower rates, for validating a change |
 | `scripts/plans-windows/` | one file, `full-shape-plan.json`: `full-plan`'s load shape — `LOSS 120s × 500/s`, `LATLOAD 500 rps`, the `PERSIST` idle window, `DNS 200 rps` — for validating a change through a real product without a full-length campaign. Its arm order, arm names and key sets are identical to `scripts/plans/full-plan.json`; the only differences are nine `seconds` values, and `LOSS` (120 s) is the one arm left uncompressed. The loader has no override or merge mechanism, so the shape is repeated rather than patched — see "The configs and the plan sets" |
+| `scripts/plans-release/` | the release caliber: the five campaign plans with only their declared `seconds` changed, plus `caliber.json` — the machine-readable descriptor naming the plan set, `full-plan.json`'s SHA-256 and the per-arm seconds the report prints |
 | `scripts/configs/` | the six committed product configurations — six of the seven rows, since the Proxifier row's profile is machine-local; the repo-file → row → deployed-path mapping is in "The configs and the plan sets" |
 | `scripts/orchestrator.ps1` | the campaign driver, run on the machine under test |
 | `scripts/publish.sh` | build and publish the artifacts |
@@ -152,7 +153,8 @@ self-test can run while a campaign target is up.
 
 The plan path is the only argument. With no argument the script prints usage and exits `2` before it
 starts anything, so a missing argument can neither be read as a green run nor leave a target behind;
-pass a path under `scripts/plans/`, `scripts/plans-short/` or `scripts/plans-windows/`. The work directory is fixed at
+pass a path under `scripts/plans/`, `scripts/plans-short/`, `scripts/plans-windows/` or
+`scripts/plans-release/`. The work directory is fixed at
 `/tmp/wf-bench/selftest`.
 
 The client also runs against any plan directly, which is how the campaign drives it:
@@ -311,14 +313,14 @@ which stages each repo file and verifies the upload by the remote file's size. M
 
 | Repo file | Row id (`scripts/orchestrator.ps1`) | Deployed path the orchestrator reads |
 |---|---|---|
-| `wf-aot-opt.json` | `wf-aot-opt` — the reference build | `C:\wfbench\wf-aot\config.json` |
+| `wf-aot-opt.json` | `wf-aot-opt` — the opt-in UoT variant (UDP-over-TCP v2 on) | `C:\wfbench\wf-aot\config.json` |
 | `wf-fdd-opt.json` | `wf-fdd-opt` — the framework-dependent build of the same configuration | `C:\wfbench\wf-fdd\config.json` |
-| `wf-aot-nativeudp.json` | `wf-aot-nativeudp` — the reference build with `udpOverTcp` off | `C:\wfbench\wf-aot\config-nativeudp.json` |
-| `wf-aot-dnsrelay.json` | `wf-aot-dnsrelay` — the reference build with the DNS relay rule | `C:\wfbench\wf-aot\config-dnsrelay.json` |
+| `wf-aot-nativeudp.json` | `wf-aot-nativeudp` — the default native-UDP reference configuration | `C:\wfbench\wf-aot\config-nativeudp.json` |
+| `wf-aot-dnsrelay.json` | `wf-aot-dnsrelay` — the opt-in UoT variant with the DNS local target off | `C:\wfbench\wf-aot\config-dnsrelay.json` |
 | `proxifyre-app-config.json` | `proxifyre` | `C:\wfbench\stage\proxifyre-app-config.json`, then copied over `C:\Program Files\ProxiFyre\app-config.json` |
 | `proxybridge.pbprofile` | `proxybridge` | `C:\wfbench\proxybridge\bench.pbprofile` |
 
-`wf-fdd-opt.json` and `wf-aot-opt.json` are **byte-identical** (both sha256 `15e49373…`), and that is
+`wf-fdd-opt.json` and `wf-aot-opt.json` are **byte-identical** (both sha256 `dc9972e4…`), and that is
 deliberate: the `wf-fdd-opt` row changes only the build, so the delta between those two rows is
 attributable only while the two files stay byte-identical. The second file is a named deploy-time copy,
 not a second configuration; collapsing it to one upload is a registered follow-up, not a cleanup to do
@@ -328,20 +330,31 @@ The Proxifier row has **no repository configuration file**: `bench.ppx` is a GUI
 only on the machine (`/tmp/wf-bench/bench.ppx`) and is staged to `C:\wfbench\proxifier\bench.ppx`, so a
 fresh checkout cannot reproduce that row.
 
-The three plan directories are three **independent sets**, not one set with overrides. `Client/PlanFile.cs`
+The four plan directories are four **independent sets**, not one set with overrides. `Client/PlanFile.cs`
 reads exactly one `--plan` path and has no `extends`, patch or merge token (repeating the flag is
 last-one-wins), so every variant is a full copy of the arms it runs:
 
-| Directory | Files | Relationship to `scripts/plans/` (measured 2026-10-09) |
+| Directory | Files | Relationship to `scripts/plans/` (measured 2026-10-09; `plans-release` measured 2026-10-18) |
 |---|---|---|
-| `scripts/plans/` | 6: `base`, `dns`, `dual`, `full`, `selftest`, `udp` | the canonical set; the campaign stages five of them, and `selftest-plan.json` — `full`'s ten arms plus `BASE`, at 5–10 s per arm on smaller, lower-rate shapes — is the self-test's |
+| `scripts/plans/` | 6: `base`, `dns`, `dual`, `full`, `selftest`, `udp` | the canonical set; the release campaign stages `plans-release/` instead, and `selftest-plan.json` — `full`'s ten arms plus `BASE`, at 5–10 s per arm on smaller, lower-rate shapes — is the self-test's |
 | `scripts/plans-short/` | 5: the same set minus `selftest-plan` | the same arm shapes at short durations **and lower rates**: against `plans/full-plan.json` it differs in 17 leaves, 10 `seconds` and 7 not — four `ratePerSecond`, `connectionsPerSecond`, `targetBytesPerSecond` and `idleSeconds`. It is not a pure duration compression |
 | `scripts/plans-windows/` | 1: `full-shape-plan.json` | `plans/full-plan.json` with nine `seconds` values overridden and **nothing else**: 47 of its 56 leaves are identical, 0 leaves differ in any key other than `seconds`, and `LOSS` keeps its full 120 s. `deploy-campaign.sh` stages it as `C:\wfbench\e2e-win\full-plan.json` |
+| `scripts/plans-release/` | 5 plans plus `caliber.json`: `base`, `dns`, `dual`, `full`, `udp` | the **release caliber**: the canonical arm shapes with only the declared `seconds` values changed — `IDLE`, `LAT`, `LATLOAD`, `DNS`, `DNSALT` and `THRU` 30 s, `LOSS` 120 s, `REL` 60 s, `MIX` and `PERSIST` 60 s on the full plan — and every rate, count and `modeMix` identical to `plans/`. `caliber.json` names the set, `full-plan.json`, its SHA-256 and the per-arm seconds |
 
-Every file in `plans-short/` and `plans-windows/` is derivable from `plans/` plus two override tables —
-`plans/` itself is the irreducible set — so deduplicating the twelve is tempting, but it needs a new
-`PlanFile` override/merge mechanism with its own validation and tests. **Do not add one as part of a
-data cleanup**; it is registered as a follow-up instead.
+Every file in `plans-short/`, `plans-windows/` and `plans-release/` is derivable from `plans/` plus
+three override tables — `plans/` itself is the irreducible set — so deduplicating the seventeen is
+tempting, but it needs a new `PlanFile` override/merge mechanism with its own validation and tests.
+**Do not add one as part of a data cleanup**; it is registered as a follow-up instead.
+
+The **release caliber** is the triple *(plan file, content hash, declared arm durations)*, and every
+published table prints it. The release session runs `plans-release/full-plan.json`: its ten declared
+arms total 480 s per full row instead of the canonical 870 s, with every `ratePerSecond`, count and
+arm shape untouched, and `plans-release/caliber.json` records the plan set, the file's SHA-256 and
+those ten `seconds` values for the report to print. `plans/` stays the reference set the release plans
+are copied from, `plans-short/` is **screening only** and never shares a table with the release
+caliber, and `plans-windows/full-shape-plan.json` exists to validate a change through a real product.
+If a night's window is 8–9 h rather than 10 h, the declared fallback is `MIX` and `PERSIST` at 45 s —
+never dropping a row.
 
 ## The record
 

@@ -20,6 +20,13 @@ internal static class RepoPaths
     internal static string WindowsPlansDirectory => Path.Combine(Root, "benchmarks", "WinForward.E2E", "scripts", "plans-windows");
 
     /// <summary>
+    /// The release caliber: <c>plans/</c>'s arm shapes at the declared release durations. It is a
+    /// fourth shipped directory because the loader has no override or merge token, and it carries
+    /// <c>caliber.json</c> beside the plans, so the caller filters by the <c>-plan.json</c> suffix.
+    /// </summary>
+    internal static string ReleasePlansDirectory => Path.Combine(Root, "benchmarks", "WinForward.E2E", "scripts", "plans-release");
+
+    /// <summary>
     /// The minimal plans a fact loads by path: the Tier 0 defect repros, which are either rejected at
     /// load time or would need a live target, and the semantic fixtures that pin one plan key to one
     /// published value. They live with the tests, not in <c>scripts/plans/</c>, because none of them is

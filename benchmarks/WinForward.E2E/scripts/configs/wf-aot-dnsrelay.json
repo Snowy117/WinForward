@@ -1,43 +1,49 @@
 {
-  "socks5Servers": [
-    {
-      "name": "main",
-      "host": "127.0.0.1",
-      "port": 1080,
-      "udpOverTcp": true
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information"
     }
-  ],
-  "host": {
-    "fallbackAction": "pass",
-    "rules": [
-      {
-        "process": [
-          "sing-box.exe"
-        ],
-        "action": "pass"
-      },
-      {
-        "process": [
-          "WinForward.E2E.Direct.exe"
-        ],
-        "protocol": [
-          "tcp",
-          "udp"
-        ],
-        "action": "pass"
-      },
-      {
-        "process": [
-          "WinForward.E2E.exe"
-        ],
-        "protocol": [
-          "tcp",
-          "udp"
-        ],
-        "action": "proxy",
-        "target": "main"
-      }
-    ]
   },
-  "logLevel": "info"
+  "WinForward": {
+    "Socks5Servers": [
+      {
+        "Name": "main",
+        "Host": "127.0.0.1",
+        "Port": 1080,
+        "UdpOverTcp": true
+      }
+    ],
+    "Host": {
+      "FallbackAction": "pass",
+      "Rules": [
+        {
+          "Process": [
+            "sing-box.exe"
+          ],
+          "Action": "pass"
+        },
+        {
+          "Process": [
+            "WinForward.E2E.Direct.exe"
+          ],
+          "Protocol": [
+            "tcp",
+            "udp"
+          ],
+          "Action": "pass"
+        },
+        {
+          "Process": [
+            "WinForward.E2E.exe"
+          ],
+          "Protocol": [
+            "tcp",
+            "udp"
+          ],
+          "Action": "proxy",
+          "Target": "main"
+        }
+      ]
+    }
+  }
 }

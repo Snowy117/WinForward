@@ -39,11 +39,13 @@ internal static class TableRowProfiles
         + "table, so a row's label can never drift from its treatment.";
 
     private const string PartialRows =
-        "The three WinForward rows are a deliberate design: `wf-aot-nativeudp` differs from `wf-aot-opt` "
-        + "only in the UDP carriage and `wf-aot-dnsrelay` only in the DNS local target, so a difference "
-        + "between `wf-aot-opt` and either is attributable to that one feature. Because a partial row never "
-        + "ran the arms the other rows ran, every comparison involving it is reported as `not measured in "
-        + "this row` and is excluded from the Holm family rather than treated as a missing value or a zero.";
+        "The WinForward rows are a deliberate design: `wf-aot-nativeudp` is the default configuration and "
+        + "the reference row, `wf-aot-opt` differs from it only in the UDP carriage (the opt-in UoT "
+        + "variant) and `wf-aot-dnsrelay` differs from `wf-aot-opt` only in the DNS local target, so a "
+        + "difference between the first two is attributable to the UDP carriage and one between "
+        + "`wf-aot-opt` and `wf-aot-dnsrelay` to the DNS local target. Because a partial row never ran the "
+        + "arms the other rows ran, every comparison involving it is reported as `not measured in this "
+        + "row` and is excluded from the Holm family rather than treated as a missing value or a zero.";
 
     private const string DnsAltNote =
         "`DNSALT` targets a port no product special-cases, so it is the arm whose results are comparable "

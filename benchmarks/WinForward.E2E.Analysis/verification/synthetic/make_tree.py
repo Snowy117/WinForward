@@ -6,7 +6,7 @@ sets, and the three states a key can be in: present with a value, present and JS
 absent because the kind does not publish it), and it deliberately contains:
 
 * the seven measured rows with their different plans plus both control blocks;
-* a dual phase on the five full-plan rows, with a `directLeak` on one of them;
+* a dual phase on the six full-plan rows, with a `directLeak` on one of them;
 * a `DNSALT` arm on every row that runs DNS, and a `PERSIST` arm on every full-plan row;
 * a `foreignConnection` finding, a UDP accounting-identity violation, a zero lane
   witness, a `samplerError` record, a sample carrying `readError`, a mid-run product
@@ -125,7 +125,7 @@ ROWS = [
     ("control-pre", "BASE only", False, None, "192.168.77.2:40055", 600.0),
     ("wf-aot-opt", "full", True, "WinForward", PROXY_ENDPOINT, 650.0),
     ("wf-fdd-opt", "full", True, "WinForward", PROXY_ENDPOINT, 665.0),
-    ("wf-aot-nativeudp", "udp only", False, "WinForward", PROXY_ENDPOINT, 700.0),
+    ("wf-aot-nativeudp", "full", True, "WinForward", PROXY_ENDPOINT, 700.0),
     ("wf-aot-dnsrelay", "dns only", False, "WinForward", PROXY_ENDPOINT, 655.0),
     ("proxifyre", "full", True, "ProxiFyre", PROXY_ENDPOINT, 900.0),
     ("proxifier", "full", True, "Proxifier", "192.168.77.2:40099", 1400.0),
