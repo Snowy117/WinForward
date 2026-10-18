@@ -154,4 +154,58 @@ public sealed class TargetOptionsTests
             refused,
             StringComparison.Ordinal);
     }
+    // The injection delay is a calibration control, so its absence has to be a no-op: a target run
+    // that declares nothing keeps the response path it always had.
+    [Fact]
+    public void TheUndeclaredInjectionDelayIsZero()
+    {
+        Assert.True(TargetOptions.TryCreate(["--bind", "127.0.0.1"], out var options, out var error), error);
+
+        Assert.Equal(0, options.InjectDelayMs);
+    }
+
+    [Fact]
+    public void ADeclaredInjectionDelayIsTaken()
+    {
+        Assert.True(TargetOptions.TryCreate(["--inject-delay-ms", "1000"], out var options, out var error), error);
+
+        Assert.Equal(1000, options.InjectDelayMs);
+    }
+
+    [Theory]
+    [InlineData("abc", "is not a delay in milliseconds")]
+    [InlineData("1.5", "is not a delay in milliseconds")]
+    [InlineData("-1", "is not a delay in milliseconds")]
+    [InlineData("60001", "the injection delay must be in the range 0..")]
+    public void AnInjectionDelayThatCannotRunIsRefused(string value, string expected)
+    {
+        Assert.False(TargetOptions.TryCreate(["--inject-delay-ms", value], out _, out var error));
+
+        Assert.Contains(expected, error, StringComparison.Ordinal);
+    }
+
+    // The bound is the constant the message names: a value the parser accepts must be the one the
+    // refusal calls legal.
+    [Fact]
+    public void TheInjectionDelayBoundIsTheOneTheRefusalNames()
+    {
+        Assert.True(
+            TargetOptions.TryCreate(
+                ["--inject-delay-ms", TargetOptions.MaxInjectDelayMs.ToString(CultureInfo.InvariantCulture)],
+                out var options,
+                out var error),
+            error);
+        Assert.Equal(TargetOptions.MaxInjectDelayMs, options.InjectDelayMs);
+
+        Assert.False(
+            TargetOptions.TryCreate(
+                ["--inject-delay-ms", (TargetOptions.MaxInjectDelayMs + 1).ToString(CultureInfo.InvariantCulture)],
+                out _,
+                out var refused));
+
+        Assert.Contains(
+            string.Create(CultureInfo.InvariantCulture, $"0..{TargetOptions.MaxInjectDelayMs}"),
+            refused,
+            StringComparison.Ordinal);
+    }
 }

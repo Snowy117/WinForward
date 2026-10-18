@@ -9,7 +9,7 @@
     "base-plan.json"
   ],
   "plan": "full-plan.json",
-  "sha256": "b139226d9f13e8bf9908714c715bdac3fd4d7195c84b159b029398d466e4757f",
+  "sha256": "da148a1d99580475cdc75ea0b93130b55819aab1206074f9a21fd9ddd0a925d3",
   "seconds": {
     "IDLE": 30,
     "LAT": 30,

@@ -5,6 +5,7 @@ Usage: WinForward.E2E target [options]
   --udp-port <n>       UDP echo listener port (default 30010)
   --udp-receivers <n>  UDP receive loops each datagram listener runs (default: half the
                        processors, clamped to 2..8)
+  --inject-delay-ms <n>  Delay every measured response by n ms (default 0, max 60000)
   --dns-port <n>       DNS responder port, UDP and TCP (default 30053)
   --dns-alt-port <n>   Second DNS responder port, UDP and TCP (default: none)
   --label <name>       Run or row identity copied into every ledger record (default empty)

@@ -19,12 +19,13 @@ internal sealed class UdpEchoServer : IAsyncDisposable
     private readonly EndPoint _sourceTemplate;
     private readonly SourceCensus[] _censuses;
     private readonly int[] _receiverStarts;
+    private readonly DelayedDatagrams? _delayed;
     private long _received;
     private long _undecodable;
     private long _bytes;
     private long _sendErrors;
 
-    internal UdpEchoServer(EndPoint endPoint, JsonlSink ledger, int receiverCount)
+    internal UdpEchoServer(EndPoint endPoint, JsonlSink ledger, int receiverCount, int injectDelayMs = 0)
     {
         _ledger = ledger;
         _receiverCount = receiverCount;
@@ -38,6 +39,7 @@ internal sealed class UdpEchoServer : IAsyncDisposable
         _sourceTemplate = Sockets.SourceTemplate(endPoint);
 
         _socket = Sockets.BindUdp(endPoint);
+        _delayed = injectDelayMs > 0 ? new DelayedDatagrams(_socket, TimeSpan.FromMilliseconds(injectDelayMs)) : null;
     }
 
     /// <summary>
@@ -69,6 +71,14 @@ internal sealed class UdpEchoServer : IAsyncDisposable
 
         var summary = SummarizeLoopAsync(cancellationToken);
         await Task.WhenAll(receivers).ConfigureAwait(false);
+
+        // A pending delayed response is part of the run's send evidence, so the summary is written
+        // after the queue has been observed rather than while it is still counting send errors.
+        if (_delayed is not null)
+        {
+            await _delayed.DrainAsync().ConfigureAwait(false);
+        }
+
         await summary.ConfigureAwait(false);
     }
 
@@ -175,24 +185,42 @@ internal sealed class UdpEchoServer : IAsyncDisposable
                 continue;
             }
 
-            try
-            {
-                await _socket.SendToAsync(buffer.AsMemory(0, result.ReceivedBytes), SocketFlags.None, result.RemoteEndPoint, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
+            if (!await SendEchoAsync(buffer, result.ReceivedBytes, result.RemoteEndPoint, cancellationToken).ConfigureAwait(false))
             {
                 return;
-            }
-            catch (ObjectDisposedException)
-            {
-                return;
-            }
-            catch (SocketException)
-            {
-                Interlocked.Increment(ref _sendErrors);
             }
         }
     }
+
+    private async ValueTask<bool> SendEchoAsync(byte[] buffer, int length, EndPoint remoteEndPoint, CancellationToken cancellationToken)
+    {
+        if (_delayed is not null)
+        {
+            _delayed.Send(buffer.AsMemory(0, length), remoteEndPoint, BookSendError, cancellationToken);
+            return true;
+        }
+
+        try
+        {
+            await _socket.SendToAsync(buffer.AsMemory(0, length), SocketFlags.None, remoteEndPoint, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+        catch (SocketException)
+        {
+            BookSendError();
+            return true;
+        }
+    }
+
+    private void BookSendError() => Interlocked.Increment(ref _sendErrors);
 
     private async Task SummarizeLoopAsync(CancellationToken cancellationToken)
     {

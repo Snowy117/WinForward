@@ -20,8 +20,8 @@
 Trigger: any `catch (ObjectDisposedException)` over a socket, and any decision about what a teardown (a
 closed arm, a stopped target, a disposed socket) may publish. The rule is uniform: **teardown is not a
 measurement**, so such a catch books no counter, no verdict and no observation. The five shapes below
-are the whole allowed vocabulary, and `ObjectDisposedCatchGateTests` holds the registry (31 catches in
-19 files under `benchmarks/WinForward.E2E`; the three in `Contracts/Json/JsonlSink.cs` are the sink's own
+are the whole allowed vocabulary, and `ObjectDisposedCatchGateTests` holds the registry (33 catches in
+20 files under `benchmarks/WinForward.E2E`; the three in `Contracts/Json/JsonlSink.cs` are the sink's own
 swallow-and-count policy, D14.7, and stay out of it):
 
 | Shape | Body | Published effect |
@@ -43,7 +43,7 @@ swallow-and-count policy, D14.7, and stay out of it):
   honest.
 - `TcpConnectionProtocol` is the exception worth driving: it takes its reader as an argument, so a
   socket disposed before the first read reaches its arm
-  (`AConnectionTornDownUnderTheProtocolPublishesNoVerdict`). Two of the 31 are not sockets at all
+  (`AConnectionTornDownUnderTheProtocolPublishesNoVerdict`). Two of the 33 are not sockets at all
   (`TargetLog`, `ResourceSampleWriter` wrap stderr), so there the catch is only a closed-pipe guard —
   the gate's business too.
 
@@ -96,7 +96,7 @@ catch (SocketException)
 ## Tests Required
 
 - **`ObjectDisposedCatchGateTests`** — the registry holds every `catch (ObjectDisposedException)` site
-  with its shape in source order, asserts the baseline counts (31 sites / 19 files), and refuses any body
+  with its shape in source order, asserts the baseline counts (33 sites / 20 files), and refuses any body
   that books a counter; re-adding an increment, or reverting `TornDown`/`Cancelled`, turns it red
   (mutation-checked).
 - **`ObjectDisposedTeardownTests`** — the behavioural half: the protocol's torn-down arm (`Outcome` is

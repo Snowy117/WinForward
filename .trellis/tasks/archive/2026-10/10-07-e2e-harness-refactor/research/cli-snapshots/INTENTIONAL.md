@@ -81,3 +81,26 @@ E2-d 的判据是"**语义与错误文本逐字不变**"（`implement.md` 的 E2
 
 三条都是**拒绝路径**，所以清单仍然是"每条命令都在建目录/开 socket 之前结束"（采集器结尾的
 `.cli-snapshot-out` 断言照旧成立）：`0` 与 `65` 走同一个区间拒绝，`abc` 走"不是十进制数"。
+
+
+## 5. B4：`target --help` 新增 `--inject-delay-ms` 一行
+
+| | |
+|---|---|
+| 位置 | `benchmarks/WinForward.E2E/Target/TargetRunner.cs` 的 `PrintHelp()` |
+| 来源 | B4 的靶机确定性延迟注入 `--inject-delay-ms <n>`（默认 0，范围 0..60000），用于 latency 仪器的阳性对照 |
+| 变更 | `--udp-receivers` 的两行之后、`--dns-port` 之前插入一行 |
+| 影响面 | 11 个 `after/` stdout：`04-target-help` 与 10 条打印 help 的 usage 错误 |
+| 不影响 | 全部 31 条的退出码、全部 stderr、`index.json`、`client` 的全部文本、根用法文本 |
+
+```diff
+   --udp-receivers <n>  UDP receive loops each datagram listener runs (default: half the
+                        processors, clamped to 2..8)
++  --inject-delay-ms <n>  Delay every measured response by n ms (default 0, max 60000)
+   --dns-port <n>       DNS responder port, UDP and TCP (default 30053)
+```
+
+测试侧的落地是 `CliSnapshotTests` 的 `InjectDelayOption` / `DnsPortHelpBefore` /
+`DnsPortHelpAfter` 常量、`WithRegisteredChanges` 的第三条 `Replace`，以及
+`TheRegisteredChangesAreTheOnlyDifferenceBetweenTheTrees` 里"before 树不含该选项"的断言。
+这次没有新增 case：选项的拒绝路径由 `TargetOptionsTests` 覆盖，终端用户文本只有 help 一行变化。

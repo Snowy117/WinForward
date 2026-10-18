@@ -69,7 +69,11 @@ internal static class TcpConnectionProtocol
 {
     private static readonly TimeSpan s_stallDelay = TimeSpan.FromSeconds(2);
 
-    internal static async ValueTask<CommandOutcome> RunConnectionAsync(Socket socket, FrameStreamReader reader, CancellationToken cancellationToken)
+    internal static async ValueTask<CommandOutcome> RunConnectionAsync(
+        Socket socket,
+        FrameStreamReader reader,
+        CancellationToken cancellationToken,
+        TimeSpan responseDelay = default)
     {
         try
         {
@@ -86,7 +90,7 @@ internal static class TcpConnectionProtocol
                 case FrameReadStatus.Frame
                     when reader.Header.Sequence == FrameCodec.CommandSequence
                     && TcpCommand.TryParse(reader.Payload.Span, out var mode, out var expectedBytes):
-                    var outcome = await RunModeAsync(socket, reader, mode, expectedBytes, cancellationToken).ConfigureAwait(false);
+                    var outcome = await RunModeAsync(socket, reader, mode, expectedBytes, responseDelay, cancellationToken).ConfigureAwait(false);
                     return new CommandOutcome(mode, expectedBytes, modeKnown: true, outcome);
                 case FrameReadStatus.Frame:
                 case FrameReadStatus.BadMagic:
@@ -116,34 +120,55 @@ internal static class TcpConnectionProtocol
         }
     }
 
-    private static async Task<TcpModeOutcome> RunModeAsync(Socket socket, FrameStreamReader reader, TcpMode mode, uint expectedBytes, CancellationToken cancellationToken)
+    private static async Task<TcpModeOutcome> RunModeAsync(
+        Socket socket,
+        FrameStreamReader reader,
+        TcpMode mode,
+        uint expectedBytes,
+        TimeSpan responseDelay,
+        CancellationToken cancellationToken)
+    {
+        var delayed = responseDelay > TimeSpan.Zero
+            ? new DelayedStreamWrites(socket, responseDelay, cancellationToken)
+            : null;
+
+        try
+        {
+            return await RunModeLoopAsync(socket, reader, mode, expectedBytes, delayed, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // An exit the read path decided (a socket fault or teardown) still owns a queue; observing
+            // it keeps a write that failed for the same reason from becoming an unobserved task.
+            if (delayed is not null)
+            {
+                await delayed.ObserveAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static async Task<TcpModeOutcome> RunModeLoopAsync(
+        Socket socket,
+        FrameStreamReader reader,
+        TcpMode mode,
+        uint expectedBytes,
+        DelayedStreamWrites? delayed,
+        CancellationToken cancellationToken)
     {
         var connectionId = reader.Header.ConnectionId;
         long bytesEchoed = 0;
-        var protocolErrors = 0;
+        const int protocolErrors = 0;
         var stallPending = mode == TcpMode.Stall;
 
         while (true)
         {
             var status = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
 
-            // Two ways for a stream to end, and they are not the same outcome: a clean close answers
-            // the mode, while a close inside a frame leaves a boundary that can never be found and
-            // gets the protocol error -- and no trailer, which only the clean close earns.
-            if (status is FrameReadStatus.EndOfStream or FrameReadStatus.Truncated)
+            // A close, a truncated frame and a malformed one all end the connection here; the helper
+            // keeps the close path's trailer or FIN behind the echo queue.
+            if (status is not FrameReadStatus.Frame)
             {
-                if (status == FrameReadStatus.Truncated)
-                {
-                    protocolErrors++;
-                    return new TcpModeOutcome(TcpVerdict.ProtocolError, bytesEchoed, protocolErrors, truncated: true);
-                }
-
-                return await CompleteOnEndOfStreamAsync(socket, connectionId, mode, bytesEchoed, protocolErrors, cancellationToken).ConfigureAwait(false);
-            }
-            if (status != FrameReadStatus.Frame)
-            {
-                protocolErrors++;
-                return new TcpModeOutcome(TcpVerdict.ProtocolError, bytesEchoed, protocolErrors, truncated: false);
+                return await FinishReadAsync(socket, connectionId, status, mode, bytesEchoed, protocolErrors, delayed, cancellationToken).ConfigureAwait(false);
             }
 
             if (stallPending)
@@ -156,25 +181,84 @@ internal static class TcpConnectionProtocol
                 await Task.Delay(s_stallDelay, CancellationToken.None).ConfigureAwait(false);
             }
 
-            if (!await SocketIO.TrySendAllAsync(socket, reader.Raw, cancellationToken).ConfigureAwait(false))
+            var (echoed, outcome) = await EchoFrameAsync(socket, reader, mode, expectedBytes, bytesEchoed, protocolErrors, delayed, cancellationToken).ConfigureAwait(false);
+            bytesEchoed = echoed;
+            if (outcome is { } completed)
             {
-                throw new IOException("The peer closed while a frame was being echoed.");
-            }
-
-            bytesEchoed += reader.Payload.Length;
-
-            if ((mode is TcpMode.ResetAfterN or TcpMode.PartialFin) && bytesEchoed >= expectedBytes)
-            {
-                if (mode == TcpMode.ResetAfterN)
-                {
-                    socket.LingerState = new LingerOption(enable: true, 0);
-                    return new TcpModeOutcome(TcpVerdict.Reset, bytesEchoed, protocolErrors, truncated: false);
-                }
-
-                socket.Shutdown(SocketShutdown.Send);
-                return new TcpModeOutcome(TcpVerdict.PartialFin, bytesEchoed, protocolErrors, truncated: false);
+                return completed;
             }
         }
+    }
+
+    private static async Task<TcpModeOutcome> FinishReadAsync(
+        Socket socket,
+        uint connectionId,
+        FrameReadStatus status,
+        TcpMode mode,
+        long bytesEchoed,
+        int protocolErrors,
+        DelayedStreamWrites? delayed,
+        CancellationToken cancellationToken)
+    {
+        // A queued echo must reach the wire before the close path's trailer or FIN: the delay belongs
+        // to the response, not to the connection's ending.
+        if (delayed is not null)
+        {
+            await delayed.CompleteAsync().ConfigureAwait(false);
+        }
+
+        if (status is FrameReadStatus.EndOfStream)
+        {
+            return await CompleteOnEndOfStreamAsync(socket, connectionId, mode, bytesEchoed, protocolErrors, cancellationToken).ConfigureAwait(false);
+        }
+
+        var errors = protocolErrors + 1;
+        return status is FrameReadStatus.Truncated
+            ? new TcpModeOutcome(TcpVerdict.ProtocolError, bytesEchoed, errors, truncated: true)
+            : new TcpModeOutcome(TcpVerdict.ProtocolError, bytesEchoed, errors, truncated: false);
+    }
+
+    private static async Task<(long BytesEchoed, TcpModeOutcome? Outcome)> EchoFrameAsync(
+        Socket socket,
+        FrameStreamReader reader,
+        TcpMode mode,
+        uint expectedBytes,
+        long bytesEchoed,
+        int protocolErrors,
+        DelayedStreamWrites? delayed,
+        CancellationToken cancellationToken)
+    {
+        if (delayed is not null)
+        {
+            // The queue copies the frame because the reader reuses its buffer on the next read.
+            _ = delayed.EnqueueAsync(reader.Raw);
+        }
+        else if (!await SocketIO.TrySendAllAsync(socket, reader.Raw, cancellationToken).ConfigureAwait(false))
+        {
+            throw new IOException("The peer closed while a frame was being echoed.");
+        }
+
+        var echoed = bytesEchoed + reader.Payload.Length;
+        if ((mode is TcpMode.ResetAfterN or TcpMode.PartialFin) && echoed >= expectedBytes)
+        {
+            // The reset or half-close is the mode's verdict and has to follow the echo bytes it was
+            // measured at, not overtake a response still waiting on its delay.
+            if (delayed is not null)
+            {
+                await delayed.CompleteAsync().ConfigureAwait(false);
+            }
+
+            if (mode == TcpMode.ResetAfterN)
+            {
+                socket.LingerState = new LingerOption(enable: true, 0);
+                return (echoed, new TcpModeOutcome(TcpVerdict.Reset, echoed, protocolErrors, truncated: false));
+            }
+
+            socket.Shutdown(SocketShutdown.Send);
+            return (echoed, new TcpModeOutcome(TcpVerdict.PartialFin, echoed, protocolErrors, truncated: false));
+        }
+
+        return (echoed, null);
     }
 
     /// <summary>

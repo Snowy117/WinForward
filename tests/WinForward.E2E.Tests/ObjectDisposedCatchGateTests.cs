@@ -11,11 +11,11 @@ namespace WinForward.E2E.Tests;
 /// fabricated from teardown and fails here.
 /// </summary>
 /// <remarks>
-/// <para><b>The baseline.</b> <c>benchmarks/WinForward.E2E</c> holds <b>31</b> of these catches in
-/// <b>19</b> files, and the registry below is that list, per file and in source order. The three
+/// <para><b>The baseline.</b> <c>benchmarks/WinForward.E2E</c> holds <b>33</b> of these catches in
+/// <b>20</b> files, and the registry below is that list, per file and in source order. The three
 /// sites whose catch no longer writes a counter -- <c>MixBulkLoop</c>, <c>MixPageLoop</c>'s page
 /// connection and <c>DnsServer</c>'s stream handler -- are registered as <see cref="Ignored"/> like
-/// their 19 siblings: putting the increment back is an <see cref="Unregistered"/> shape and fails.</para>
+/// their 21 siblings: putting the increment back is an <see cref="Unregistered"/> shape and fails.</para>
 /// <para><b>What is not in the baseline.</b> <c>WinForward.E2E.Contracts</c> holds three more of these
 /// catches, in <c>JsonlSink</c>, and they are deliberately outside this gate: the sink's policy is
 /// "swallow and count the write failure", so one of them books a <c>ledgerWriteErrors</c> failure by
@@ -50,7 +50,7 @@ public sealed class ObjectDisposedCatchGateTests
 
     /// <summary>
     /// The registered sites, harness-relative and in source order per file. The counts are the baseline's
-    /// shapes: 22 bodies that only explain why nothing is booked, six that end the loop or the method,
+    /// shapes: 24 bodies that only explain why nothing is booked, six that end the loop or the method,
     /// one connect failure, and the two explicit teardown outcomes.
     /// </summary>
     private static readonly Dictionary<string, string[]> s_registry = new(StringComparer.Ordinal)
@@ -69,6 +69,7 @@ public sealed class ObjectDisposedCatchGateTests
         ["Client/ResourceSampleWriter.cs"] = [Ignored],
         ["Program.cs"] = [Ignored],
         ["Target/DnsServer.cs"] = [Ends, Ends, Ignored],
+        ["Target/ResponseDelay.cs"] = [Ignored, Ignored],
         ["Target/TargetLog.cs"] = [Ignored],
         ["Target/TcpAcceptLoop.cs"] = [Ends],
         ["Target/TcpConnectionProtocol.cs"] = [NoVerdict],
@@ -132,8 +133,8 @@ public sealed class ObjectDisposedCatchGateTests
         }
 
         // Fixed baseline counts, so a site removed by a refactor is as visible as one added.
-        Assert.Equal(31, found.Sum(pair => pair.Value.Count));
-        Assert.Equal(19, found.Count);
+        Assert.Equal(33, found.Sum(pair => pair.Value.Count));
+        Assert.Equal(20, found.Count);
 
         // No site of any shape may book a counter: the ignored bodies are empty and the explicit
         // outcomes write a named status, so this holds for the whole set.

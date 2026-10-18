@@ -124,6 +124,8 @@ internal sealed class DnsServer : IAsyncDisposable
     private readonly int _port;
     private readonly EndPoint _sourceTemplate;
     private readonly TcpAcceptLoop _acceptLoop;
+    private readonly TimeSpan _responseDelay;
+    private readonly DelayedDatagrams? _delayed;
     private long _udpQueries;
     private long _udpAnswers;
     private long _udpEmpty;
@@ -137,8 +139,8 @@ internal sealed class DnsServer : IAsyncDisposable
     private long _tcpConnectionsAccepted;
     private long _tcpAborted;
 
-    internal DnsServer(IPEndPoint endPoint, JsonlSink ledger, int workerCount)
-        : this(Sockets.BindUdp(endPoint), new TcpAcceptLoop(Sockets.BindTcpListener(endPoint)), ledger, workerCount, endPoint.Port)
+    internal DnsServer(IPEndPoint endPoint, JsonlSink ledger, int workerCount, int injectDelayMs = 0)
+        : this(Sockets.BindUdp(endPoint), new TcpAcceptLoop(Sockets.BindTcpListener(endPoint)), ledger, workerCount, endPoint.Port, injectDelayMs)
     {
     }
 
@@ -148,7 +150,7 @@ internal sealed class DnsServer : IAsyncDisposable
     /// has to arrive from outside, which is how the ledger's own evidence for
     /// <see cref="DnsTotalsKeys.TcpAcceptErrors"/> is driven.
     /// </summary>
-    internal DnsServer(Socket udp, TcpAcceptLoop acceptLoop, JsonlSink ledger, int workerCount, int port)
+    internal DnsServer(Socket udp, TcpAcceptLoop acceptLoop, JsonlSink ledger, int workerCount, int port, int injectDelayMs = 0)
     {
         _ledger = ledger;
         _workerCount = workerCount;
@@ -160,6 +162,8 @@ internal sealed class DnsServer : IAsyncDisposable
 
         _udp = udp;
         _acceptLoop = acceptLoop;
+        _responseDelay = TimeSpan.FromMilliseconds(injectDelayMs);
+        _delayed = injectDelayMs > 0 ? new DelayedDatagrams(udp, _responseDelay) : null;
     }
 
     public ValueTask DisposeAsync()
@@ -180,6 +184,13 @@ internal sealed class DnsServer : IAsyncDisposable
         workers[_workerCount] = _acceptLoop.RunAsync(socket => HandleTcpConnectionAsync(socket, cancellationToken), cancellationToken);
         await Task.WhenAll(workers).ConfigureAwait(false);
         await _acceptLoop.DrainAsync().ConfigureAwait(false);
+
+        // A pending delayed response is part of the run's send evidence, so the summary is written
+        // after the queue has been observed rather than while it is still counting send errors.
+        if (_delayed is not null)
+        {
+            await _delayed.DrainAsync().ConfigureAwait(false);
+        }
     }
 
     internal void WriteTotals(Utf8JsonWriter writer, DnsTotalsKeys keys)
@@ -277,6 +288,12 @@ internal sealed class DnsServer : IAsyncDisposable
             Interlocked.Increment(ref _udpEmpty);
         }
 
+        if (_delayed is not null)
+        {
+            _delayed.Send(response.AsMemory(0, responseLength), result.RemoteEndPoint, BookUdpSendError, cancellationToken);
+            return true;
+        }
+
         try
         {
             await _udp.SendToAsync(response.AsMemory(0, responseLength), SocketFlags.None, result.RemoteEndPoint, cancellationToken).ConfigureAwait(false);
@@ -292,12 +309,12 @@ internal sealed class DnsServer : IAsyncDisposable
         }
         catch (SocketException)
         {
-            Interlocked.Increment(ref _udpSendErrors);
+            BookUdpSendError();
             return true;
         }
     }
 
-    private async ValueTask<bool> AnswerTcpAsync(Socket socket, byte[] message, byte[] response, byte[] lengthBuffer, CancellationToken cancellationToken)
+    private async ValueTask<bool> AnswerTcpAsync(Socket socket, byte[] message, byte[] response, byte[] lengthBuffer, DelayedStreamWrites? delayed, CancellationToken cancellationToken)
     {
         var responseLength = BuildAnswer(message, response, out var answerCount);
         if (responseLength <= 0)
@@ -316,6 +333,13 @@ internal sealed class DnsServer : IAsyncDisposable
         }
 
         BinaryPrimitives.WriteUInt16BigEndian(lengthBuffer, (ushort)responseLength);
+        if (delayed is not null)
+        {
+            _ = delayed.EnqueueAsync(lengthBuffer);
+            _ = delayed.EnqueueAsync(response.AsMemory(0, responseLength));
+            return true;
+        }
+
         // A send the peer refused is not this loop's decision: the answer is dropped, and the next
         // read sees the end of the stream, which is where the connection ends.
         _ = await SocketIO.TrySendAllAsync(socket, lengthBuffer, cancellationToken).ConfigureAwait(false);
@@ -347,6 +371,9 @@ internal sealed class DnsServer : IAsyncDisposable
             Interlocked.Increment(ref _tcpConnectionsAccepted);
             var lengthBuffer = new byte[2];
             var response = new byte[MaxMessageLength];
+            var delayed = _responseDelay > TimeSpan.Zero
+                ? new DelayedStreamWrites(socket, _responseDelay, cancellationToken)
+                : null;
 
             try
             {
@@ -371,7 +398,7 @@ internal sealed class DnsServer : IAsyncDisposable
                         return;
                     }
 
-                    if (!await AnswerTcpAsync(socket, message, response, lengthBuffer, cancellationToken).ConfigureAwait(false))
+                    if (!await AnswerTcpAsync(socket, message, response, lengthBuffer, delayed, cancellationToken).ConfigureAwait(false))
                     {
                         return;
                     }
@@ -389,6 +416,15 @@ internal sealed class DnsServer : IAsyncDisposable
             {
                 /* teardown closed the socket under the handler: a teardown is not an aborted query and books nothing */
             }
+            finally
+            {
+                if (delayed is not null)
+                {
+                    await delayed.ObserveAsync().ConfigureAwait(false);
+                }
+            }
         }
     }
+
+    private void BookUdpSendError() => Interlocked.Increment(ref _udpSendErrors);
 }

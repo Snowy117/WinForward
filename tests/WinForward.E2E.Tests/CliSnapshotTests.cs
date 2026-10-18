@@ -40,6 +40,14 @@ public sealed class CliSnapshotTests
         + "                       processors, clamped to 2..8)\n";
     private const string UdpReceiverOption = "--udp-receivers";
 
+    private const string InjectDelayOption = "--inject-delay-ms";
+
+    private const string DnsPortHelpBefore = "  --dns-port <n>       DNS responder port, UDP and TCP (default 30053)\n";
+
+    private const string DnsPortHelpAfter =
+        "  --inject-delay-ms <n>  Delay every measured response by n ms (default 0, max 60000)\n"
+        + "  --dns-port <n>       DNS responder port, UDP and TCP (default 30053)\n";
+
     private static string Before => Path.Combine(RepoPaths.CliSnapshotsDirectory, "before");
 
     private static string After => Path.Combine(RepoPaths.CliSnapshotsDirectory, "after");
@@ -118,6 +126,8 @@ public sealed class CliSnapshotTests
 
         // The option is the one thing the before tree cannot contain; the sentence it replaced is
         // the other, and the line above states its absence.
+        Assert.Contains(DnsPortHelpAfter, help, StringComparison.Ordinal);
+        Assert.DoesNotContain(InjectDelayOption, Text(Path.Combine(Before, $"{stem}.stdout")), StringComparison.Ordinal);
         Assert.DoesNotContain(UdpReceiverOption, Text(Path.Combine(Before, $"{stem}.stdout")), StringComparison.Ordinal);
     }
 
@@ -160,7 +170,8 @@ public sealed class CliSnapshotTests
     /// </summary>
     private static string WithRegisteredChanges(string stdout) => stdout
         .Replace(TargetHelpBefore, TargetHelpAfter, StringComparison.Ordinal)
-        .Replace(UdpPortHelpBefore, UdpPortHelpAfter, StringComparison.Ordinal);
+        .Replace(UdpPortHelpBefore, UdpPortHelpAfter, StringComparison.Ordinal)
+        .Replace(DnsPortHelpBefore, DnsPortHelpAfter, StringComparison.Ordinal);
 
     private static List<RecordedCase> ReadIndex(string tree)
     {

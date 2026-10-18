@@ -16,7 +16,7 @@ public sealed class PlanFileTests
             string.Join(',', arms.Select(arm => arm.Name)));
     }
 
-    // 6 long-form plans, 5 short-form ones, the Windows shape-preserving compression and the 5 release
+    // 7 long-form plans, 5 short-form ones, the Windows shape-preserving compression and the 5 release
     // plans. The count is asserted so that a plan moved out of these directories fails the suite
     // instead of quietly shrinking the set under test.
     [Fact]
@@ -24,7 +24,7 @@ public sealed class PlanFileTests
     {
         var plans = ShippedPlanPaths();
 
-        Assert.Equal(17, plans.Length);
+        Assert.Equal(18, plans.Length);
         foreach (var plan in plans)
         {
             Assert.True(PlanFile.TryLoad(plan, out var arms, out var planBytes, out var error), $"{plan}: {error}");
@@ -83,6 +83,48 @@ public sealed class PlanFileTests
         Assert.Single(arms);
         Assert.Equal("BASE", arms[0].Name);
         Assert.True(planBytes.Length > 0);
+    }
+
+    /// <summary>
+    /// The calibration-only positive control: the reference row's latency and loss arms at release
+    /// durations and rates, with no MIX/REL/THRU breadth that the sensitivity question does not need.
+    /// </summary>
+    [Fact]
+    public void TheSensitivityPlanRunsLatencyAndLossAtTheReleaseCaliber()
+    {
+        var plan = Path.Combine(RepoPaths.PlansDirectory, "sensitivity-plan.json");
+
+        Assert.True(PlanFile.TryLoad(plan, out var arms, out _, out var error), error);
+        Assert.Equal("LAT,LOSS", string.Join(',', arms.Select(arm => arm.Name)));
+
+        var latency = arms[0];
+        Assert.Equal(30, latency.Seconds);
+        Assert.Equal(20, latency.RatePerSecond);
+        Assert.Equal("tcp+udp", latency.Protocol);
+
+        var loss = arms[1];
+        Assert.Equal(120, loss.Seconds);
+        Assert.Equal(500, loss.RatePerSecond);
+        Assert.Equal(200, loss.LossWindowMs);
+    }
+
+    /// <summary>
+    /// The reliability arm's fault mix is the one plan key that carries the target's stall mode.
+    /// Canonical and release both declare it, so the release plan stays a duration-only variant and a
+    /// plan that quietly dropped the mode would fail here.
+    /// </summary>
+    [Fact]
+    public void BothFullPlansRunTheStallFaultMode()
+    {
+        string[] directories = [RepoPaths.PlansDirectory, RepoPaths.ReleasePlansDirectory];
+        foreach (var directory in directories)
+        {
+            var plan = Path.Combine(directory, "full-plan.json");
+            Assert.True(PlanFile.TryLoad(plan, out var arms, out _, out var error), error);
+
+            var modeMix = arms.Single(arm => arm.Name == "REL").ModeMix;
+            Assert.Contains("stall=25", modeMix, StringComparison.Ordinal);
+        }
     }
 
     private static string[] ShippedPlanPaths() =>

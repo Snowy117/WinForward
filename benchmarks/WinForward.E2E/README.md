@@ -61,7 +61,7 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Target/SourceCensus.cs` | the UDP echo server's per-receiver source-endpoint census |
 | `Target/TargetLog.cs` | the target's own stderr log, with the closed-pipe guard the teardown contract requires |
 | `Wire/` | the protocol both verbs share: frame codec, stream reader, CRC32C, command payload, half-close trailer, DNS wire subset, payload filler |
-| `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `selftest-plan` |
+| `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `sensitivity-plan`, `selftest-plan` |
 | `scripts/plans-short/` | the same arm shapes at short durations and lower rates, for validating a change |
 | `scripts/plans-windows/` | one file, `full-shape-plan.json`: `full-plan`'s load shape — `LOSS 120s × 500/s`, `LATLOAD 500 rps`, the `PERSIST` idle window, `DNS 200 rps` — for validating a change through a real product without a full-length campaign. Its arm order, arm names and key sets are identical to `scripts/plans/full-plan.json`; the only differences are nine `seconds` values, and `LOSS` (120 s) is the one arm left uncompressed. The loader has no override or merge mechanism, so the shape is repeated rather than patched — see "The configs and the plan sets" |
 | `scripts/plans-release/` | the release caliber: the five campaign plans with only their declared `seconds` changed, plus `caliber.json` — the machine-readable descriptor naming the plan set, `full-plan.json`'s SHA-256 and the per-arm seconds the report prints |
@@ -196,7 +196,7 @@ A campaign needs a target reachable from the machine under test. The target is t
 
 ```bash
 WinForward.E2E target [--bind <ip>] [--tcp-port <n>] [--udp-port <n>] [--dns-port <n>]
-                      [--dns-alt-port <n>] [--udp-receivers <n>] [--label <name>] [--ledger <path>]
+                      [--dns-alt-port <n>] [--udp-receivers <n>] [--inject-delay-ms <n>] [--label <name>] [--ledger <path>]
 ```
 
 | Target flag | Default | Meaning |
@@ -207,6 +207,7 @@ WinForward.E2E target [--bind <ip>] [--tcp-port <n>] [--udp-port <n>] [--dns-por
 | `--dns-port <n>` | 30053 | DNS responder, UDP and TCP |
 | `--dns-alt-port <n>` | none | a second DNS responder, UDP and TCP, on a port no product special-cases; it must differ from the other three ports |
 | `--udp-receivers <n>` | `clamp(processors / 2, 2, 8)` | datagram receive loops each listener starts, `1..64` — the echo listener and both DNS listeners take the same count, and only the echo listener's started loops are published, as `targetSummary`'s `udp/udpReceivers` |
+| `--inject-delay-ms <n>` | 0 | deterministic delay in ms before each measured response (TCP echo, UDP echo, DNS UDP/TCP), `0..60000`; `0` is a no-op. Calibration-only positive control; the effective value is written to `<ledger-base>.injection.json` beside the ledger |
 | `--label <name>` | empty | identity copied into every ledger record: the run's own label when the target serves one run, or `target:<port>` — the port the instance serves — when it serves many |
 | `--ledger <path>` | `target-ledger.jsonl` | JSONL ledger output |
 
@@ -405,15 +406,15 @@ The four plan directories are four **independent sets**, not one set with overri
 reads exactly one `--plan` path and has no `extends`, patch or merge token (repeating the flag is
 last-one-wins), so every variant is a full copy of the arms it runs:
 
-| Directory | Files | Relationship to `scripts/plans/` (measured 2026-10-09; `plans-release` measured 2026-10-18) |
+| Directory | Files | Relationship to `scripts/plans/` (measured 2026-10-18 for all four rows; the leaf counts below are current) |
 |---|---|---|
-| `scripts/plans/` | 6: `base`, `dns`, `dual`, `full`, `selftest`, `udp` | the canonical set; the release campaign stages `plans-release/` instead, and `selftest-plan.json` — `full`'s ten arms plus `BASE`, at 5–10 s per arm on smaller, lower-rate shapes — is the self-test's |
-| `scripts/plans-short/` | 5: the same set minus `selftest-plan` | the same arm shapes at short durations **and lower rates**: against `plans/full-plan.json` it differs in 17 leaves, 10 `seconds` and 7 not — four `ratePerSecond`, `connectionsPerSecond`, `targetBytesPerSecond` and `idleSeconds`. It is not a pure duration compression |
+| `scripts/plans/` | 7: `base`, `dns`, `dual`, `full`, `sensitivity`, `selftest`, `udp` | the canonical set; the release campaign stages `plans-release/` instead, and `selftest-plan.json` — `full`'s ten arms plus `BASE`, at 5–10 s per arm on smaller, lower-rate shapes — is the self-test's. `sensitivity-plan.json` is the calibration-only positive control: one target instance, no product, never staged as a campaign row |
+| `scripts/plans-short/` | 5: the same set minus `selftest-plan` and `sensitivity-plan` | the same arm shapes at short durations **and lower rates**: against `plans/full-plan.json` it differs in 18 leaves, 10 `seconds` and 8 not — four `ratePerSecond`, `connectionsPerSecond`, `targetBytesPerSecond`, `idleSeconds`, and `arms[6]/modeMix` (the canonical plan has `stall`, the short set does not). It is not a pure duration compression |
 | `scripts/plans-windows/` | 1: `full-shape-plan.json` | `plans/full-plan.json` with nine `seconds` values overridden and **nothing else**: 47 of its 56 leaves are identical, 0 leaves differ in any key other than `seconds`, and `LOSS` keeps its full 120 s. `deploy-campaign.sh` stages it as `C:\wfbench\e2e-win\full-plan.json` |
 | `scripts/plans-release/` | 5 plans plus `caliber.json`: `base`, `dns`, `dual`, `full`, `udp` | the **release caliber**: the canonical arm shapes with only the declared `seconds` values changed — `IDLE`, `LAT`, `LATLOAD`, `DNS`, `DNSALT` and `THRU` 30 s, `LOSS` 120 s, `REL` 60 s, `MIX` and `PERSIST` 60 s on the full plan — and every rate, count and `modeMix` identical to `plans/`. `caliber.json` names the set, `full-plan.json`, its SHA-256 and the per-arm seconds |
 
 Every file in `plans-short/`, `plans-windows/` and `plans-release/` is derivable from `plans/` plus
-three override tables — `plans/` itself is the irreducible set — so deduplicating the seventeen is
+three override tables — `plans/` itself is the irreducible set — so deduplicating the eighteen is
 tempting, but it needs a new `PlanFile` override/merge mechanism with its own validation and tests.
 **Do not add one as part of a data cleanup**; it is registered as a follow-up instead.
 
@@ -446,6 +447,7 @@ One client run writes one directory. Every JSONL file is one JSON object per lin
 | | `tcpSummary` | once at shutdown: connections, refused accepts, bytes echoed, protocol errors, frames cut off mid-frame by the peer's close, verdicts |
 | | `targetSummary` | once at shutdown: the tick window, the ledger write-error count, and the `tcp` / `udp` / `dns` / `dnsAlt` totals — the UDP block carries the receive-loop count that started (`udpReceivers`), and the `tcp`, `dns` and `dnsAlt` blocks repeat their listener's `acceptErrors` and `truncatedFrames` |
 | | `error` | a record that could not be written: `type`, `detail` (the innermost exception type), and the envelope |
+| `<ledger-base>.injection.json` | one object | the target's delay audit: `injectDelayMs`, `label`, `ledger`, `writtenUtc`; written beside the ledger; not a ledger key and outside the `ArmKeys` literal gate; the analysis does not read it |
 | `proxy-truth.json` | one object | `tcp`, `udp`, `utcp` and `total` — the proxied flows observed in the proxy's log — plus `directLeak` in the dual phase's file |
 | `dual/proxied/`, `dual/direct/` | as a row | the two lanes of the dual phase: one run around the proxy and one configured to go direct, the same workload shape against two targets. Each lane is a full run directory, and `dual/proxy-truth.json` carries the row's flow census plus `directLeak` |
 | `order.txt` | one line | the row ids in the order this pass ran them |

@@ -20,12 +20,14 @@ internal static class TargetRunner
 
         var workers = options.UdpReceivers;
         await using var ledger = new JsonlSink(options.LedgerPath, JsonlPolicy.SwallowAndCount, WriteLedgerEnvelope(options.Label));
-        await using var tcp = new TcpTargetServer(new IPEndPoint(bindAddress, options.TcpPort), ledger);
-        await using var udp = new UdpEchoServer(new IPEndPoint(bindAddress, options.UdpPort), ledger, workers);
-        await using var dns = new DnsServer(new IPEndPoint(bindAddress, options.DnsPort), ledger, workers);
+        await using var tcp = new TcpTargetServer(new IPEndPoint(bindAddress, options.TcpPort), ledger, options.InjectDelayMs);
+        await using var udp = new UdpEchoServer(new IPEndPoint(bindAddress, options.UdpPort), ledger, workers, options.InjectDelayMs);
+        await using var dns = new DnsServer(new IPEndPoint(bindAddress, options.DnsPort), ledger, workers, options.InjectDelayMs);
         await using var dnsAlt = options.DnsAltPort is { } dnsAltPort
-            ? new DnsServer(new IPEndPoint(bindAddress, dnsAltPort), ledger, workers)
+            ? new DnsServer(new IPEndPoint(bindAddress, dnsAltPort), ledger, workers, options.InjectDelayMs)
             : null;
+
+        await TargetInjectionFile.WriteAsync(options).ConfigureAwait(false);
 
         var startedTicks = Stopwatch.GetTimestamp();
         await AnnounceAsync(options, bindAddress, dnsAlt is not null).ConfigureAwait(false);
@@ -59,7 +61,7 @@ internal static class TargetRunner
     {
         await Console.Out.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
-            $"e2e target listening on tcp {bindAddress}:{options.TcpPort}, udp {bindAddress}:{options.UdpPort}, dns {bindAddress}:{options.DnsPort} (label '{options.Label}', ledger {Path.GetFullPath(options.LedgerPath)})")).ConfigureAwait(false);
+            $"e2e target listening on tcp {bindAddress}:{options.TcpPort}, udp {bindAddress}:{options.UdpPort}, dns {bindAddress}:{options.DnsPort} (label '{options.Label}', inject delay {options.InjectDelayMs} ms, ledger {Path.GetFullPath(options.LedgerPath)})")).ConfigureAwait(false);
         if (hasDnsAlt)
         {
             await Console.Out.WriteLineAsync(string.Create(
@@ -188,6 +190,7 @@ internal static class TargetRunner
               --udp-port <n>       UDP echo listener port (default 30010)
               --udp-receivers <n>  UDP receive loops each datagram listener runs (default: half the
                                    processors, clamped to 2..8)
+              --inject-delay-ms <n>  Delay every measured response by n ms (default 0, max 60000)
               --dns-port <n>       DNS responder port, UDP and TCP (default 30053)
               --dns-alt-port <n>   Second DNS responder port, UDP and TCP (default: none)
               --label <name>       Run or row identity copied into every ledger record (default empty)

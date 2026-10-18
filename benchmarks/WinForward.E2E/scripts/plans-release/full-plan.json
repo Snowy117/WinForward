@@ -52,7 +52,7 @@
       "kind": "reliability",
       "seconds": 60,
       "connectionsPerSecond": 20,
-      "modeMix": "clean=25,resetAfterN=25,partialFin=25,halfClose=25"
+      "modeMix": "clean=25,resetAfterN=25,partialFin=25,halfClose=25,stall=25"
     },
     {
       "name": "THRU",

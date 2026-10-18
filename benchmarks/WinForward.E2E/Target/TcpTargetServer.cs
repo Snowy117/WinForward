@@ -72,13 +72,14 @@ internal sealed class TcpTargetServer : IAsyncDisposable
     private readonly CancellationTokenSource _shutdown = new();
     private readonly TcpAcceptLoop _acceptLoop;
     private readonly long[] _verdicts = new long[s_verdictCount];
+    private readonly TimeSpan _responseDelay;
     private long _connectionCount;
     private long _bytesEchoed;
     private long _protocolErrors;
     private long _truncatedFrames;
 
-    internal TcpTargetServer(EndPoint endPoint, JsonlSink ledger)
-        : this(new TcpAcceptLoop(Sockets.BindTcpListener(endPoint)), ledger)
+    internal TcpTargetServer(EndPoint endPoint, JsonlSink ledger, int injectDelayMs = 0)
+        : this(new TcpAcceptLoop(Sockets.BindTcpListener(endPoint)), ledger, injectDelayMs)
     {
     }
 
@@ -88,10 +89,11 @@ internal sealed class TcpTargetServer : IAsyncDisposable
     /// has to arrive from outside, which is how the ledger's own evidence for
     /// <see cref="TcpTotalsKeys.AcceptErrors"/> is driven.
     /// </summary>
-    internal TcpTargetServer(TcpAcceptLoop acceptLoop, JsonlSink ledger)
+    internal TcpTargetServer(TcpAcceptLoop acceptLoop, JsonlSink ledger, int injectDelayMs = 0)
     {
         _ledger = ledger;
         _acceptLoop = acceptLoop;
+        _responseDelay = TimeSpan.FromMilliseconds(injectDelayMs);
     }
 
     internal async Task RunAsync(CancellationToken cancellationToken)
@@ -163,7 +165,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
             Interlocked.Increment(ref _connectionCount);
 
             var reader = new FrameStreamReader(socket);
-            var command = await TcpConnectionProtocol.RunConnectionAsync(socket, reader, _shutdown.Token).ConfigureAwait(false);
+            var command = await TcpConnectionProtocol.RunConnectionAsync(socket, reader, _shutdown.Token, _responseDelay).ConfigureAwait(false);
             if (command.Outcome is not { } outcome)
             {
                 // Teardown closed the socket under the connection before the protocol measured
