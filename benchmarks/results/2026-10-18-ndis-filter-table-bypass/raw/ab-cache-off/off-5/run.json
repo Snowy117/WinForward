@@ -1,0 +1,45 @@
+{
+  "type": "run",
+  "label": "",
+  "clientVersion": "1.0.0.0",
+  "osDescription": "Microsoft Windows 10.0.26100",
+  "frameworkDescription": ".NET 10.0.12",
+  "logicalProcessors": 16,
+  "planHash": "13e735627b9c1f28",
+  "planPath": "C:\\wfprof\\fdd\\plan.json",
+  "planSource": "file",
+  "outDirectory": "C:\\wfprof\\kpcache\\results\\off-5",
+  "target": {
+    "address": "192.168.100.4",
+    "tcpPort": 40010,
+    "udpPort": 40010,
+    "dnsPort": 53
+  },
+  "samplerProcesses": [
+    "WinForward"
+  ],
+  "startedUtc": "2026-10-18T08:05:32.0110481\u002B00:00",
+  "endedUtc": "2026-10-18T08:06:17.1080707\u002B00:00",
+  "startedTicks": 251978830790,
+  "endedTicks": 252429738878,
+  "wallSeconds": 45.091,
+  "arms": [
+    {
+      "name": "IDLE",
+      "kind": "idle",
+      "file": "IDLE.jsonl",
+      "startedTicks": 251978963594,
+      "endedTicks": 252129185008,
+      "failed": false
+    },
+    {
+      "name": "THRU",
+      "kind": "throughput",
+      "file": "THRU.jsonl",
+      "startedTicks": 252129571433,
+      "endedTicks": 252429671314,
+      "failed": false
+    }
+  ],
+  "failed": false
+}

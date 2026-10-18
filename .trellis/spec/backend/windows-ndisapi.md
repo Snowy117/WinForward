@@ -7,7 +7,8 @@
 > around. Children: [ndis-capture-refresh.md](./ndis-capture-refresh.md) (when the capture view is
 > rebuilt and why), [ndis-batched-capture.md](./ndis-batched-capture.md) (the batched read ABI and
 > buffer pooling), [ndis-batched-send.md](./ndis-batched-send.md) (batched reinjection, pass lanes and
-> redirect lanes).
+> redirect lanes), [ndis-kernel-pass-cache.md](./ndis-kernel-pass-cache.md) (the opt-in leased
+> static-filter mirror, its PASS-only ownership rules, and its measured Windows cost).
 
 ---
 
@@ -120,7 +121,9 @@ stable GUID + friendly name + internal name for every MSTCP-bound adapter (exit 
   ever shows up on hardware: a single send-gate + per-adapter read-gates.
 - This matches the official samples: `ETH_M_REQUEST.hAdapterHandle` is set once from the adapter list
   and reused for read/write requests.
-- All 14 NDISAPI `[LibraryImport]` declarations in `NdisApiAbi.cs` use `SetLastError = true`;
+- All 18 NDISAPI `[LibraryImport]` declarations in `NdisApiAbi.cs` use `SetLastError = true` (the
+  four static-filter-table calls are `SetPacketFilterTable`, `ResetPacketFilterTable`,
+  `GetPacketFilterTableSize`, and `GetPacketFilterTable`);
   send-path exceptions must include `Marshal.GetLastWin32Error()` — driver-side rejections are
   otherwise undiagnosable. Diagnostics context worth logging on send failure: native error, frame
   length, device flags, adapter handle.

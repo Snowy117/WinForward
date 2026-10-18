@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify the implementation against the quality gate, suppression policy, and commit gates."}
+{"file":".trellis/spec/backend/test-stability.md","reason":"Check that the new tests use real synchronization, deterministic clocks, and no wall-clock assertions."}
+{"file":".trellis/spec/backend/allocation-gates.md","reason":"Verify the exact 0 B gate on the observation path can actually fail and covers the production path."}
+{"file":".trellis/spec/backend/hot-path.md","reason":"Check that no new per-packet allocation, lock chain, or logging entered the capture loop."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify event names, levels, placeholders, privacy, and no logging on the packet path."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Verify the ABI mirror, gate topology, error mapping, and the Windows open items against the interop contracts."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Verify file placement, size ceilings, and naming for the new ABI/cache files."}
+{"file":".trellis/spec/backend/benchmark-methodology.md","reason":"Verify that no timing claim is stated as a gate and the Windows evidence plan is honest."}

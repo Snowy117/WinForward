@@ -1,0 +1,53 @@
+{
+  "type": "run",
+  "label": "",
+  "clientVersion": "1.0.0.0",
+  "osDescription": "Microsoft Windows 10.0.26100",
+  "frameworkDescription": ".NET 10.0.12",
+  "logicalProcessors": 16,
+  "planHash": "cb4e338d2fe86243",
+  "planPath": "C:\\wfprof\\kpcache\\plan-soak.json",
+  "planSource": "file",
+  "outDirectory": "C:\\wfprof\\kpcache\\results\\soak-on",
+  "target": {
+    "address": "192.168.100.4",
+    "tcpPort": 40010,
+    "udpPort": 40010,
+    "dnsPort": 53
+  },
+  "samplerProcesses": [
+    "WinForward"
+  ],
+  "startedUtc": "2026-10-18T08:16:33.5865533\u002B00:00",
+  "endedUtc": "2026-10-18T08:18:03.9355399\u002B00:00",
+  "startedTicks": 258594585872,
+  "endedTicks": 259498000143,
+  "wallSeconds": 90.341,
+  "arms": [
+    {
+      "name": "THRU",
+      "kind": "throughput",
+      "file": "THRU.jsonl",
+      "startedTicks": 258594713653,
+      "endedTicks": 258894903395,
+      "failed": false
+    },
+    {
+      "name": "DNS",
+      "kind": "dns",
+      "file": "DNS.jsonl",
+      "startedTicks": 258895298898,
+      "endedTicks": 259195563038,
+      "failed": false
+    },
+    {
+      "name": "LOSS",
+      "kind": "loss",
+      "file": "LOSS.jsonl",
+      "startedTicks": 259195716059,
+      "endedTicks": 259497927543,
+      "failed": false
+    }
+  ],
+  "failed": false
+}

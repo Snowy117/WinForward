@@ -1,0 +1,13 @@
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"NDISAPI interop contracts, the shared request ABI, the native-call gates, and the adapter-handle rules this feature extends."}
+{"file":".trellis/spec/backend/ndis-batched-capture.md","reason":"The capture read path, batch-buffer ownership, and pump contracts the pass observation sits beside."}
+{"file":".trellis/spec/backend/ndis-batched-send.md","reason":"The pass reinjection lane contract and its failure posture, which the bypass removes for cached flows."}
+{"file":".trellis/spec/backend/hot-path.md","reason":"The hot-path family hub: what a packet may cost and which rules hold across the pipeline."}
+{"file":".trellis/spec/backend/allocation-gates.md","reason":"How to write an exact 0 B gate for the observation path and the existing warm dispatch."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"LoggerMessage event identity, levels, privacy, and the no-throw observational posture for the new kernel.passCache events."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Analyzer suppressions and the two commit gates (format + inspectcode) this task must pass."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"File placement, the 400-effective-line ceiling, naming, and the new-file layout."}
+{"file":".trellis/spec/backend/test-stability.md","reason":"Flake-proof test contracts (real synchronization points, deterministic clocks) for the cache and seam tests."}
+{"file":".trellis/spec/backend/benchmark-methodology.md","reason":"What the Windows A/B may claim: series comparisons vs exact gates, and the negative-result path."}
+{"file":".trellis/spec/backend/traffic-policy-lifecycle.md","reason":"The two policy domains, non-flow pass, self-traffic, and the process-pass decisions the cache mirrors."}
+{"file":".trellis/spec/backend/async-lifetime.md","reason":"QuiescenceScope admission/seal/join for the cache worker lifetime and the bundle disposal order."}
+{"file":".trellis/spec/backend/native-lease-and-pool-lifetime.md","reason":"Pool/lease ownership around the executor pass path the observer hooks into."}
