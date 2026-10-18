@@ -156,8 +156,27 @@ and embedded in the verdict. The campaign invocation is
 **full seven-pass tree** and runs
 `--release --thresholds <absolute> --min-passes 6 --discard-pass 1`, so `release-inputs.json` records
 `discarded: [1]` and the measured passes `[2..7]`. A tree trimmed to passes 2-7 is refused by the
-script, because it cannot carry the discarded-pass provenance. `--legacy` keeps the old invocation for
-diagnostics; the release campaign path is the default.
+script, because it cannot carry the discarded-pass provenance. `--legacy` keeps the old invocation
+for diagnostics; the release campaign path is the default.
+
+### Re-analysis of an archived campaign
+
+- An archived tree is read through the row table compiled into `Model/RowProfiles.cs`, not through
+  the tree's own metadata. A later profile change moves the row table, the dual-phase/availability
+  cells and the findings of the legacy documents while leaving the metric values untouched;
+  reproduce a baseline at the commit that produced it, and never compare two profile generations as
+  a regression.
+- A release re-analysis needs the campaign's own pre-registered `thresholds.json`: one caliber, its
+  plan hash and durations, and a band written before the campaign. The legacy business constants
+  are not a calibration band, and a post-hoc band is not a re-analysis. When the file is absent,
+  record the missing band and stop rather than manufacture one.
+- The release path verifies the thresholds `caliber` plan, hash and durations only; it does not read
+  each row's `run.json` plan hash. A mixed-caliber tree has to be rejected by the analyst before
+  `--release`, and a row that ran a partial plan is not the full-plan reference, even when its id is
+  the declared reference.
+- A tree below `minPasses` is recorded with `insufficient: true`; its primary states are
+  `inconclusive`, not `different` or `same`. A zero-variance or zero-event rate is `unevaluable`,
+  never `same`.
 
 | Artifact | Purpose |
 |---|---|
