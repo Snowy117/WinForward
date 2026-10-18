@@ -7,6 +7,16 @@
 > A run that fails mid-write is [measurement-run-lifecycle.md](./measurement-run-lifecycle.md)'s subject;
 > the gates that hold these spellings are [measurement-tooling.md](./measurement-tooling.md)'s.
 
+## Release artifacts are separate, not published keys
+
+`--release` adds `release-inputs.json`, `verdict.release.json`, `tables.release.md` and
+`findings.release.json` beside the legacy report. Those are analysis documents, not arm records:
+this contract's key spellings, the three states, the sink policies and the fail-closed plan loader
+are unchanged, and the frozen key set — `contract-inventory.json`, `contract-rename.json`, the key
+literal and shape tests — does not grow. They have their own schemas (`release-inputs/1`,
+`release-verdict/1`, `release-findings/1`) and are described in the analysis README; the legacy
+record shape is untouched whether or not the release flags ran.
+
 ## One spelling per published key
 
 Field names live in `benchmarks/WinForward.E2E.Contracts` (`ArmKeys.*.cs`), a public project both

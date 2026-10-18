@@ -28,7 +28,7 @@ Release (new, C#-only):
 bash benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh \
   --raw raw --out analysis \
   --release --thresholds thresholds.json --min-passes 6 --discard-pass 1
-# -> tables.release.md, verdict.release.json, findings.release.json
+# -> release-inputs.json, tables.release.md, verdict.release.json, findings.release.json
 #    (the legacy files may also be written for diagnostics; they are unchanged)
 ```
 

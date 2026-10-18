@@ -6,7 +6,7 @@
 
 ## The README contract table is a gate, not prose
 
-`benchmarks/WinForward.E2E/README.md`'s "Which keys are contract" section (line 428, bounded by the
+`benchmarks/WinForward.E2E/README.md`'s "Which keys are contract" section (bounded by the
 next `## ` heading) is what a reader consults when a cell looks wrong, and it is the one place a
 rename can go stale without anything failing:
 the analysis resolves most paths by arm kind, so a misspelt key renders an empty cell and the report still
@@ -121,9 +121,12 @@ The test replays those 28 against `before/` and the 3 the E3-d receive-loop opti
 runs against (`verification/FROZEN.md:8`). Entry point
 `benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh`: it builds once, then `exec`s the binary with the
 caller's working directory and arguments untouched (`--raw --out --ledger --flat
---warmup-seconds --resamples --seed`; defaults `../raw`, `..`, `5.0`, `10000`, `20261006`; `--ledger` may
-be repeated). `AnalysisOptions.DefaultMinPasses = 3` is a constant rather than a flag: fewer than three
-passes is reported as `inconclusive`.
+--warmup-seconds --resamples --seed`, plus the release-only `--release --thresholds --min-passes
+--discard-pass`; defaults `../raw`, `..`, `5.0`, `10000`, `20261006`; `--ledger` may be repeated).
+`AnalysisOptions.DefaultMinPasses = 3` is a constant rather than a flag: fewer than three passes is
+reported as `inconclusive`. The release path has its own default, six measured passes
+(`ReleaseOptions.DefaultMinPasses`), and its two pass-selection flags override the thresholds file in
+that order.
 
 It reads JSONL with `JsonDocument`. The envelope-level names come from `ArmKeys` (a compile error on a
 rename), while the paths inside `metrics`/`parameters` are literals addressed positionally on `/`, because
@@ -133,6 +136,26 @@ only the arm's kind knows which map a path belongs to — so a metric rename is 
 `Tables/TablesWriter.cs:52-69`), `verdict.json` (14 top-level keys, `Verdict/VerdictWriter.cs:19-34`) and
 `<out>/plots/SKIPPED.md` (`Cli/AnalysisRunner.cs:38-48`, `Cli/PlotsNotice.cs:41`); the frozen
 byte-identical copy of the last one is `verification/plots-SKIPPED.md`.
+
+Those three files are the legacy, frozen contract: `verification/oracle-diff.py` compares the first two
+and the plots notice is pinned as `verification/plots-SKIPPED.md`.
+
+A release run (`--release --thresholds <file>`) writes four more documents beside them:
+`release-inputs.json` (schema `release-inputs/1`), `verdict.release.json` (`release-verdict/1`),
+`tables.release.md` and `findings.release.json` (`release-findings/1`). They are release-only: no
+oracle compares them, they are absent from `contract-inventory.json`, `contract-rename.json`, the frozen
+golden and the README key table, and the release rules are covered by the analyzer's C# tests and
+negative controls instead. The legacy files stay byte-identical whether or not the release flags ran.
+
+The release path resolves `caliber.path` from the process's working directory and opens `--thresholds`
+from that same directory as spelled; `coverage.json`, when present, is read beside the thresholds file
+and embedded in the verdict. The campaign invocation is
+`publish-campaign.sh <results-directory> <thresholds.json>` from the repository root: it downloads the
+**full seven-pass tree** and runs
+`--release --thresholds <absolute> --min-passes 6 --discard-pass 1`, so `release-inputs.json` records
+`discarded: [1]` and the measured passes `[2..7]`. A tree trimmed to passes 2-7 is refused by the
+script, because it cannot carry the discarded-pass provenance. `--legacy` keeps the old invocation for
+diagnostics; the release campaign path is the default.
 
 | Artifact | Purpose |
 |---|---|

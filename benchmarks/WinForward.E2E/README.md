@@ -92,7 +92,7 @@ these five is in `git ls-files`, so a fix to one can never be committed):
 | `scripts/wf.sh` | drives the remote Windows session on one particular host |
 | `scripts/deploy-campaign.sh` | copies the artifacts and configurations to one particular machine |
 | `scripts/start-targets.sh` | starts the targets with one particular set of addresses and ports |
-| `scripts/publish-campaign.sh` | collects a campaign from one particular machine and runs the analysis on it |
+| `scripts/publish-campaign.sh` | collects a campaign from one particular machine and runs the release analysis on the downloaded full pass tree; the legacy invocation is `--legacy` |
 
 A campaign is not reproducible from a fresh checkout: those five files are how it is driven, and the
 Proxifier row's `bench.ppx` is machine-local too (see "The configs and the plan sets"). What the
@@ -747,6 +747,13 @@ The flags, the inputs, the aggregation policy and every table are described in
 [README.md](../WinForward.E2E.Analysis/README.md); the analysis is a .NET project in this
 repository, sharing the harness's contract types, and it writes `plots/SKIPPED.md` instead of the
 charts the previous implementation drew.
+
+The release campaign uses `scripts/publish-campaign.sh` (local glue, absent from a fresh checkout):
+it downloads the full seven-pass tree, changes to the repository root and runs the release
+invocation with `--release --thresholds <absolute> --min-passes 6 --discard-pass 1`. The thresholds
+file and the optional `coverage.json` beside it are calibration evidence; the invocation, its four
+artifacts and the calibration/release runbook are in the
+[analysis README](../WinForward.E2E.Analysis/README.md).
 
 ## Non-obvious properties
 

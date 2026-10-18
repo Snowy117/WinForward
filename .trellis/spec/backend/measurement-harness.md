@@ -66,4 +66,7 @@ The analyzer's own artifacts — `tables.md`, `verdict.json` and `<out>/plots/SK
 outputs, not history: they are written unconditionally by
 `benchmarks/WinForward.E2E.Analysis/Cli/AnalysisRunner.cs:38-48`. `analyze.py`, the Python reference
 they were once compared against, is retired and survives only as frozen output
-(`benchmarks/WinForward.E2E.Analysis/verification/FROZEN.md:8`).
+(`benchmarks/WinForward.E2E.Analysis/verification/FROZEN.md:8`). The release invocation adds
+`release-inputs.json`, `verdict.release.json`, `tables.release.md` and `findings.release.json`; those
+four are release-only documents, not part of the frozen contract above
+([tooling](./measurement-tooling.md)).

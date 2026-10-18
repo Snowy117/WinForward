@@ -118,10 +118,14 @@ frozen golden** for B5.
       the release `caliber.json` hash.
 - [ ] Stage `plans-release/*` as `C:\wfbench\e2e\{full,udp,dns,dual,base}-plan.json` and stage
       `caliber.json`; do not stage canonical `plans/` under the release label.
-- [ ] Analyze the full 7-pass tree with `--discard-pass 1`; do not stage only passes 2–7 (it
-      loses the discarded-pass provenance). `publish-campaign.sh` must `cd` to the repo or use an
-      absolute `caliber.path`; it currently analyzes every pass from `$raw`.
-- [ ] Verify: `bash -n`; `--help`/dry run; `git ls-files` shows the four scripts; a dirty-tree run
+- [ ] B5e already runs the full 7-pass tree with `--discard-pass 1` from the repo cwd; B7 must
+      track `publish-campaign.sh`, remove the `.gitignore` entry, and parameterize the remaining
+      paths. Do not redo the invocation or stage only passes 2–7.
+- [ ] `verify-vm.ps1` checks the VM prerequisites (ProxiFyre service, Proxifier service,
+      ProxyBridge, ndisrd/ProxiFyreDrv/WinDivert, sing-box 1.14.2-singfix, `bench.ppx`,
+      `ndisapi.dll`, `C:\wfbench` layout) and refuses with a named missing item.
+- [ ] Verify: `bash -n`; `--help`/dry run; `verify-vm.ps1`; `git ls-files` shows the four scripts;
+      a dirty-tree run refuses without `--allow-dirty`.
       refuses without `--allow-dirty`.
 - [ ] Commit `feat(e2e): ...`.
 

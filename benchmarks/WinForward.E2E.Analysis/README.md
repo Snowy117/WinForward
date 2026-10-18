@@ -9,8 +9,9 @@ things:
 | `verdict.json` | per-row medians, the findings list, the control-block comparison, the dual phase, the ledger cross-check, and a pairwise practical-significance test per headline metric |
 | `plots/` | `plots/SKIPPED.md`; the charts the reference drew are not rendered (see "Plots") |
 
-With `--release` the same run also writes `verdict.release.json`, `tables.release.md` and
-`findings.release.json`; the three legacy files stay byte-identical (see "The release files").
+With `--release` the same run also writes `release-inputs.json`, `verdict.release.json`,
+`tables.release.md` and `findings.release.json`; the three legacy files stay byte-identical
+(see "The release invocation" and "The release files").
 
 It is a .NET console project in this repository, built with the rest of the solution and referencing the
 harness's contract project (`WinForward.E2E.Contracts`), so the envelope-level field names it reads —
@@ -86,9 +87,37 @@ the legacy outputs are untouched.
 `release-thresholds.example.json` beside this README is the schema filled in for the current release
 caliber. Its `caliber.sha256` is the digest of
 `benchmarks/WinForward.E2E/scripts/plans-release/full-plan.json`, so a plan edit updates that value or
-fails the release tests. A relative `caliber.path` is resolved from the process's current working
-directory — the same base `--thresholds` is opened from, and the one `scripts/analyze.sh` deliberately
-does not change.
+fails the release tests. It is an example, not a calibration record: the calibration writes its own
+`thresholds.json`, and the campaign passes that file's absolute path.
+
+#### The campaign invocation
+
+The release campaign runs this invocation from the repository root; `publish-campaign.sh` is local
+glue (gitignored, absent from a fresh checkout) that publishes on the VM, downloads the full
+campaign and runs the release analyzer. `--legacy` runs the old analyzer for diagnostics only.
+
+```bash
+bash benchmarks/WinForward.E2E/scripts/publish-campaign.sh \
+  <campaign-root> /abs/path/to/thresholds.json
+```
+
+The script analyses the **full seven-pass tree** with
+`--release --thresholds <abs> --min-passes 6 --discard-pass 1` and does not trim the tree to passes
+2-7. `release-inputs.json` then records `"total": 7, "discarded": [1]` and
+`measured: [2, 3, 4, 5, 6, 7]` with `n: 6`; the discarded pass stays in `--raw` as the provenance the
+record names. The script refuses a tree with no `pass1` rather than silently analysing a different
+pass selection.
+
+**Working directory.** `--thresholds` is opened from the process's working directory as spelled, and
+`caliber.path` is resolved from the same directory. `publish-campaign.sh` therefore changes to the
+repository root and hands the analyzer absolute `--raw`, `--out` and `--thresholds` paths, so the
+checked-in relative `caliber.path` resolves. To run `scripts/analyze.sh` from anywhere else, make
+`caliber.path` absolute (or use a thresholds file whose caliber path is absolute); a relative path is
+otherwise looked up under the wrong root, and the run exits 2 before writing a release file.
+
+**Coverage.** The calibration writes `coverage.json` beside `thresholds.json`. The release run reads
+it from the thresholds file's directory (never from `--raw`), embeds it in `verdict.release.json` and
+prints it in `tables.release.md`; absent is `null`, and an unreadable file is a finding, not a refusal.
 
 ### `release-inputs.json`
 
@@ -307,6 +336,33 @@ gate matrix and the three release files are covered by `AnalyzerReleaseGateMatri
 regression is a copied clean tree — every `run.json`'s `startedUtc` shifted by two seconds, a
 `clock.jsonl` at pre `+1800` / post `+2200` — where the corrected per-arm counts reproduce the
 unshifted tree's exactly, while the uncorrected read, an omitted log and an inverted sign do not.
+
+### The release campaign runbook
+
+Calibration and release are separate nights with separate evidence.
+
+**Calibration night.** Run the release caliber on the reference row three times, derive the band
+(`B = max(B_business, 1.5 × spread)`), and write `thresholds.json` with the verified
+`caliber.sha256`, `minPasses: 6`, `discardPass: 1` and `warmupSeconds: 5`. Run the coverage simulation for the measured
+n = 6 and write `coverage.json` beside it. Archive both files with the calibration tree; they are
+release inputs and are not regenerated from the release data.
+
+**Release night.** Deploy the release caliber and run seven passes — pass 1 is the discarded
+warm-up, passes 2-7 are measured. From the repository root, run the publisher (it publishes on the
+VM, downloads and analyses the **whole** campaign):
+
+```bash
+bash benchmarks/WinForward.E2E/scripts/publish-campaign.sh \
+  <campaign-root> <calibration-archive>/thresholds.json
+```
+
+The campaign root then holds the legacy documents and the four release documents. Check
+`release-inputs.json` before writing the report: `passes.discarded` is `[1]`, `passes.measured` is
+`[2, 3, 4, 5, 6, 7]`, `passes.n` is 6 and `passes.insufficient` is false; the `thresholds.sha256`
+and `caliber.sha256` values match the archived files. Archive the four release documents with
+`thresholds.json`, `coverage.json` and the campaign tree (or its manifest), and keep the
+`sha256sum -c` result with the report. `--legacy` regenerates the legacy documents for diagnostics
+only; they are not the release evidence.
 
 ## What it reads
 
