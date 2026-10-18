@@ -79,6 +79,7 @@ public sealed class FlowAttributionPipelineTests
         Assert.Equal([1, 2, 3], harness.Executor.Events.Select(entry => entry.Marker));
         Assert.Equal(3, harness.Executor.PassCount);
         Assert.Equal(1, harness.Dispatcher.FlowCount);
+        Assert.Equal([PacketPassKind.Flow, PacketPassKind.Flow, PacketPassKind.Flow], harness.Executor.PassKinds);
     }
 
     [Fact]

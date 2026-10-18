@@ -44,6 +44,9 @@ public sealed class AppSettingsExampleTests
         // 0 is the auto sentinel: the example documents the key as null rather than naming a worker
         // count the operator would then be stuck with.
         Assert.Equal(0, validated.SetupWorkerCount);
+        // The kernel pass mirror is opt-in in the first release: the example must not silently enable a
+        // feature that claims the driver's process-global filter table.
+        Assert.False(validated.KernelPassCache);
     }
 
     /// <summary>

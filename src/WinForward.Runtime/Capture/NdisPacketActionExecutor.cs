@@ -13,6 +13,17 @@ using WinForward.Runtime.TcpRedirect;
 using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Runtime.Capture;
+/// <summary>
+/// The pass observation seam: the executor reports every pass packet the dispatcher tagged as a
+/// claimed policy pass, so a consumer can mirror the flow into a kernel-side bypass. It is the only
+/// notification the packet path offers, and it runs on the pump thread inside the packet's dispatch —
+/// an implementation must not block, take a packet-path lock, or allocate.
+/// </summary>
+public interface IKernelPassFlowObserver
+{
+    /// <summary>Observes one policy-pass packet. Called once per pass packet while a worker owns the mirror.</summary>
+    void OnPassPacket(in FlowKey key);
+}
 
 /// <summary>
 /// Executes pass/block/proxy packet dispositions. A pass accumulates its frame for reinjection
@@ -60,7 +71,9 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private long _lastLaneRetireLogTicks;
     private long _immediateSendLaneOverflowCount;
 
-    public NdisPacketActionExecutor(IPacketReinjector reinjector, ILogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null, NdisPacketBufferPool? bufferPool = null, IInterceptionHealthSignal? healthSignal = null)
+    private readonly IKernelPassFlowObserver? _passFlowObserver;
+
+    public NdisPacketActionExecutor(IPacketReinjector reinjector, ILogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null, NdisPacketBufferPool? bufferPool = null, IInterceptionHealthSignal? healthSignal = null, IKernelPassFlowObserver? passFlowObserver = null)
     {
         ArgumentNullException.ThrowIfNull(reinjector);
         _reinjector = reinjector;
@@ -69,12 +82,18 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         _logger = logger ?? NullLogger.Instance;
         _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
         _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
+        _passFlowObserver = passFlowObserver;
     }
 
     public ValueTask PassAsync(CapturedFlowPacket packet)
     {
         // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member.
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
+        // Only a packet the dispatcher tagged as a claimed policy pass may arm the kernel mirror.
+        // Self traffic, non-flow frames, a proxied flow's reverse leg and the redirect fallback all
+        // reach this executor too, and a kernel rule for any of them would bypass the policy that
+        // decided the flow.
+        if (packet.IsPolicyPass) _passFlowObserver?.OnPassPacket(packet.Context.Key);
         var metadata = packet.Metadata;
         if (packet.NativeFrame.Buffer is { } captureBuffer && !packet.Lease.IsMaterialized)
         {

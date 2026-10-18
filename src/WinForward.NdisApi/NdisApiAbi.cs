@@ -26,6 +26,7 @@ public static class NdisApiAbi
     public static void AssertManagedLayout()
     {
         if (IntPtr.Size != 8) throw new PlatformNotSupportedException("WinForward supports only the 64-bit NDISAPI ABI: the managed mirrors below are pinned to the LP64 layout that the x64 and ARM64 builds of ndisapi.h both use.");
+        NdisStaticFilterAbi.AssertManagedLayout();
         AssertSize<TcpAdapterList>(8836);
         AssertSize<IntermediateBuffer>(1566);
         AssertSize<NdisrdEthernetPacket>(8);
@@ -58,13 +59,13 @@ public static class NdisApiAbi
         AssertOffset<AdapterMode>(nameof(AdapterMode.Flags), 8);
     }
 
-    private static void AssertSize<T>(int expected) where T : unmanaged
+    internal static void AssertSize<T>(int expected) where T : unmanaged
     {
         var actual = Unsafe.SizeOf<T>();
         if (actual != expected) throw new TypeLoadException(string.Create(CultureInfo.InvariantCulture, $"NDISAPI ABI mismatch for {typeof(T).Name}: expected {expected}, actual {actual}."));
     }
 
-    private static void AssertOffset<T>(string field, int expected)
+    internal static void AssertOffset<T>(string field, int expected)
     {
         var actual = Marshal.OffsetOf<T>(field).ToInt32();
         if (actual != expected) throw new TypeLoadException(string.Create(CultureInfo.InvariantCulture, $"NDISAPI ABI mismatch for {typeof(T).Name}.{field}: expected {expected}, actual {actual}."));
@@ -241,4 +242,32 @@ internal static partial class NdisApiNative
     [LibraryImport(LibraryName, EntryPoint = "SendPacketsToAdapter", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int SendPacketsToAdapter(NdisApiSafeHandle handle, EthernetMultiRequest* request);
+
+    /// <summary>
+    /// Replaces the driver's whole static filter table. The wrapper derives the byte count from the
+    /// table header (<c>8 + 184 * (m_TableSize - 1)</c> with <c>ANY_SIZE == 1</c>), so a zero-entry
+    /// table underflows that unsigned expression — never call it with <c>m_TableSize == 0</c>.
+    /// Clearing the table is <see cref="ResetPacketFilterTable"/>.
+    /// </summary>
+    [LibraryImport(LibraryName, EntryPoint = "SetPacketFilterTable", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static unsafe partial int SetPacketFilterTable(NdisApiSafeHandle handle, byte* table);
+
+    /// <summary>Clears the driver's whole static filter table.</summary>
+    [LibraryImport(LibraryName, EntryPoint = "ResetPacketFilterTable", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static partial int ResetPacketFilterTable(NdisApiSafeHandle handle);
+
+    /// <summary>Reports how many records the driver's current static table holds.</summary>
+    [LibraryImport(LibraryName, EntryPoint = "GetPacketFilterTableSize", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static unsafe partial int GetPacketFilterTableSize(NdisApiSafeHandle handle, uint* tableSize);
+
+    /// <summary>
+    /// Reads the static table back. The caller sizes the output buffer from the header's
+    /// <c>m_TableSize</c> before the call, which is what the user-mode SDK wrapper does.
+    /// </summary>
+    [LibraryImport(LibraryName, EntryPoint = "GetPacketFilterTable", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static unsafe partial int GetPacketFilterTable(NdisApiSafeHandle handle, byte* table);
 }

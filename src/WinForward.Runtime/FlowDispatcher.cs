@@ -34,6 +34,31 @@ public readonly record struct PacketCaptureMetadata(uint DeviceFlags, nint Adapt
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct NativeFrameHandle(NdisPacketBuffer? Buffer);
 
+/// <summary>
+/// Why a packet is being passed, tagged by the dispatcher that already knows the reason. The
+/// distinction is load-bearing for the kernel pass mirror: only a claimed policy <c>Pass</c>
+/// decision may become a kernel rule. Every other pass origin — self traffic, a non-flow frame, a
+/// proxied UDP flow's reverse leg, the redirect fallback of a proxy-decided flow — must keep both
+/// boundary crossings, because a kernel pass rule for it would bypass the policy that decided it.
+/// </summary>
+public enum PacketPassKind : byte
+{
+    /// <summary>Not a pass, or a pass whose origin carries no eligibility (the default).</summary>
+    None,
+
+    /// <summary>A claimed <c>FlowAction.Pass</c> decision from the inline or the deferred path.</summary>
+    Flow,
+
+    /// <summary>WinForward's own socket traffic, passed without a flow decision.</summary>
+    SelfTraffic,
+
+    /// <summary>A frame that cannot be classified as a flow; policy never applied to it.</summary>
+    NonFlow,
+
+    /// <summary>The reverse leg of a proxied flow, passed so the response reaches its client.</summary>
+    Reverse,
+}
+
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct CapturedFlowPacket(
     PacketLease Lease,
@@ -42,8 +67,12 @@ public readonly record struct CapturedFlowPacket(
     long PacketSequence = 0,
     long FlowGeneration = 0,
     NativeFrameHandle NativeFrame = default,
-    PacketLayout Layout = default)
+    PacketLayout Layout = default,
+    PacketPassKind PassKind = PacketPassKind.None)
 {
+    /// <summary>True when the dispatcher tagged this pass as a claimed policy pass; the only kind a kernel rule may mirror.</summary>
+    public bool IsPolicyPass => PassKind == PacketPassKind.Flow;
+
     /// <summary>
     /// A read-only view of the frame bytes for synchronous header inspection: the native capture
     /// buffer while the lease has not materialized (so bit-test paths like fragment detection
@@ -211,7 +240,12 @@ public sealed class FlowDispatcher : IFlowAttributionHost
             return _executor.ProxyAsync(packet, target, cancellationToken);
         }
 
-        packet = packet with { FlowGeneration = existing.Generation };
+        // The warm pass is the steady-state shape for a long-lived flow, so it carries the same tag as
+        // the slow path: an untagged warm pass would never be mirrored and every packet of that flow
+        // would keep both boundary crossings.
+        packet = decision.Action == FlowAction.Pass
+            ? packet with { FlowGeneration = existing.Generation, PassKind = PacketPassKind.Flow }
+            : packet with { FlowGeneration = existing.Generation };
         var disposition = decision.Action == FlowAction.Pass ? PacketDisposition.Pass : PacketDisposition.Block;
         if (!packet.Lease.TryComplete(disposition)) return ValueTask.CompletedTask;
         return decision.Action == FlowAction.Pass
@@ -247,7 +281,9 @@ public sealed class FlowDispatcher : IFlowAttributionHost
             if (existing.Decision.Action == FlowAction.Proxy && packet.Context.Key.Protocol == TransportProtocol.Udp &&
                 existing.Key.IsReverseOf(packet.Context.Key))
             {
-                await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
+                // The reverse leg of a proxied flow: a kernel pass rule for this tuple would bypass the
+                // proxy in the forward direction.
+                await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken, PacketPassKind.Reverse).ConfigureAwait(false);
                 return;
             }
             await ExecuteDecisionAsync(packet, existing.Decision, cancellationToken).ConfigureAwait(false);
@@ -280,7 +316,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         if (!_selfTraffic.IsOwned(packet.Context)) return false;
         var key = packet.Context.Key;
         FlowLog.PacketSelfTraffic(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, "pass", key.Protocol, key.Origin, key.Local, key.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
-        await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
+        await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken, PacketPassKind.SelfTraffic).ConfigureAwait(false);
         return true;
     }
 
@@ -443,7 +479,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         if (_selfTraffic.IsOwned(packet.Context))
         {
             FlowLog.PacketSelfTraffic(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, "pass", nonFlowKey.Protocol, nonFlowKey.Origin, nonFlowKey.Local, nonFlowKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
-            await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
+            await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken, PacketPassKind.SelfTraffic).ConfigureAwait(false);
             return;
         }
 
@@ -455,7 +491,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
 
         var actionKey = packet.Context.Key;
         FlowLog.PacketAction(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, action: FlowAction.Pass, rule: null, target: null, reason: "nonFlow", actionKey.Protocol, actionKey.Origin, actionKey.Local, actionKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
-        await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
+        await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken, PacketPassKind.NonFlow).ConfigureAwait(false);
     }
 
     private async ValueTask<bool> TryHandleFragmentAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
@@ -482,7 +518,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         switch (decision.Action)
         {
             case FlowAction.Pass:
-                await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
+                await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken, PacketPassKind.Flow).ConfigureAwait(false);
                 return;
             case FlowAction.Block:
                 await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, target: null, cancellationToken).ConfigureAwait(false);
@@ -496,8 +532,11 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         }
     }
 
-    private async ValueTask CompleteAsync(CapturedFlowPacket packet, PacketDisposition disposition, PacketAction action, ProxyTarget? target, CancellationToken cancellationToken)
+    private async ValueTask CompleteAsync(CapturedFlowPacket packet, PacketDisposition disposition, PacketAction action, ProxyTarget? target, CancellationToken cancellationToken, PacketPassKind passKind = PacketPassKind.None)
     {
+        // The observer sees the kind through the packet the executor receives, so the tag must be on
+        // the packet before the disposition is executed.
+        if (passKind != PacketPassKind.None) packet = packet with { PassKind = passKind };
         if (!packet.Lease.TryComplete(disposition)) return;
         switch (action)
         {

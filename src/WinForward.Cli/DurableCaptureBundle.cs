@@ -66,7 +66,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool? attributionPool = null,
         SetupExecutor? setupExecutor = null,
         ActivityBucketClock? activityClock = null,
-        FlowAttributionWakeRegistry? wakeRegistry = null)
+        FlowAttributionWakeRegistry? wakeRegistry = null,
+        NdisKernelPassCache? kernelPassCache = null)
     {
         Dispatcher = dispatcher;
         Executor = executor;
@@ -82,6 +83,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         _udpWindowPool = udpWindowPool;
         _attributionPool = attributionPool;
         _setupExecutor = setupExecutor;
+        KernelPassCache = kernelPassCache;
         WakeRegistry = wakeRegistry;
         ActivityClock = activityClock ?? new ActivityBucketClock();
     }
@@ -120,12 +122,41 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     internal FlowAttributionWakeRegistry? WakeRegistry { get; }
 
     /// <summary>
+    /// The kernel pass mirror, or null when <see cref="ValidatedConfiguration.KernelPassCache"/> is
+    /// off. Owned and disposed by this bundle, and disposed first so its final reset runs while the
+    /// driver is still open.
+    /// </summary>
+    internal NdisKernelPassCache? KernelPassCache { get; }
+
+    /// <summary>
+    /// Builds the mirror when the configuration asks for it. With the feature off nothing is created
+    /// and no driver table is touched; with it on and no table seam the composition is broken, which is
+    /// a programming error rather than a runtime one.
+    /// </summary>
+    internal static NdisKernelPassCache? CreateKernelPassCache(ValidatedConfiguration configuration, INdisKernelFilterTable? kernelFilterTable, ILoggerFactory loggerFactory, RuntimeCounters counters)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(counters);
+        if (!configuration.KernelPassCache) return null;
+        // The seam is optional because the feature is: a run that asks for the cache without handing
+        // over the driver's table is a composition bug, not a missing runtime capability.
+        var table = kernelFilterTable ?? throw new InvalidOperationException("KernelPassCache requires the driver's static filter table seam.");
+        return new NdisKernelPassCache(table, loggerFactory.CreateLogger<NdisKernelPassCache>(), counters: counters);
+    }
+
+    /// <summary>
     /// Builds the durable layer for a run. Nothing in the bundle references a specific adapter
     /// enumeration: the UDP target snapshot starts scope-less and is populated by the capture
     /// runner's scope-installed callback at generation 0 and after every refresh.
     /// <paramref name="healthSignal"/> receives the interception-path failure
     /// observations the capture runner may answer with a forced refresh; null keeps every site
     /// on the no-op signal, so existing compositions are unchanged.
+    /// <param name="kernelFilterTable">
+    /// The driver's static-filter-table seam. It is only reached when
+    /// <see cref="ValidatedConfiguration.KernelPassCache"/> is enabled; a run with the feature off
+    /// never constructs the cache and never touches the driver's table.
+    /// </param>
     /// </summary>
     internal static async ValueTask<DurableCaptureBundle> CreateAsync(
         ValidatedConfiguration configuration,
@@ -133,7 +164,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         SelfTrafficRegistry selfTraffic,
         ILoggerFactory loggerFactory,
         IInterceptionHealthSignal? healthSignal = null,
-        RuntimeCounters? counters = null)
+        RuntimeCounters? counters = null,
+        INdisKernelFilterTable? kernelFilterTable = null)
     {
         var runtimeCounters = counters ?? RuntimeCounters.Shared;
         // One interning table for the whole process: keys carry a slot, so it must outlive every
@@ -173,7 +205,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, loggerFactory, healthSignal, runtimeCounters, tcpCoordinator, adapterSlots, synCopyPool, relayPool, setupExecutor, addressCache, activityClock).ConfigureAwait(false);
+            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, loggerFactory, healthSignal, runtimeCounters, tcpCoordinator, adapterSlots, synCopyPool, relayPool, setupExecutor, addressCache, activityClock, kernelFilterTable).ConfigureAwait(false);
         }
         catch
         {
@@ -211,7 +243,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool relayPool,
         SetupExecutor setupExecutor,
         Socks5AddressCache addressCache,
-        ActivityBucketClock activityClock)
+        ActivityBucketClock activityClock,
+        INdisKernelFilterTable? kernelFilterTable)
     {
         // Single source of truth for every datagram-path buffer bound: the transport send buffer
         // (6 + 16 + cap), the coordinator receive windows (cap + 22 + 1), the reinjector's
@@ -249,7 +282,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return BuildBundle(configuration, reinjector, selfTraffic, loggerFactory, healthSignal, udpTargets, adapterSlots, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock);
+            return BuildBundle(configuration, reinjector, selfTraffic, loggerFactory, healthSignal, udpTargets, adapterSlots, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock, counters, kernelFilterTable);
         }
         catch
         {
@@ -277,9 +310,14 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool udpWindowPool,
         NativeBufferPool attributionPool,
         SetupExecutor setupExecutor,
-        ActivityBucketClock activityClock)
+        ActivityBucketClock activityClock,
+        RuntimeCounters counters,
+        INdisKernelFilterTable? kernelFilterTable)
     {
-        var executor = new NdisPacketActionExecutor(reinjector, loggerFactory.CreateLogger<NdisPacketActionExecutor>(), tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
+        // Created before the executor so the pass observer is wired from its first packet, and started
+        // only once the whole graph exists: a start failure disables the cache without touching capture.
+        var kernelPassCache = CreateKernelPassCache(configuration, kernelFilterTable, loggerFactory, counters);
+        var executor = new NdisPacketActionExecutor(reinjector, loggerFactory.CreateLogger<NdisPacketActionExecutor>(), tcpCoordinator, udpCoordinator, healthSignal: healthSignal, passFlowObserver: kernelPassCache);
         var attributor = new WindowsProcessAttributor(ownerTableReadSink: static () => RuntimeCounters.Shared.Increment(RuntimeCounters.AttributionOwnerTableScans));
         var dispatcher = new FlowDispatcher(
             configuration, selfTraffic, executor, attributor,
@@ -293,7 +331,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         idleExpirySweeper.Start();
         var wakeRegistry = new FlowAttributionWakeRegistry();
         if (dispatcher.Attribution is { } pipeline) pipeline.Wake = wakeRegistry;
-        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, loggerFactory.CreateLogger<DurableCaptureBundle>(), adapterSlots, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock, wakeRegistry);
+        kernelPassCache?.Start();
+        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, loggerFactory.CreateLogger<DurableCaptureBundle>(), adapterSlots, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock, wakeRegistry, kernelPassCache);
     }
 
     /// <summary>
@@ -385,11 +424,16 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     /// scope retires every lane: interception is paused, so no lane can accumulate. The redirect
     /// lanes take the same scope: a redirect lane is only drained by the pump it is keyed on, so a
     /// cross-adapter target that left the scope must stop deferring (its frames keep the immediate
-    /// send, which fails closed through the per-flow tail).
+    /// send, which fails closed through the per-flow tail). The kernel pass mirror follows the same
+    /// install: an empty scope pauses it (the table is cleared), a non-empty scope resumes it.
     /// </summary>
     internal void OnScopeInstalled(IReadOnlyList<AdapterEnumerationItem> scope)
     {
         UpdateUdpTargets(scope);
+        // Interception paused (empty scope) clears the table; any live scope keeps mirroring. Rules are
+        // adapter-agnostic, so a refresh with a non-empty scope needs no table change.
+        if (scope.Count == 0) KernelPassCache?.Pause();
+        else KernelPassCache?.Resume();
         var handles = new nint[scope.Count];
         for (var index = 0; index < scope.Count; index++) handles[index] = scope[index].Adapter.RuntimeHandle;
         Executor.RetireLanesExcept(handles);
@@ -431,6 +475,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     {
         try
         {
+            // First, while the driver is still open: the cache's final reset is what claims the table
+            // back, and it must run before any other teardown can take the driver's handle away.
+            // ReSharper disable once InlineTemporaryVariable // The pattern match is the null-safe read of the nullable property; inlining it would need a null-forgiving operator.
+            if (KernelPassCache is { } kernelPassCache) await kernelPassCache.DisposeAsync().ConfigureAwait(false);
             await _sweeper.DisposeAsync().ConfigureAwait(false);
             // After the sweeper (no more TTL ticks) and before any pool: sealing the pipeline is
             // what stops new attribution work, and every pending entry settles while the pumps have

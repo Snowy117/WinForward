@@ -336,6 +336,9 @@ internal sealed class FlowAttributionPipeline : IAsyncDisposable
             switch (decision.Action)
             {
                 case FlowAction.Pass:
+                    // A policy pass decided on the worker: the same eligibility as the inline path, so
+                    // the pass observer may mirror it.
+                    packet = packet with { PassKind = PacketPassKind.Flow };
                     Complete(packet, PacketDisposition.Pass);
                     Run(_host.Executor.PassAsync(packet));
                     break;

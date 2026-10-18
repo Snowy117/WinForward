@@ -96,6 +96,29 @@ public sealed class RuntimeCounters
     /// surfaces as per-key deltas plus the aggregate occupancy (rented − returned).
     /// </summary>
     public const string PoolCounterPrefix = "pool.";
+    /// <summary>Packets the kernel pass rules matched (from the driver's per-rule counters); see <c>kernel.passCache</c>.</summary>
+    public const string KernelPassCacheBypassed = "kernelPassCache.bypassed";
+
+    /// <summary>Static-filter-table applications the pass cache issued (one per changed tick at most).</summary>
+    public const string KernelPassCacheApplies = "kernelPassCache.applies";
+
+    /// <summary>Pass rules the cache retired, by the idle lease or the flow cap.</summary>
+    public const string KernelPassCacheEvictions = "kernelPassCache.evictions";
+
+    /// <summary>Pass observations refused because the candidate ring was full; the flow keeps the user-mode path.</summary>
+    public const string KernelPassCacheRejected = "kernelPassCache.rejected";
+
+    /// <summary>Pass observations dropped because the marker probe chain found no free slot.</summary>
+    public const string KernelPassCacheMarkerOverflow = "kernelPassCache.markerOverflow";
+
+    /// <summary>Static-filter-table read-backs that failed or did not describe this driver's table.</summary>
+    public const string KernelPassCacheReadFailures = "kernelPassCache.readFailures";
+
+    /// <summary>Static-filter-table replaces (or clears) the driver refused.</summary>
+    public const string KernelPassCacheApplyFailures = "kernelPassCache.applyFailures";
+
+    /// <summary>The pass cache disabled itself after a persistent native fault; capture keeps the user-mode path.</summary>
+    public const string KernelPassCacheDisabled = "kernelPassCache.disabled";
 
     /// <summary>The process-wide aggregate wired into production call sites; tests use private instances for isolation.</summary>
     public static RuntimeCounters Shared { get; } = new();

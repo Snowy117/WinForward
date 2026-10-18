@@ -30,6 +30,14 @@ public sealed partial class WinForwardConfigDto
 
     [JsonPropertyName("SetupWorkerCount")]
     public int? SetupWorkerCount { get; init; }
+
+    /// <summary>
+    /// Opts into mirroring decided policy passes into the NDISAPI static filter table. Off by default:
+    /// enabling it claims the driver's process-global table and accepts a bounded 5-tuple reuse
+    /// window, which is a deliberate operator decision.
+    /// </summary>
+    [JsonPropertyName("KernelPassCache")]
+    public bool? KernelPassCache { get; init; }
 }
 
 public sealed class RuleDomainDto
@@ -166,7 +174,8 @@ public sealed partial record ValidatedConfiguration(
     int TcpFlowCapacity = ConfigurationLoader.DefaultTcpFlowCapacity,
     int SetupWorkerCount = 0,
     int UdpSessionCapacity = ConfigurationLoader.DefaultUdpSessionCapacity,
-    int UdpRelayReceiveBufferBytes = ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes)
+    int UdpRelayReceiveBufferBytes = ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes,
+    bool KernelPassCache = false)
 {
     /// <summary>
     /// Non-blocking validation findings (for example a tcpFlowCapacity above the warning
@@ -233,7 +242,8 @@ public static partial class ConfigurationLoader
             limits.TcpFlowCapacity,
             limits.SetupWorkerCount,
             limits.UdpSessionCapacity,
-            limits.UdpRelayReceiveBufferBytes)
+            limits.UdpRelayReceiveBufferBytes,
+            dto.KernelPassCache ?? false)
         {
             Warnings = warnings,
             UdpSessionIdleTimeout = limits.UdpSessionIdleTimeout,

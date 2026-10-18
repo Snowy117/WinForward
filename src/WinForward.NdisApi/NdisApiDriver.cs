@@ -19,7 +19,7 @@ namespace WinForward.NdisApi;
 /// call remains serialized, preserving per-adapter reinjection order.
 /// </remarks>
 [SupportedOSPlatform("windows")]
-public sealed class NdisApiDriver : IDisposable, INdisPacketReader
+public sealed partial class NdisApiDriver : IDisposable, INdisPacketReader, INdisKernelFilterTable
 {
     internal const int MaxStackMultiRequestBytes = 1024;
 
@@ -29,6 +29,10 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
 
     private readonly NdisApiSafeHandle _handle;
     private readonly INdisReadPacketCalls _readCalls;
+    // Null only for a driver fabricated by CreateForTests without the filter seam: every static
+    // filter-table call then reports Unavailable instead of touching a native surface that is not there.
+    private readonly INdisStaticFilterCalls? _filterCalls;
+
     private readonly NdisNativeCallGate _controlGate = new();
     private readonly NdisAdapterGateMap _adapterGates = new();
     // Adapter handles whose read-first drain already failed with a non-empty queue: they are served
@@ -41,12 +45,16 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     private long _emptyReads;
     private long _failedReads;
     private long _readShapeMismatchCount;
+    private long _packetsRead;
+    private long _sendCalls;
+    private long _packetsReinjected;
     private int _lastFailedReadNativeError;
 
-    private NdisApiDriver(NdisApiSafeHandle handle, INdisReadPacketCalls readCalls)
+    private NdisApiDriver(NdisApiSafeHandle handle, INdisReadPacketCalls readCalls, INdisStaticFilterCalls? filterCalls)
     {
         _handle = handle;
         _readCalls = readCalls;
+        _filterCalls = filterCalls;
     }
 
     public static NdisApiDriver Open()
@@ -63,7 +71,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
             var loadError = isDriverLoaded ? 0 : Marshal.GetLastWin32Error();
             if (!isDriverLoaded && loadError == 0) loadError = openError;
             NdisNativeCallStatus.ThrowIfOpenFailed(rawHandle, isDriverLoaded, loadError);
-            return new NdisApiDriver(handle, new NdisNativeReadPacketCalls(handle));
+            return new NdisApiDriver(handle, new NdisNativeReadPacketCalls(handle), new NdisNativeStaticFilterCalls(handle));
         }
         catch
         {
@@ -78,10 +86,16 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     /// <see cref="NdisApiSafeHandle"/>, so <see cref="Dispose"/> never reaches
     /// <c>NdisApiNative.CloseFilterDriver</c> and no fact can trip the DLL resolver.
     /// </summary>
-    internal static NdisApiDriver CreateForTests(INdisReadPacketCalls readCalls)
+    /// <param name="readCalls">The read-path seam every drain goes through.</param>
+    /// <param name="filterCalls">
+    /// The static-filter-table seam. Null leaves the fabricated driver without a table surface, so
+    /// every filter call reports <see cref="NdisKernelFilterStatus.Unavailable"/>; facts that do not
+    /// exercise the table keep using the single-argument overload.
+    /// </param>
+    internal static NdisApiDriver CreateForTests(INdisReadPacketCalls readCalls, INdisStaticFilterCalls? filterCalls = null)
     {
         ArgumentNullException.ThrowIfNull(readCalls);
-        return new NdisApiDriver(NdisApiSafeHandle.FromRawHandle(0), readCalls);
+        return new NdisApiDriver(NdisApiSafeHandle.FromRawHandle(0), readCalls, filterCalls);
     }
 
     public unsafe IReadOnlyList<NdisAdapter> GetAdapters()
@@ -245,9 +259,13 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         var adapterGate = _adapterGates.Get(adapterHandle);
         using (adapterGate.Enter())
         {
-            return IsQueryFirstForDiagnostics(adapterHandle)
+            var count = IsQueryFirstForDiagnostics(adapterHandle)
                 ? ReadQueryFirst(adapterHandle, buffers)
                 : ReadSpeculatively(adapterHandle, buffers);
+            // The crossing ratio the cache summary reports divides by the packets this driver handed
+            // to user mode; an empty drain adds nothing.
+            if (count > 0) Interlocked.Add(ref _packetsRead, count);
+            return count;
         }
     }
 
@@ -404,11 +422,13 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         var request = new EthernetRequest { AdapterHandle = adapterHandle, Packet = new NdisrdEthernetPacket { Buffer = buffer.Pointer } };
         var adapterGate = _adapterGates.Get(adapterHandle);
         using var gateLease = adapterGate.Enter();
+        Interlocked.Increment(ref _sendCalls);
         if (NdisApiNative.SendPacketToMstcp(_handle, &request) == 0)
         {
             var error = Marshal.GetLastWin32Error();
             throw new Win32Exception(error, string.Create(CultureInfo.InvariantCulture, $"Unable to inject an NDISAPI packet toward MSTCP (native error {error}, length {buffer.Length}, device flags 0x{buffer.DeviceFlags:X}, NDIS flags 0x{buffer.Flags:X}, adapter 0x{adapterHandle:X})."));
         }
+        Interlocked.Increment(ref _packetsReinjected);
     }
 
     public unsafe void SendPacketToAdapter(nint adapterHandle, NdisPacketBuffer buffer)
@@ -417,11 +437,13 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         var request = new EthernetRequest { AdapterHandle = adapterHandle, Packet = new NdisrdEthernetPacket { Buffer = buffer.Pointer } };
         var adapterGate = _adapterGates.Get(adapterHandle);
         using var gateLease = adapterGate.Enter();
+        Interlocked.Increment(ref _sendCalls);
         if (NdisApiNative.SendPacketToAdapter(_handle, &request) == 0)
         {
             var error = Marshal.GetLastWin32Error();
             throw new Win32Exception(error, string.Create(CultureInfo.InvariantCulture, $"Unable to inject an NDISAPI packet toward the adapter (native error {error}, length {buffer.Length}, device flags 0x{buffer.DeviceFlags:X}, NDIS flags 0x{buffer.Flags:X}, adapter 0x{adapterHandle:X})."));
         }
+        Interlocked.Increment(ref _packetsReinjected);
     }
 
     /// <summary>
@@ -459,6 +481,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
             var chunkCount = Math.Min(chunkCapacity, count - offset);
             BuildMultiRequest(requestBytes, adapterHandle, buffers, chunkCount, offset);
             var request = (EthernetMultiRequest*)requestBytes;
+            Interlocked.Increment(ref _sendCalls);
             var result = toMstcp
                 ? NdisApiNative.SendPacketsToMstcp(_handle, request)
                 : NdisApiNative.SendPacketsToAdapter(_handle, request);
@@ -468,6 +491,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
                 var target = toMstcp ? "MSTCP" : "the adapter";
                 throw new Win32Exception(error, string.Create(CultureInfo.InvariantCulture, $"Unable to inject {chunkCount} NDISAPI packets toward {target} (native error {error}, packets {offset}..{offset + chunkCount - 1} of {count}, adapter 0x{adapterHandle:X})."));
             }
+            Interlocked.Add(ref _packetsReinjected, chunkCount);
         }
     }
 

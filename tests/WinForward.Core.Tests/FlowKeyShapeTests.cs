@@ -20,7 +20,7 @@ public sealed class FlowKeyShapeTests(ITestOutputHelper output)
         {
             ("FlowKey", Unsafe.SizeOf<FlowKey>(), 64),
             ("FlowContext", Unsafe.SizeOf<FlowContext>(), 80),
-            ("CapturedFlowPacket", Unsafe.SizeOf<CapturedFlowPacket>(), 152),
+            ("CapturedFlowPacket", Unsafe.SizeOf<CapturedFlowPacket>(), 160),
             ("FlowStateView", Unsafe.SizeOf<FlowStateView>(), 96),
             ("PacketView", Unsafe.SizeOf<PacketView>(), 96),
             ("Endpoint", Unsafe.SizeOf<Endpoint>(), 48),

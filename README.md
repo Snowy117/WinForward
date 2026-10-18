@@ -171,7 +171,7 @@ than one of them:
 
 | Object | Keys |
 | --- | --- |
-| `WinForward` (11) | `Socks5Servers`, `LocalTargets`, `Host`, `Forwarded`, `ProxyUnavailableAction`, `ProcessingFailureAction`, `TcpFlowCapacity`, `SetupWorkerCount`, `UdpSessionCapacity`, `UdpRelayReceiveBufferKb`, `UdpSessionIdleSeconds` |
+| `WinForward` (12) | `Socks5Servers`, `LocalTargets`, `Host`, `Forwarded`, `ProxyUnavailableAction`, `ProcessingFailureAction`, `TcpFlowCapacity`, `SetupWorkerCount`, `UdpSessionCapacity`, `UdpRelayReceiveBufferKb`, `UdpSessionIdleSeconds`, `KernelPassCache` |
 | a `Host` or `Forwarded` domain (2) | `FallbackAction`, `Rules` |
 | a `Socks5Servers` entry (6) | `Name`, `Host`, `Port`, `Username`, `Password`, `UdpOverTcp` |
 | a `LocalTargets` entry (3) | `Name`, `Host`, `Port` |
@@ -238,6 +238,19 @@ ranges — only key names changed case.
   `4096` are accepted with a validation warning about port-pool pressure. Omitting the field
   deliberately tightens the limit from the previous implicit 16,384 sessions; configure a higher
   value explicitly (max 8192) if more concurrent flows are required.
+- `KernelPassCache`: optional kernel-side pass mirror, `true` or `false`, default `false`. When it is
+  enabled, a TCP flow the policy decides `pass` is copied into the NDISAPI driver's static filter table
+  as two exact-match `FILTER_PACKET_PASS` rules, so the flow's later packets take the driver's normal
+  network path instead of crossing into user mode and back; the pump stops seeing them. The table
+  belongs to the driver, not to this process: enabling the feature claims exclusive ownership of it (a
+  second WinpkFilter client's rules would be replaced), and it is PASS-only by construction, so a crash
+  leaves at worst a benign pass-through rule that the next start with the feature enabled clears. Only
+  TCP flows are mirrored — UDP, WinForward's own traffic, non-flow frames, and the reverse leg of a
+  proxied flow keep today's path.
+  A rule is removed 2 s after its last matched packet, which is also the window in which a
+  recycled TCP 5-tuple could inherit it. When the feature is off, no cache object exists and the
+  driver's table is never touched.
+
 - `SetupWorkerCount`: optional setup worker count, `1..256`; omitted means automatic. It bounds the
   threads that drain new-flow setup — TCP handshake completion, deferred process attribution, and
   UDP session setup — so it is worth raising only when setup queueing is the measured bottleneck.

@@ -471,3 +471,9 @@ dotnet_diagnostic.WF0004.severity = error
 # permanent exemption"）。
 [src/WinForward.Runtime/QuiescenceScope.cs]
 dotnet_diagnostic.WF0001.severity = none
+
+# MA0182（Avoid unused internal types，info）：内核直通缓存 NdisKernelPassCache 刻意保持 internal，
+# 由 CLI 组合根（InternalsVisibleTo "WinForward"）与本程序集的测试/基准项目实例化——分析器看不到
+# 友元程序集的使用，故仅对本类型所在的文件关闭该条。
+[src/WinForward.Runtime/Capture/NdisKernelPassCache*.cs]
+dotnet_diagnostic.MA0182.severity = none

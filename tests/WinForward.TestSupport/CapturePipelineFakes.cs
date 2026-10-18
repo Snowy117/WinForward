@@ -163,6 +163,7 @@ internal sealed class RecordingExecutor : IPacketActionExecutor
 {
     private readonly Lock _gate = new();
     private readonly List<(string Action, long Generation, byte Marker)> _events = [];
+    private readonly List<PacketPassKind> _passKinds = [];
 
     /// <summary>Runs before each recorded action; a test can dispatch another packet from here.</summary>
     public Action<CapturedFlowPacket>? OnExecute { get; set; }
@@ -179,6 +180,12 @@ internal sealed class RecordingExecutor : IPacketActionExecutor
 
     public int BlockCount => CountOf("block");
 
+    /// <summary>The pass kind of every packet this executor was asked to pass, in call order.</summary>
+    public IReadOnlyList<PacketPassKind> PassKinds
+    {
+        get { lock (_gate) return [.. _passKinds]; }
+    }
+
     public ValueTask PassAsync(CapturedFlowPacket packet) => Record("pass", packet);
 
     public ValueTask BlockAsync(CapturedFlowPacket packet) => Record("block", packet);
@@ -191,6 +198,7 @@ internal sealed class RecordingExecutor : IPacketActionExecutor
         lock (_gate)
         {
             _events.Add((action, packet.FlowGeneration, bytes.Length == 0 ? (byte)0 : bytes[0]));
+            if (string.Equals(action, "pass", StringComparison.Ordinal)) _passKinds.Add(packet.PassKind);
         }
 
         OnExecute?.Invoke(packet);

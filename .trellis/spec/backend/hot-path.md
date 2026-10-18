@@ -36,7 +36,7 @@ closures or delegates. The F4 (2026-09-30) sizes, asserted exactly by
 |---|---|
 | `FlowKey` | 64 |
 | `FlowContext` | 80 (key + two interned metadata references) |
-| `CapturedFlowPacket` | 152 (incl. the 16-byte layout) |
+| `CapturedFlowPacket` | 160 (incl. the 16-byte layout and the 1-byte pass-kind tag, which rounds up to the 8-byte alignment) |
 | `FlowStateView` | 96 |
 | `PacketView` | 96 |
 | `Endpoint` | 48 |

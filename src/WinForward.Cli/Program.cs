@@ -268,7 +268,9 @@ internal static class Program
             // The durable layer survives every adapter-list refresh; the runner disposes it exactly
             // once after the final generation. The local finally only covers failures around the
             // runner itself — bundle disposal is single-flight, so it never runs twice.
-            var bundle = await DurableCaptureBundle.CreateAsync(configuration, reinjector, selfTraffic, loggerFactory, healthSignal: healthMonitor).ConfigureAwait(false);
+            // The driver's static-filter table is passed in even when the feature is off: the bundle
+            // only reaches it when KernelPassCache is enabled, and the feature-off path touches no table.
+            var bundle = await DurableCaptureBundle.CreateAsync(configuration, reinjector, selfTraffic, loggerFactory, healthSignal: healthMonitor, kernelFilterTable: driver).ConfigureAwait(false);
             try
             {
                 // The degraded forwarder feeds error 87 into the runner's refresh channel; the
