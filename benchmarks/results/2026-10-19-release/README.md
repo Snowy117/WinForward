@@ -23,7 +23,7 @@ band from campaign data.
 | Thresholds file | `~/bench-archive/2026-10-18-calibration/thresholds.json` |
 | Thresholds SHA-256 | `8ae8e31f576fd3791b9aba2267953063307819cd84a388c791c579029b51af3c` |
 | Coverage file | `~/bench-archive/2026-10-18-calibration/coverage.json`, SHA-256 `366e4523bf9a20aa183b2142678dc72351ce5b6f0da0cbe2ec95e60d68d5b84e` |
-| Calibration record | `.trellis/tasks/10-18-e2e-benchmark-campaign/research/b8-calibration.md` (three reference runs, 2026-10-18, same VM and binary) |
+| Calibration record | `.trellis/tasks/archive/2026-10/10-18-e2e-benchmark-campaign/research/b8-calibration.md` (three reference runs, 2026-10-18, same VM and binary) |
 | Warm-up trimmed per arm | 5 s (`--warmup-seconds 5`) |
 
 ### Calibration in one table
@@ -114,7 +114,7 @@ not a post-hoc choice.
 
 These are the pre-registered analysis's numbers, and they are **not adopted as a release claim**.
 The campaign record fixed the memory-comparability floor before any measured pass completed
-(`research/b9-attempt2-environment.md`): the memory family is not comparable when a measured pass
+(`.trellis/tasks/archive/2026-10/10-18-e2e-benchmark-campaign/research/b9-attempt2-environment.md`): the memory family is not comparable when a measured pass
 boundary's guest-visible RAM falls below 5,500 MB, 10 % under the 6,114 MB attempt-1 preflight the
 release was planned against. Measured pass starts fell through that floor: pass 2 started at
 6,367 MB (+4.1 %), pass 6 at 5,310 MB (−13.1 %), and pass 7 at 4,075 MB (−33.3 %); the 3 GB + 2 GB
@@ -275,7 +275,7 @@ Do not merge this appendix into any release table. It records the re-analysis de
   `E5B2-REFERENCE-ROW-NOT-ON-RELEASE-PLAN`, `E5B2-N=3<6`, `E5B2-NO-CLOCK-LOG` and
   `E5B2-PLAN-NOT-ARCHIVED`.
 - A diagnostic state check on the old reference and old constants is recorded in
-  `.trellis/tasks/10-18-e2e-benchmark-evidence/research/reanalysis-notes.md`; its `different` cells
+  `.trellis/tasks/archive/2026-10/10-18-e2e-benchmark-evidence/research/reanalysis-notes.md`; its `different` cells
   are not release claims.
 - The old latency/CPU/memory conclusions keep their legacy meaning. The old loss `same` is the
   degenerate zero-variance case (now `unevaluable`), and REL is a capability gate (old data: fail),

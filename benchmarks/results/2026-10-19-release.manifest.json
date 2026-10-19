@@ -136,8 +136,8 @@
     },
     {
       "path": "report.md",
-      "sha256": "48dc55139889a5471e34ffd349aed54f166f69c03aae61d252767af3775e3ee4",
-      "bytes": 19406
+      "sha256": "5ee4dff9b63307611a9eb03543de0084459e497c78522fbb4b3fc1976a4d5bd2",
+      "bytes": 19498
     }
   ],
   "analysis": {
@@ -148,7 +148,7 @@
   },
   "report": {
     "path": "benchmarks/results/2026-10-19-release/README.md",
-    "sha256": "48dc55139889a5471e34ffd349aed54f166f69c03aae61d252767af3775e3ee4"
+    "sha256": "5ee4dff9b63307611a9eb03543de0084459e497c78522fbb4b3fc1976a4d5bd2"
   },
   "claim": {
     "primaryInferential": "withheld",
