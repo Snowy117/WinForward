@@ -79,7 +79,6 @@ def main() -> int:
     seq = 0
     try:
         while args.count == 0 or seq < args.count:
-            seq += 1
             try:
                 conn, peer = server.accept()
             except socket.timeout:
@@ -99,9 +98,20 @@ def main() -> int:
                             break
                         data += chunk
                     payload = data.decode("utf-8", "replace").strip()
+                    if not payload:
+                        # The reachability check opens and closes a bare TCP connection. It is a
+                        # liveness probe, not one of the counted clock probes, so keep serving.
+                        print(
+                            "peer=%s:%d liveness connection without handshake" % (peer[0], peer[1]),
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        continue
                     if not payload.startswith("vmT0="):
-                        print(f"seq={seq} unexpected handshake: {payload!r}", file=sys.stderr, flush=True)
+                        print(f"seq={seq + 1} unexpected handshake: {payload!r}", file=sys.stderr, flush=True)
                         return 1
+                    seq += 1
+
                     conn.sendall((utc_iso(t_recv) + "\n").encode("ascii"))
                     t_send = time.time()
                 except socket.timeout:
