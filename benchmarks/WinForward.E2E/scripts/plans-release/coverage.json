@@ -1,0 +1,118 @@
+{
+  "schema": "calibration-coverage/1",
+  "n": 6,
+  "method": "exact percentile bootstrap over passes, 6**6 = 46656 resamples enumerated; outer simulation 100000 replicates, seed 20261006; paired log-ratio interval for the reference-vs-opponent pair and a single-row median interval for reference",
+  "resamples": 46656,
+  "reportedResamples": 10000,
+  "replicates": 100000,
+  "seed": 20261006,
+  "generator": "Python random.Random (Mersenne Twister), outer simulation only",
+  "interval": "type-7 linear-interpolation percentile of the bootstrap median, 2.5/97.5 for the raw 95% interval and alpha/2 for the adjusted interval",
+  "releaseReads": "the release verdict embeds this document verbatim under coverage; tables.release.md prints it in the Coverage section; it is not a thresholds key",
+  "primary": {
+    "mem.privateBytes.p50": {
+      "role": "primary",
+      "kind": "ratio",
+      "m": 3,
+      "band": 0.1,
+      "business": 0.1,
+      "mdd": 0.1,
+      "spread": 0.057964209318098814,
+      "sigmaLog": 0.031151,
+      "percentile": {
+        "level": 0.95,
+        "coverage": 0.9378
+      },
+      "adjusted": {
+        "level": 0.983333,
+        "coverage": 0.9696
+      },
+      "referenceMedianPercentile": {
+        "level": 0.95,
+        "coverage": 0.9369
+      }
+    },
+    "loss.lossRate": {
+      "role": "primary",
+      "kind": "pp",
+      "m": 2,
+      "band": 0.5,
+      "business": 0.5,
+      "mdd": 0.5,
+      "spread": null,
+      "sigmaLog": null,
+      "percentile": {
+        "level": 0.95,
+        "coverage": null
+      },
+      "adjusted": {
+        "level": 0.975,
+        "coverage": null
+      },
+      "reason": "degenerate calibration values (all zero or non-positive); the percentile interval is zero-width and the release state is unevaluable, never same"
+    }
+  },
+  "demoted": {
+    "lat.tcp_rtt.p50": {
+      "role": "exploratory-report-only",
+      "kind": "ratio",
+      "m": 3,
+      "band": 0.23769975467369542,
+      "business": 0.05,
+      "mdd": 0.23769975467369542,
+      "spread": 0.15846650311579694,
+      "sigmaLog": 0.073684,
+      "percentile": {
+        "level": 0.95,
+        "coverage": 0.9371
+      },
+      "adjusted": {
+        "level": 0.983333,
+        "coverage": 0.9681
+      },
+      "coverageUsed": false,
+      "reason": "B 0.23769975467369542 > B_business 0.05; demoted by the pre-registered rule; the analyzer reports the metric as exploratory with values and raw CI only and makes no decision"
+    },
+    "cpu.proxy.vcpuPct": {
+      "role": "exploratory-report-only",
+      "kind": "ratio",
+      "m": 3,
+      "band": 0.12683221015296758,
+      "business": 0.1,
+      "mdd": 0.12683221015296758,
+      "spread": 0.08455480676864505,
+      "sigmaLog": 0.044836,
+      "percentile": {
+        "level": 0.95,
+        "coverage": 0.9378
+      },
+      "adjusted": {
+        "level": 0.983333,
+        "coverage": 0.9688
+      },
+      "coverageUsed": false,
+      "reason": "B 0.12683221015296758 > B_business 0.10; demoted by the pre-registered rule; the analyzer reports the metric as exploratory with values and raw CI only and makes no decision"
+    }
+  },
+  "validation": {
+    "method": "the same exact-6**n enumeration at n=3 and n=4 reproduces the design-review coverage bands",
+    "n3": {
+      "coverage": 0.751,
+      "designReview": "71.3-75.7%"
+    },
+    "n4": {
+      "coverage": 0.8703,
+      "designReview": "86.0-89.3%"
+    },
+    "n6": {
+      "coverage": 0.9378
+    }
+  },
+  "limits": [
+    "The simulation models pass-level log-normal noise with sigma estimated from the three calibration values; it is not a resampling of those three values themselves.",
+    "The reference-vs-opponent pair is simulated with independent equal-sigma rows; the calibration has no opponent row, so the ratio noise is an assumption, not a measured quantity.",
+    "The loss interval is degenerate at the calibration values and is not simulated; the release state is unevaluable, never same.",
+    "The coverage is the method-level coverage at n=6; it is not a prediction for a particular opponent or a confidence statement about the B9 campaign.",
+    "Latency p50 and CPU are demoted to exploratory; their simulated coverage is recorded for context only and is not used by the release decision."
+  ]
+}
