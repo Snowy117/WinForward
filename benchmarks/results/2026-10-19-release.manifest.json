@@ -1,0 +1,157 @@
+{
+  "schema": "release-campaign-manifest/1",
+  "campaign": "2026-10-19-release",
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "voided",
+      "reason": "planned Windows Update restart during pass 4",
+      "archive": "~/bench-archive/2026-10-19-b9-attempt1-aborted"
+    },
+    {
+      "attempt": 2,
+      "status": "accepted",
+      "archive": "~/bench-archive/2026-10-19-release"
+    }
+  ],
+  "repositoryCommit": "692b5446c122d11984b3e92b9970806a718d19c3",
+  "dirty": false,
+  "dirtySummary": {
+    "entries": 0,
+    "tracked": 0,
+    "untracked": 0,
+    "truncated": false,
+    "sample": []
+  },
+  "campaignEnvHash": "0f16bcae33b75a8f79b351a9057dbc6c8f2cbddff028544a94afa0d9d9d5fb42",
+  "planSet": "release",
+  "plans": [
+    {
+      "name": "full-plan.json",
+      "sha256": "da148a1d99580475cdc75ea0b93130b55819aab1206074f9a21fd9ddd0a925d3",
+      "deployedAs": "C:\\wfbench\\e2e\\full-plan.json"
+    },
+    {
+      "name": "udp-plan.json",
+      "sha256": "28f8b3212de25249bdcf9ca7098c1e891d8d50958c8281021d2b8a5bd8e45f40",
+      "deployedAs": "C:\\wfbench\\e2e\\udp-plan.json"
+    },
+    {
+      "name": "dns-plan.json",
+      "sha256": "b397fb57864a0ecee9486de0f4c37d7f44a97fb6aad4d5d57b26f7fa13f044a9",
+      "deployedAs": "C:\\wfbench\\e2e\\dns-plan.json"
+    },
+    {
+      "name": "dual-plan.json",
+      "sha256": "88806d4e91436b73ea1d74bfcac8041a7a73c0abafd6c2dd8e3595a4d21d6651",
+      "deployedAs": "C:\\wfbench\\e2e\\dual-plan.json"
+    },
+    {
+      "name": "base-plan.json",
+      "sha256": "6c28a3d0ce91a24c4ea984002c871ae75d86f6424134eb6e45c641c80e26e7f3",
+      "deployedAs": "C:\\wfbench\\e2e\\base-plan.json"
+    }
+  ],
+  "caliber": {
+    "plan": "benchmarks/WinForward.E2E/scripts/plans-release/full-plan.json",
+    "sha256": "da148a1d99580475cdc75ea0b93130b55819aab1206074f9a21fd9ddd0a925d3",
+    "seconds": {
+      "IDLE": 30,
+      "LAT": 30,
+      "LATLOAD": 30,
+      "DNS": 30,
+      "DNSALT": 30,
+      "LOSS": 120,
+      "REL": 60,
+      "THRU": 30,
+      "MIX": 60,
+      "PERSIST": 60
+    }
+  },
+  "thresholds": {
+    "path": "~/bench-archive/2026-10-18-calibration/thresholds.json",
+    "sha256": "8ae8e31f576fd3791b9aba2267953063307819cd84a388c791c579029b51af3c"
+  },
+  "coverage": {
+    "path": "~/bench-archive/2026-10-18-calibration/coverage.json",
+    "sha256": "366e4523bf9a20aa183b2142678dc72351ce5b6f0da0cbe2ec95e60d68d5b84e"
+  },
+  "rows": [
+    "wf-aot-opt",
+    "wf-fdd-opt",
+    "wf-aot-nativeudp",
+    "wf-aot-dnsrelay",
+    "proxifyre",
+    "proxifier",
+    "proxybridge"
+  ],
+  "passes": {
+    "total": 7,
+    "discarded": [
+      1
+    ],
+    "measured": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "n": 6,
+    "required": 6,
+    "insufficient": false
+  },
+  "archive": "~/bench-archive/2026-10-19-release",
+  "files": [
+    {
+      "path": "release-inputs.json",
+      "sha256": "3964286b291e49f6d3421cf2785ab379d859f4305084b186b7b97b406d25f018",
+      "bytes": 1222
+    },
+    {
+      "path": "verdict.release.json",
+      "sha256": "25fba715acce9bcebd075c1b95681b987a097a6aafe9c6ee379356cbb17718d1",
+      "bytes": 347273
+    },
+    {
+      "path": "tables.release.md",
+      "sha256": "97c38db5a696984e081e35c208e9c2ebd69be7489c7c80805a1d261d331cc0af",
+      "bytes": 18349
+    },
+    {
+      "path": "findings.release.json",
+      "sha256": "b6b317512adaedea225524a6eb46b3bf85a66ef86e098dd3e082d8d7f2dac555",
+      "bytes": 204821
+    },
+    {
+      "path": "thresholds.json",
+      "sha256": "8ae8e31f576fd3791b9aba2267953063307819cd84a388c791c579029b51af3c",
+      "bytes": 1564
+    },
+    {
+      "path": "coverage.json",
+      "sha256": "366e4523bf9a20aa183b2142678dc72351ce5b6f0da0cbe2ec95e60d68d5b84e",
+      "bytes": 4285
+    },
+    {
+      "path": "report.md",
+      "sha256": "48dc55139889a5471e34ffd349aed54f166f69c03aae61d252767af3775e3ee4",
+      "bytes": 19406
+    }
+  ],
+  "analysis": {
+    "inputs": "release-inputs.json",
+    "verdict": "verdict.release.json",
+    "tables": "tables.release.md",
+    "findings": "findings.release.json"
+  },
+  "report": {
+    "path": "benchmarks/results/2026-10-19-release/README.md",
+    "sha256": "48dc55139889a5471e34ffd349aed54f166f69c03aae61d252767af3775e3ee4"
+  },
+  "claim": {
+    "primaryInferential": "withheld",
+    "reason": "the memory family is outside the pre-registered environment floor; loss is unevaluable (see report sections 4 and 8)"
+  }
+}
