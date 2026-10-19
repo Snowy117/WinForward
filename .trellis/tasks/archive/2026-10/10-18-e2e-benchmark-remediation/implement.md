@@ -143,21 +143,34 @@ frozen golden** for B5.
 
 ## B9 — Release campaign and report (campaign)
 
-- [ ] Run seven passes (one discarded + six measured) under the release caliber; archive every
+- [x] Run seven passes (one discarded + six measured) under the release caliber; archive every
       attempt; write `attempt`.
-- [ ] Analyze the full 7-pass tree with `--min-passes 6 --discard-pass 1` and the pre-registered
+- [x] Analyze the full 7-pass tree with `--min-passes 6 --discard-pass 1` and the pre-registered
       band; do not stage only 2–7; n=6 measured passes; generate the release tables/verdict.
-- [ ] Write the report with release caliber, primary family, band/MDD, coverage, attempts and the
+- [x] Write the report with release caliber, primary family, band/MDD, coverage, attempts and the
       limits section; review it against the measurement model.
-- [ ] Verify: gates green; `sha256sum -c`; manifest matches; report review.
-- [ ] Commit the report and manifest (not raw data).
-- [ ] Report to the user: what the campaign supports and what it does not.
+- [x] Verify: gates green; `sha256sum -c`; manifest matches; report review.
+- [x] Commit the report and manifest (not raw data).
+- [x] Report to the user: what the campaign supports and what it does not.
+
+Result: `2026-10-19-release` (attempt 2), 7 passes / 6 measured, committed `d09ad7b`; report
+`benchmarks/results/2026-10-19-release/README.md`, manifest
+`benchmarks/results/2026-10-19-release.manifest.json`, archive
+`~/bench-archive/2026-10-19-release/`. The memory family is not comparable (dynamic memory below
+the pre-registered floor), so no primary inferential claim is published; loss is `unevaluable`,
+REL is capability-fail, latency/CPU are report-only.
+
 
 ## B10 — Re-analysis and final acceptance
 
-- [ ] Re-run the new analyzer on the archived E5-b2 tree; update `reanalysis-notes.md` with the
+- [x] Re-run the new analyzer on the archived E5-b2 tree; update `reanalysis-notes.md` with the
       differences; do not change the old conclusions silently.
-- [ ] Update `.trellis/spec/` with any new contract, gate or lesson.
-- [ ] Final gates: `dotnet build WinForward.slnx -c Release`; `dotnet test WinForward.slnx -c Release`;
+- [x] Update `.trellis/spec/` with any new contract, gate or lesson.
+- [x] Final gates: `dotnet build WinForward.slnx -c Release`; `dotnet test WinForward.slnx -c Release`;
       `dotnet format ... --verify-no-changes --no-restore`; `jb inspectcode ...` with zero `<Issue>`.
-- [ ] Archive 10-11, the child tasks and the parent; update the goal to `complete`.
+- [x] Archive 10-11, the child tasks and the parent; update the goal to `complete`.
+
+Result: re-analysis committed `0ffde74`; `measurement-tooling.md` carries the 111-key/403-path
+record and the re-analysis bullets. Final gates ran at `d09ad7b`: build, test, format, inspectcode
+(0 issues), oracle-diff, fixture-drift, fairness, boundary and README contract all exit 0.
+
