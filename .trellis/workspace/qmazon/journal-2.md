@@ -205,3 +205,62 @@ Traced the REL arm's 28 MB/s allocation rate and private-memory staircase to its
 
 The first commit skipped the workflow's quality-check step; an external review (`/tmp/winforward-9c6aff7-review.md`, kept at `research/review-9c6aff7.md`) ran the gates and reported 13 findings, all folded in: the cache's owner spec (`traffic-policy-lifecycle.md`) still described the immutable-snapshot implementation, including a duplicated "it allocates" claim; the new 0 B gate was missing from the per-gate lump registry (whose Windows entry had no exact gate); the fill protocol and the UDP4/UDP6/TCP6 decodes had no facts; the cache's failure wording conflated a pre-fill validation failure with an invalidating one; the design's native-buffer sketch and counter name were stale; and the gate name, `ReadCount` and the one-line IPv6 forwarder drifted from repository conventions. Two extras came out of the discussion: the last `Marshal.AllocHGlobal`/`FreeHGlobal` pair in `src/` became `NativeMemory`, and the iphlpapi table buffers (owner-table path *and* the shared `IPHelperTables.ReadRow`, hence `UnicastAddressInventory` and its tests) went from `nint` to `void*` — `nint` is this repository's handle spelling, not its buffer spelling, and the `NativeMemory` switch had left a cast on each side of every fill. Gates on the final revision: zero-warning Release build, all 14 test projects green, `dotnet format` exit 0 with empty output, `jb inspectcode` 0 issues.
 
+
+
+## Session 64: E2E benchmark remediation: release caliber, calibration and the seven-pass release campaign
+<!-- trellis-session: v=2 fp=3963c3b1326c40fb -->
+
+**Date**: 2026-10-20
+**Task**: E2E benchmark remediation: release caliber, calibration and the seven-pass release campaign
+**Branch**: `master`
+
+### Summary
+
+Finished the 10-11 design-review remediation: committed the release caliber and measurement model (release plans, row profiles, C#-only release path), the falsifiable instrument gates (clock measure-and-correct, positive control, environment read-before-change, clean-slate failures, product-row order randomization, BASE-singbox), the verdict model (four-metric family with two demotions, noise-derived band, unevaluable, Bonferroni intervals, REL capability gate), and the reproducible campaign driver. B8 calibrated the band (thresholds 8ae8e31f, coverage 366e4523). B9 ran the seven-pass campaign twice: attempt 1 was voided by a planned Windows Update restart during pass 4; attempt 2 completed all seven passes (pass 1 discarded, six measured) after installing the Proxifier service-wide profile, restoring the ProxiFyre config, re-registering WinDivert and pausing Windows Update. The release analysis wrote release-inputs/verdict.release/tables.release/findings.release. The memory family is not comparable: the VM's dynamic memory fell from 6,367 MB at pass 2 to 4,075 MB at pass 7, below the pre-registered 5,500 MB floor, so the report withholds the primary inferential claim even though the analyzer prints different for three opponents; loss is unevaluable (zero-variance), REL fails at 18.8-19.6 pp, and latency/CPU are report-only. Clock offsets +1.46-1.96 s with 67.6-74.1 ms drift were corrected per pass (ledger mismatches 58/1 against 293/265 uncorrected). The campaign is archived at ~/bench-archive/2026-10-19-release (1,376 files, sha256sum verified); the report and manifest are checked in; E5-b2 was re-analyzed for B10; all five remediation tasks were archived.
+
+### Main Changes
+
+- Release caliber: plans-release, row profiles and the C#-only release analysis path (B5a-e)
+- Instrument gates: clock correction, positive control, environment read-before-change, failures.json, order randomization, BASE-singbox, campaign driver (B3-B7)
+- B8 calibration: three reference passes, thresholds and coverage files, sensitivity proof, latency/CPU demoted
+- B9 campaign: attempt 1 voided by Windows Update; attempt 2 seven passes, pass 1 discarded, six measured; report, manifest and checksummed archive
+- B10: E5-b2 re-analysis notes and measurement-tooling spec record
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fc49e5c` | chore(deps): 升级 Pkcs 以恢复 NuGet 审计门 |
+| `f34581e` | docs(e2e): 记录 10-11 审查决策并建立整改任务树 |
+| `8e01d51` | feat(e2e): 落地 release 口径与默认配置参考行 |
+| `2c306f3` | chore(e2e): 归档 2026-10-08 E5-b2 数据与基线分析 |
+| `36fbe1b` | feat(e2e): 加入时钟门与环境先读后改 |
+| `a27b82d` | feat(e2e): 加入正对照注入与 REL stall |
+| `883566b` | feat(analysis): 加入 release 输入 schema 与 CLI |
+| `647fb13` | feat(analysis): 加入时钟偏移校正 |
+| `49412aa` | feat(analysis): 加入 release 比较与判决模型 |
+| `9e89c17` | feat(analysis): 加入 release gate 矩阵与报告 |
+| `2b52350` | docs(e2e): 接通 release campaign runbook |
+| `f58f096` | feat(e2e): 记录失败行、clean-slate 与行序随机化 |
+| `c035b9c` | feat(e2e): 固定可复现 campaign driver |
+| `5b0083d` | feat(e2e): 加入 BASE-singbox 校准控制 |
+| `0ffde74` | docs(evidence): 重分析 E5-b2 旧数据并记录 archive provenance |
+| `bbfe12c` | fix(analysis): 修正无 TOST family 时的等价边际 |
+| `458d568` | fix(e2e): 时钟探针容忍裸连接 |
+| `692b544` | feat(e2e): 预注册 B8 校准带 |
+| `d09ad7b` | docs(e2e): 记录 B9 发布 campaign 的报告与归档 |
+| `2be83c1` | docs(e2e): 修正 B9 报告中的归档任务路径 |
+
+### Testing
+
+- [OK] Final gates at d09ad7b: Release build, all tests, dotnet format empty, jb inspectcode 0 issues; oracle-diff, check-fixture-drift, check-fairness, check-boundary-trees and check-readme-contract all exit 0
+- [OK] Archive: sha256sum -c passes over 1,376 files; committed manifest re-hashes all 7 listed files; release analysis exit 0 on the 7-pass tree
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Pin the VM's guest-visible RAM (or prove it constant) and rerun the seven-pass campaign if the memory family is to become publishable; the report's sections 4 and 8 already record this
+- Review the report's claim boundary wording and the withheld primary claim

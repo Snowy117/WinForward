@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 63
-- **Last Active**: 2026-10-09
+- **Total Sessions**: 64
+- **Last Active**: 2026-10-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~176 | Active |
+| `journal-2.md` | ~266 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 64 | 2026-10-20 | E2E benchmark remediation: release caliber, calibration and the seven-pass release campaign | `fc49e5c`, `f34581e`, `8e01d51`, `2c306f3`, `36fbe1b`, `a27b82d`, `883566b`, `647fb13`, `49412aa`, `9e89c17`, `2b52350`, `f58f096`, `c035b9c`, `5b0083d`, `0ffde74`, `bbfe12c`, `458d568`, `692b544`, `d09ad7b`, `2be83c1` | `master` |
 | 63 | 2026-10-09 | TCP close drain: retire the alias on the client's acknowledgement | `7d246c5`, `4f20c1a`, `e5bd7ab` | `master` |
 | 62 | 2026-10-09 | 代码树规范化：IPv4/IPv6 改名与全量注释精简 | `488e06f`, `fe97c11`, `85b199a`, `89d784f`, `c53a50a`, `17a439c`, `60f4433`, `c7db454` | `master` |
 | 61 | 2026-10-09 | E2E C#-native cleanup: four children, one parent, 1663 tests green | `a402289`, `90bc922`, `9310eda`, `8cfff82`, `ed436af`, `0d1edda`, `f1b556e`, `b23eceb`, `bf4bced`, `836db2b` | `master` |
