@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 本批只有 Policy 命名空间：规则模型与 blob 编译器。配置解析、IOCTL、中继在后续批次。 -->
+    <AssemblyName>WinForward.Userland</AssemblyName>
+    <RootNamespace>WinForward.Userland</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 布局断言与夹具生成在测试工程里做，它们是同一份 ABI 的两端。 -->
+    <InternalsVisibleTo Include="WinForward.Userland.Tests" />
+  </ItemGroup>
+
+</Project>

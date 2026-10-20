@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="WinForward.Userland/WinForward.Userland.csproj" />
+  <Project Path="WinForward.Userland.Tests/WinForward.Userland.Tests.csproj" />
+</Solution>

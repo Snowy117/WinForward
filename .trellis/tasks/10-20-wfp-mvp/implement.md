@@ -2,7 +2,7 @@
 
 ## 批次
 
-- [ ] B1 Phase 0 探针（`wfp-phase0-probe`）
+- [x] B1 Phase 0 探针（`wfp-phase0-probe`）—— 三条验证成立，commit `e3d4193`
 - [x] B2 可移植核心（`wfp-portable-core`）—— 58 个用例，commit `b4bbae2`
 - [ ] B3 驱动规则表与 IOCTL（`wfp-driver-rules`）
 - [ ] B4 C# 控制器与中继（`wfp-userland`）

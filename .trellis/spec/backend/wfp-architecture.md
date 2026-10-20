@@ -155,3 +155,43 @@
 本仓库取「直接 PERMIT + 清位、定终态」：filter 是 terminating，不需要留给低权重 callout 二次修改。
 
 引用 WDK 示例给决定背书之前，**先去看示例源码**。WFPSampler 用的是 `rights ^= FWPS_RIGHT_ACTION_WRITE`，且都发生在 `FwpsAcquireWritableLayerDataPointer0` **之后**——acquire 已清位，XOR 等价于置位。在 acquire 之前照抄这句话，结论正好相反。
+
+### 7.9 block 不能在 redirect 层实现，也不能用 callout 实现
+
+**第一层结论**：`ALE_CONNECT_REDIRECT` / `ALE_BIND_REDIRECT` 只改地址与端口，**不执行拦截**。在这一层把 `actionType` 置 `FWP_ACTION_BLOCK`，虽然计数器会涨、日志也会写，但**连接照样建立**——一个假的 block，比没有更糟。
+
+**第二层结论**：在 `ALE_AUTH_CONNECT` 层用 callout 实现 block 也不行，两条路都被实测否掉：
+
+| 做法 | 实测结果 |
+|---|---|
+| callout 返回终止型 `FWP_ACTION_PERMIT` | 把 Windows 防火墙的 Block 截胡——防火墙拦住的目标，连接变成成功 |
+| callout 返回 `FWP_ACTION_CONTINUE` | 终止型 callout 的 CONTINUE 被引擎当作「没有决定」，所有连接被拒 |
+
+**正确做法**：把 block 规则编译成 `ALE_AUTH_CONNECT_V4/V6` 上的 `FWP_ACTION_BLOCK` filter。这类 filter 只会增加拒绝、从不放行，因此在结构上就不可能让别处要拦的流量通过。只有规则表里存在 block 规则（或兜底动作为 block）时才创建。
+
+注意 `FWP_V4_ADDR_AND_MASK` 的 `addr` 与 `mask` 是**主机字节序**（fwptypes.h 原文），写成网络序会得到 `FWP_E_INVALID_NET_MASK`。
+
+**遗留的语义偏差**：filter 只看自身条件，不参与 blob 的「首个命中」顺序。若一条 block 规则的匹配集被更早的 permit 规则覆盖，filter 仍然会拦，与配置作者的本意相反。这类重叠必须在**编译期拒绝**，不许静默改变语义。
+
+### 7.10 进程选择器的字节契约
+
+`ALE_CONNECT_REDIRECT` 层**没有** `FWPS_METADATA_FIELD_PROCESS_PATH`（实测该层 `PROCESS_PATH` metadata 计数恒为 0，而同一次运行里进程规则能命中）。这一层能拿到的是固定的 `ALE_APP_ID`，即 **UTF-16LE 的设备路径**，形如 `\device\harddiskvolumeN\...`。
+
+因此进程选择器两侧必须约定同一套字节形式：
+
+| 项 | 约定 |
+|---|---|
+| 来源 | `ALE_APP_ID`（设备路径），不是 DOS 路径 |
+| 编码 | UTF-16 → **UTF-8** |
+| 大小写 | 只折叠 ASCII `A-Z`；非 ASCII 原样保留（中文路径必须能匹配） |
+| 分隔符 | 反斜杠 |
+| **长度上限** | **511 字节，UTF-8，不含结尾 NUL**（缓冲区 512 含 NUL） |
+| 超限行为 | **整条不匹配**（`process_path_length` 置 0）。**不截断**——截断会产生错误匹配，比不匹配危险 |
+| 孤立代理项 | 不匹配；用户态在编译期就拒绝 |
+| 用户态归一化 | `FwpmGetAppIdFromFileName0` 把 DOS 路径解析成设备路径，再按上表编码 |
+
+**这个上限必须由两侧共用同一个具名常量**，不要在任一侧写死数字。它曾经出现过三方不一致：契约写 511、classify 的条件写 `>= 512`（实际只接受 510）、block filter 按 511 算、而用户态完全没有检查——最终症状是 C# 编译出 624 字节的路径、blob 合法、内核折成 0，**规则永久静默不命中**。
+
+差分测试对这种不一致无能为力：C++ 的 `matcher` 不认识这个上限，夹具里的路径又都很短。这条只能靠两侧各自的编译期/解码期检查，以及一条「恰好 511 通过、512 拒绝」的边界用例。
+
+同理，`FwpmGetAppIdFromFileName0` 的真实行为（返回什么形状、失败时指针是否为空）只在 Windows 上可验证，Linux 单测只能覆盖注入的映射——真实 API 的覆盖属于 VM 集成测试，不要把它算进 Linux 门禁的覆盖范围。

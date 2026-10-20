@@ -16,6 +16,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 |-------|-------------|--------|
 | [WFP 架构与决策](./wfp-architecture.md) | 已拍板的决策、组件划分、跨语言契约、未决清单 | 生效 |
 | [C++ 编码规范](./cpp-conventions.md) | 两套方言、命名、有效行上限、内核方言限制 | 生效 |
+| [C# 编码规范](./csharp-conventions.md) | 工具链（net10.0）、.NET 命名、零依赖测试、ABI 布局断言 | 生效 |
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Database Guidelines](./database-guidelines.md) | 本仓库不使用数据库 | 不适用 |
 | [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |

@@ -41,17 +41,27 @@
               python3
               git
               ccache
+              # C# 侧（src/userland）的 blob 编译器与差分测试。目标框架固定 net10.0；
+              # Windows VM 上是 SDK 11，也能编 net10。
+              dotnet-sdk_10
             ];
 
             env = {
-              CC = "${llvmPkgs.clang}/bin/clang";
-              CXX = "${llvmPkgs.clang}/bin/clang++";
               CMAKE_EXPORT_COMPILE_COMMANDS = "1";
+
+              # dotnet 首次运行会打印欢迎信息并尝试上报遥测；devShell 里一律关掉。
+              DOTNET_CLI_TELEMETRY_OPTOUT = "1";
+              DOTNET_NOLOGO = "1";
             };
 
             shellHook = ''
               # 包装过的 clang-tidy 必须排在 clang-tools 自带的那份前面。
               export PATH="${clang-tidy}/bin:$PATH"
+
+              # mkShell 的 stdenv 会把 CC/CXX 覆盖成 gcc/g++，必须在它之后再导出，
+              # 否则 cmake 用 g++ 编译、clang-format/tidy 用 clang 检查，两边悄悄不一致。
+              export CC="${llvmPkgs.clang}/bin/clang"
+              export CXX="${llvmPkgs.clang}/bin/clang++"
 
               echo "WinForward 内核化 · 宿主开发环境（$(clang++ --version | head -1)）"
               echo "  驱动与用户态内核侧在 Windows VM 上用 WDK 构建；这里做编辑、格式化与纯逻辑单测。"
