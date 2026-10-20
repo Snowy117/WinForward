@@ -1,0 +1,69 @@
+---
+# 本文件是格式化的唯一事实来源。门禁以 `clang-format --version` 21.x 为准，
+# 换版本会带来输出漂移，因此 clang 版本由 flake.nix 锁定。
+Language: Cpp
+Standard: Latest
+BasedOnStyle: LLVM
+
+# ---- 缩进 ----
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+ConstructorInitializerIndentWidth: 4
+NamespaceIndentation: None
+IndentCaseLabels: false
+IndentCaseBlocks: false
+IndentGotoLabels: false
+IndentWrappedFunctionNames: false
+
+# ---- 花括号：Allman ----
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
+Cpp11BracedListStyle: false
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeComma
+
+# ---- 行宽与换行 ----
+ColumnLimit: 120
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackArguments: false
+BinPackParameters: false
+
+# ---- 指针与引用：左贴类型（int* p）----
+PointerAlignment: Left
+ReferenceAlignment: Pointer
+DerivePointerAlignment: false
+QualifierAlignment: Leave
+
+# ---- 空格 ----
+SpaceAfterTemplateKeyword: false
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceInEmptyBlock: false
+SpaceAroundPointerQualifiers: Default
+
+# ---- 注释 ----
+ReflowComments: true
+AlignTrailingComments: false
+
+# ---- include 编排 ----
+# 内核侧的真"标准库"是 WDK 头，用户态侧是 Windows SDK 头；两者都排在 C++ 头之前，
+# 因为它们会引入宏，先引入才能保证后续头看到正确的环境。
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<(ntddk|ntifs|zwapi|wdm|wdmsec|ntstrsafe|ntintsafe|intsafe|ntdef|ntstatus|wdftypes|wdf|wdfobject|wdfrequest|wdfmemory|ndis|wsk|netioddk|fwpsk|fwpmk|fwptypes|fwpstypes|ip2string|netiodef|ifdef|ifmib|ipexport|iphlpapi|netioapi|ws2def|ws2ipdef|ws2tcpip|winsock2|ws2bth|windows|windef|winbase|winnt|winerror|ntstatus)>\.h$'
+    Priority: 1
+  - Regex: '^<[^.>]+>$'
+    Priority: 3
+  - Regex: '^<.*\.h>$'
+    Priority: 2
+  - Regex: '^".*"$'
+    Priority: 4

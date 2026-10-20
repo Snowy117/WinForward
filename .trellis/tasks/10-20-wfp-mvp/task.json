@@ -1,0 +1,29 @@
+{
+  "id": "wfp-mvp",
+  "name": "wfp-mvp",
+  "title": "WFP MVP 端到端跑通",
+  "description": "在 Windows VM 上跑通最小可用闭环：C++ WFP callout 驱动重定向 host TCP，C# 用户态取回原始目的地并中继，规则经 IOCTL 下发。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P0",
+  "creator": "Snowy117",
+  "assignee": "Snowy117",
+  "createdAt": "2026-10-20",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-20-wfp-phase0-probe",
+    "10-20-wfp-portable-core"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -1,0 +1,211 @@
+# C++ 编码规范
+
+> 适用范围：本仓库全部 C++ 翻译单元。
+> 拟定：2026-10-20。
+
+本仓库同时编译两种目标——Windows 内核驱动与 Windows 用户态程序。它们共用一套命名与组织约定，但语言能力相差很远。这份文档先说清两套方言的边界，再给出可执行的规则。
+
+---
+
+## 1. 两套方言
+
+| 目录 | 方言 | 编译器 |
+|---|---|---|
+| `src/driver/` | 内核方言（C++23 的受限子集） | MSVC + WDK，`/kernel` |
+| `src/userland/` | 完整 C++23 | MSVC |
+| `src/common/` | **按内核方言约束** | 两侧都会编译 |
+| `tests/host/` | 完整 C++23 | clang（Linux 宿主机，见 `flake.nix`） |
+
+`src/common/` 是唯一的共享面。它会被内核翻译单元包含，所以它只能使用两套方言的交集——写成内核方言，用户态那一侧天然可用。反过来不成立。
+
+这条不对称是整个仓库最重要的结构约束：**共享代码往严格的方向写**。
+
+---
+
+## 2. 语言基线
+
+- **用户态**：C++23。RAII 是默认的资源管理手段，不留手动释放路径。
+- **内核**：C++23 的受限子集，具体边界见 §5。同样是 RAII 优先，只是可用的积木少得多。
+
+---
+
+## 3. 命名
+
+**一句话规则：除宏之外，全部 snake_case。**
+
+| 符号 | 规则 | 例 |
+|---|---|---|
+| 命名空间 | snake_case | `winforward::wfp` |
+| 类 / 结构体 / 联合 / 枚举 | snake_case | `redirect_context`、`rule_table` |
+| 类型别名（`using` / `typedef`） | snake_case | `using port_range = std::pair<uint16_t, uint16_t>;` |
+| 函数 / 方法 | snake_case | `evaluate_host`、`apply_redirect` |
+| 变量 / 参数 / 成员 | snake_case | `process_id`、`rule_index` |
+| 常量（`constexpr` / `const`） | snake_case | `max_rule_depth`、`default_listener_port` |
+| 枚举成员 | snake_case | `stream_state::idle` |
+| 模板参数 | snake_case | `template <typename value_type>` |
+| **宏** | **SCREAMING_SNAKE_CASE** | `WF_TRACE`、`WF_ASSERT_IRQL_PASSIVE` |
+
+补充约定：
+
+- **不加 `_t` 后缀**。`ip_prefix`，不是 `ip_prefix_t`——`_t` 与 Windows 的遗留类型（`DWORD`、`ULONG` 之外的那批）混在一起读不出信息。
+- **缩写全部小写**。`ipv4`、`tcp`、`wfp`、`ndis`，不写 `IPv4`、`TCP`、`WFP`。全大写留给宏。
+- **traits 沿用标准库惯例**：`is_redirectable_v`、`ip_version_of_t`。
+- **不用匈牙利前缀**。`p`、`n`、`dw`、`sz` 一律不要——类型在声明处就写着。
+- **名字表达意图，不表达实现**。`process_attribution_failed` 优于 `get_pid_error_2`。
+
+---
+
+## 4. 文件有效行
+
+**有效行的定义**：文件中去掉空行、以及整行都是注释的行之后剩下的行数。行尾注释不计入额外行。
+
+**单个文件的有效行上限：500 行**（头文件与实现文件分别计算，`.inl` 计入其主头）。
+
+超过上限不是"允许但要注意"，是需要处理的设计信号，二选一：
+
+1. 拆文件——通常说明这个文件承担了两个以上职责；
+2. 提取共同部分——通常说明有重复结构没有抽象出来。
+
+确有必要超过时，在文件头部注释里写明理由，并说明为什么拆分不合适。**没有理由的超限不接受。**
+
+---
+
+## 5. 内核方言
+
+内核态没有异常运行时、没有 RTTI 支持、IRQL 之上不能分页。以下限制不是风格偏好，是能否通过编译或能否稳定运行的边界。
+
+### 5.1 禁止
+
+| 禁止 | 原因 |
+|---|---|
+| `throw` / `try` / `catch` | 内核 C++ 不产生异常运行时；抛异常等于立即崩溃 |
+| `dynamic_cast` / `typeid` | RTTI 关闭 |
+| 标准库容器与字符串（`std::vector`、`std::string`、`std::map` …） | 依赖堆分配与异常，且官方不支持 |
+| `new` / `delete` | `/kernel` 下不可用；内存一律走池分配 |
+| 全局或静态对象的**动态初始化** | 构造时机在 `DriverEntry` 之前，不受控 |
+| **函数内静态局部变量** | 首次调用需要线程安全的初始化守卫，在 `DISPATCH_LEVEL` 下不可用 |
+| `__try` / `__except` 与"持有析构函数的对象"同处一个作用域 | SEH 展开不调用 C++ 析构函数，资源泄漏 |
+| `DISPATCH_LEVEL` 及以上的浮点运算 | 内核栈不保存 FPU 状态 |
+
+### 5.2 允许
+
+- 类、继承（尽量不用虚函数）、模板、`constexpr`、`static_assert`、`enum class`。
+- 无分配、无异常的基础设施头：`<cstddef>`、`<cstdint>`、`<limits>`、`<type_traits>`、`<utility>`、`<bit>`。
+- `<new>` **仅用于 placement new**（在预分配的池块上构造对象），不用于 `operator new`。
+- WDK 头：`<ntddk.h>`、`<ntifs.h>`、`<ntstrsafe.h>`、`<ntintsafe.h>`、`<fwpsk.h>`、`<fwpmk.h>`、`<wsk.h>`。
+
+### 5.3 RAII 的形式
+
+内核侧不引入 STL，RAII 由仓库自己的最小类型承担。它们按 `unique_ptr` 的语义设计——可移动、不可复制、析构即释放：
+
+```cpp
+// 池内存：析构调用 ExFreePoolWithTag
+template <typename value_type>
+class pool_ptr;
+
+// 引用计数对象（callout、过滤器引擎句柄等）
+template <typename value_type>
+class object_ref;
+
+// 锁与 rundown 保护
+class irql_guard;
+class rundown_guard;
+```
+
+规则：
+
+- 分配之后立刻交给 RAII 对象，**不允许**"先分配、出错手动 `ExFreePool`"的写法。
+- 失败路径靠作用域退出自动收敛；`goto cleanup` 只在跨 C 接口的极少数场景使用，且必须有注释说明。
+- 跨 `<ntddk.h>` 边界的原生句柄，用窄接口的包装类型持有，不裸传。
+
+### 5.4 语言版本口径
+
+内核侧按 `/std:c++latest` 编译，但**只用 §5.2 白名单里的能力**。这条规则的执行方式是评审，不是编译器——编译器不会拦住 `std::vector`，但内核会。
+
+---
+
+## 6. 编译期计算
+
+鼓励模板元编程与 `constexpr`，但不是为了炫技。
+
+**应该放进编译期的**：
+
+- 结构体的尺寸与布局约束——用 `static_assert(sizeof(redirect_context) == 32, "…")` 而不是运行时断言。
+- 规则表的静态部分：CIDR 掩码、端口范围校验、偏移表。
+- 字节序转换、位域提取的常量折叠。
+- 类型分派的标签（`if constexpr`、变参模板展开），避免虚函数与函数指针表。
+
+**不应该放进编译期的**：
+
+- 会把调用栈变成模板实例化瀑布的东西。超过三层的递归模板实例化需要注释说明。
+- 需要运行期数据才能决定的分支——`constexpr` 帮不上忙时，老实写运行时代码。
+- 为了省几个周期而牺牲错误可读性的地方。`static_assert` 的第二个参数是给人看的，写清楚违反了什么约定。
+
+模板实例化深度与目标文件体积是真实成本。内核镜像有大小预算，过度泛化会让 `.sys` 膨胀。
+
+---
+
+## 7. 错误处理
+
+| 侧 | 约定 |
+|---|---|
+| 内核 | 返回 `NTSTATUS`；调用方用 `NT_SUCCESS()` 判断；**不吞错误** |
+| 用户态 | 返回 `std::expected<value_type, error_type>`（C++23）；不用异常做控制流 |
+
+两条共用要求：
+
+- 失败路径必须留下可诊断的信息，但不要在 `DISPATCH_LEVEL` 以上写日志。
+- 错误码不要自己发明体系。内核侧复用 `NTSTATUS` 值，用户态侧复用 `Win32` 错误码，只有真正业务性的语义才新增枚举。
+
+---
+
+## 8. 格式与门禁
+
+- **格式化**：`.clang-format` 是唯一事实来源（Allman、4 空格、120 列、指针左贴类型）。clang-format 版本由 `flake.nix` 锁定在 21.x——换版本会产生输出漂移，门禁会误报。
+- **命名检查**：`.clang-tidy` 里的 `readability-identifier-naming` 把 §3 的规则变成可执行检查。
+- **管辖范围**：clang-tidy 只跑可移植代码与用户态代码。含 WDK 头的内核翻译单元 clang 解析不了，那部分靠评审。
+- **禁止对仓库整体跑 `clang-tidy --fix`**：`--fix` 的实际改写范围不受 `--header-filter` 约束——它会把 filter 之外、只要被当前翻译单元包含到的头文件一并改掉。需要自动修时，先看诊断清单位置再逐个文件处理，或者直接手工改。
+- **include 顺序有语义的地方用 `// clang-format off` / `on` 包住**：WDK 要求 `<ndis.h>` 前先定义 `NDIS630`、`fwpmk.h`/`fwpsk.h` 需要 `INITGUID`，而 clang-format 会按分类重排 include，两者直接冲突。
+- **文档语言**：本项目文档以中文书写。
+
+---
+
+## 9. 测试约定
+
+### 9.1 用例的通过原因必须就是它的名字
+
+一条用例因为**错误的原因**通过，比没有这条用例更糟——它让人以为那里有覆盖。
+
+这个错误在本项目里已经出现过两次：
+
+- `rejects_an_unaligned_buffer` 起初传 `data() + 1` 且 `size - 1`，真正拒绝它的是长度不符而不是对齐检查；
+- `rejects_overlapping_segments` 的三个夹具分别被「池尾 NUL」与「网段记录合法性」拒掉，三条重叠检查全删后仍然全绿。
+
+### 9.2 验收方式是变异测试
+
+对每一条校验 / 分支，判据不是「用例通过」，而是：**把被它保护的代码删掉或改成恒假，这条用例必须失败。**
+
+做不到就说明它没钉住。做不到的常见原因是夹具同时违反了多条约束——要构造「只违反这一条」的输入。
+
+写用例时顺手记下它钉的是哪条检查，并在被测代码旁注明这条检查是否已被某个用例独占锁定。
+
+### 9.3 内存安全类的检查需要越界检测来证明
+
+判断越界的检查（长度下限、边界读取）在逻辑层往往观察不到——短缓冲会被更早的 magic 比较挡掉。这类检查要靠：
+
+- 把输入放在 `mmap` 页尾、下一页 `PROT_NONE`，让缺失的检查直接段错误；
+- 或用 ASan / UBSan 构建跑同一批用例。
+
+只用「返回 false」断言，删掉检查后用例仍可能通过。
+
+### 9.4 门禁脚本同样适用
+
+接进一键流程的验证脚本，**必须是会失败的**。只打印不断言、永远 `exit 0` 的脚本比没有更糟：它让上层那句 `if ($LASTEXITCODE -ne 0) { throw }` 变成空门，给人一种有守门的错觉。
+
+这个错误在本项目里也出现过：`edge-cases.ps1` 只打印池计数就退出，主脚本对它的判空；`build-and-test.ps1` 的 DACL 检查只输出 accesschk 结果不判定，而 DACL 正是发布阻断项。
+
+要求：
+
+- 每条守门断言都要有**反向验证**——故意破坏被守的那件事，确认脚本变红；
+- 计数类断言要精确（`allocs == before + 1`），不要写成「有输出就算过」；
+- 检查安全属性时，断言的是**内容**（不含 `Everyone`），不是「命令跑成功了」。

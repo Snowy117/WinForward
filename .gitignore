@@ -1,0 +1,20 @@
+# Nix / direnv
+result
+result-*
+.direnv/
+
+# 宿主侧构建产物
+build/
+out/
+.cache/
+compile_commands.json
+*.o
+*.obj
+
+# 驱动与用户态构建产物（真编在 Windows 上，这些只在同步回来时出现）
+*.sys
+*.pdb
+*.ilk
+*.exp
+*.lib
+x64/

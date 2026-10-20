@@ -1,0 +1,24 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+# C++ 源码：缩进由 .clang-format 决定，这里保持一致以免编辑器跳来跳去
+[*.{h,hpp,hh,hxx,cpp,cxx,cc,ixx,inl}]
+indent_size = 4
+
+[*.{json,yml,yaml,nix,md}]
+indent_size = 2
+
+[*.{vcxproj,props,targets,xml,inf}]
+indent_size = 2
+
+[*.ps1]
+indent_size = 2
+
+[Makefile]
+indent_style = tab

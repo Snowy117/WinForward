@@ -1,0 +1,63 @@
+---
+# 静态检查的口径。注意：内核翻译单元（含 WDK 头）clang 无法独立解析，
+# 因此本文件实际管辖的是可移植的纯逻辑代码与用户态代码。
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-unchecked-optional-access,
+  cppcoreguidelines-special-member-functions,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -modernize-avoid-c-arrays,
+  performance-*,
+  -performance-avoid-endl,
+  readability-braces-around-statements,
+  readability-const-return-type,
+  readability-else-after-return,
+  readability-identifier-naming,
+  readability-inconsistent-declaration-parameter-name,
+  readability-misleading-indentation,
+  readability-non-const-parameter,
+  readability-qualified-auto,
+  readability-redundant-*,
+  readability-simplify-*,
+  readability-static-accessed-through-instance,
+  readability-uppercase-literal-suffix,
+  readability-use-anyofallof
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(src|tests)/.*\.(h|hpp)$'
+FormatStyle: file
+
+CheckOptions:
+  # 命名：除宏之外，全部 snake_case（用户 2026-10-20 裁定）。
+  - { key: readability-identifier-naming.NamespaceCase,       value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,           value: lower_case }
+  - { key: readability-identifier-naming.StructCase,          value: lower_case }
+  - { key: readability-identifier-naming.UnionCase,           value: lower_case }
+  - { key: readability-identifier-naming.EnumCase,            value: lower_case }
+  - { key: readability-identifier-naming.EnumConstantCase,    value: lower_case }
+  - { key: readability-identifier-naming.TypeAliasCase,       value: lower_case }
+  - { key: readability-identifier-naming.TypedefCase,         value: lower_case }
+  - { key: readability-identifier-naming.FunctionCase,        value: lower_case }
+  - { key: readability-identifier-naming.MethodCase,          value: lower_case }
+  - { key: readability-identifier-naming.ParameterCase,       value: lower_case }
+  - { key: readability-identifier-naming.LocalVariableCase,   value: lower_case }
+  - { key: readability-identifier-naming.VariableCase,        value: lower_case }
+  - { key: readability-identifier-naming.MemberCase,          value: lower_case }
+  - { key: readability-identifier-naming.PublicMemberCase,    value: lower_case }
+  - { key: readability-identifier-naming.ProtectedMemberCase, value: lower_case }
+  - { key: readability-identifier-naming.ConstexprVariableCase, value: lower_case }
+  - { key: readability-identifier-naming.GlobalConstantCase,  value: lower_case }
+  - { key: readability-identifier-naming.StaticConstantCase,  value: lower_case }
+  - { key: readability-identifier-naming.StaticMemberCase,    value: lower_case }
+  - { key: readability-identifier-naming.StaticMethodCase,    value: lower_case }
+
+  # 宏是唯一的例外：全部大写。
+  - { key: readability-identifier-naming.MacroDefinitionCase, value: UPPER_CASE }
+
+  # 外部规定、不由我们命名的入口：操作系统要求的内核入口，以及 gtest 宏展开出的测试体。
+  - { key: readability-identifier-naming.FunctionIgnoredRegexp, value: '^(DriverEntry|GsDriverEntry|TEST|TEST_F|TEST_P|TEST_F_P)$' }

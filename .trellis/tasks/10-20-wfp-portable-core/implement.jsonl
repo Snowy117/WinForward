@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "本批必读"}
+{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "本批必读"}
+{"file": ".trellis/tasks/10-20-wfp-mvp/prd.md", "reason": "本批必读"}
+{"file": ".trellis/tasks/10-20-wfp-mvp/design.md", "reason": "本批必读"}
+{"file": "src/common/redirect_context.h", "reason": "既有契约与 constexpr 写法范例"}
+{"file": "tests/host/redirect_context_test.cpp", "reason": "测试风格与 gtest 接法"}
