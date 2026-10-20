@@ -1,9 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- 本批只有 Policy 命名空间：规则模型与 blob 编译器。配置解析、IOCTL、中继在后续批次。 -->
+    <!-- Policy：规则模型与 blob 编译器；Configuration：暂定 JSON；Device：IOCTL；Control/Relay：产品进程。 -->
     <AssemblyName>WinForward.Userland</AssemblyName>
     <RootNamespace>WinForward.Userland</RootNamespace>
+
+
   </PropertyGroup>
 
   <ItemGroup>

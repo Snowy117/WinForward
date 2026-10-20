@@ -46,7 +46,18 @@ internal static class DifferentialFixtureWriter
         foreach (DifferentialCase item in cases)
         {
             string fileName = item.Name + ".blob";
-            File.WriteAllBytes(Path.Combine(directory, fileName), TestAppId.Compile(item.Table));
+            byte[] blob;
+            try
+            {
+                blob = TestAppId.Compile(item.Table);
+            }
+            catch (PolicyCompileException exception)
+            {
+                throw new TestFailure($"用例 {item.Name} 的规则表无法编译：{exception.Message}");
+            }
+
+            File.WriteAllBytes(Path.Combine(directory, fileName), blob);
+
 
             manifest.Append("case\t").Append(item.Name).Append('\t').Append(item.Description).Append('\n');
             manifest.Append("blob\t").Append(fileName).Append('\n');

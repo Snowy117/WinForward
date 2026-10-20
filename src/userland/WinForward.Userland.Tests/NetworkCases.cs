@@ -8,15 +8,15 @@ internal static class NetworkCases
     {
         Differential.Case(
             "cidr-v4-slash0-family-v4",
-            "IPv4 默认路由：只吃 IPv4 连接，IPv6 连接仍走兜底",
-            RuleAction.Block,
+            "IPv4 默认路由：只吃 IPv4 连接，IPv6 连接仍走兜底 permit",
+            RuleAction.Permit,
             new[]
             {
                 Differential.Rule(
                     RuleAction.Redirect, network: "0.0.0.0/0", family: RuleAddressFamily.Ipv4),
             },
             Differential.Expectations(
-                RuleAction.Block,
+                RuleAction.Permit,
                 (0, RuleAction.Redirect, 0),  // 0  ipv4 10.1.2.3:443
                 (1, RuleAction.Redirect, 0),  // 1  ipv4 10.1.2.3:80
                 (2, RuleAction.Redirect, 0),  // 2  ipv4 192.168.1.5:8080

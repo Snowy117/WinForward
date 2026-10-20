@@ -1,0 +1,166 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
+namespace WinForward.Userland.Device;
+
+/// <summary>
+/// 产品侧 ABI 结构的布局断言。数字与 <c>src/driver/probe_ioctl.h</c> 的 <c>static_assert</c> 相同；
+/// 一致性测试会从头文件文本里读回这些数字，任何一边改动而另一边没跟上都会失败。
+/// </summary>
+/// <remarks>
+/// <see cref="Verify"/> 在打开设备之前跑一次：布局对不上时立刻带着「哪个结构、哪个字段」报错，
+/// 而不是让一次 DeviceIoControl 返回一个看不出原因的 Win32 错误码。
+/// </remarks>
+public static class DeviceLayout
+{
+    public const int ProbeConfigSize = 64;
+    public const int ProbeStatsSize = 232;
+    public const int ProbeRuleInfoSize = 32;
+    public const int ProbeEventSize = 64;
+    public const int ProcessPathMeasurementSize = 520;
+    public const int RedirectContextSize = 36;
+
+    private static readonly object Gate = new();
+    private static bool _verified;
+
+    public static void Verify()
+    {
+        lock (Gate)
+        {
+            if (_verified)
+            {
+                return;
+            }
+
+            VerifyProbeConfig();
+            VerifyProbeStats();
+            VerifyProbeRuleInfo();
+            VerifyProbeEvent();
+            VerifyProcessPathMeasurement();
+            VerifyRedirectContext();
+            _verified = true;
+        }
+    }
+
+    private static void VerifyProbeConfig()
+    {
+        CheckSize<ProbeConfig>(ProbeConfigSize);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.AbiVersion), 0);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.Enabled), 4);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.ListenerProcessId), 8);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.ListenerPort), 12);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.Reserved0), 14);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.SelfProcessCount), 16);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.SelfProcessIds), 20);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.Reserved), 52);
+    }
+
+    private static void VerifyProbeStats()
+    {
+        CheckSize<ProbeStats>(ProbeStatsSize);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.ClassifyCalls), 0);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.Permitted), 8);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.Blocked), 16);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.Redirected), 24);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.RulesReplaced), 32);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.RejectedBlobs), 40);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.ContextsAllocated), 48);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.ContextAllocFailures), 56);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.ApplyFailures), 64);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.RedirectFailures), 72);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedDisabled), 80);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedNoRules), 88);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedNoWriteRight), 96);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedUnsupported), 104);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedNonTcp), 112);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedListenerPort), 120);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedRedirectState), 128);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedConditionFlags), 136);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedAlreadyRedirected), 144);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.PermittedSelfProcess), 152);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.MatchedPermit), 160);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.MatchedBlock), 168);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.MatchedRedirect), 176);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.FallbackPermit), 184);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.FallbackBlock), 192);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.FallbackRedirect), 200);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.DeferredBlocks), 208);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.ProcessPathMetadataSeen), 216);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.LastStatus), 224);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.AbiVersion), 228);
+    }
+
+    private static void VerifyProbeRuleInfo()
+    {
+        CheckSize<ProbeRuleInfo>(ProbeRuleInfoSize);
+        CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.AbiVersion), 0);
+        CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.Generation), 4);
+        CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.Installed), 8);
+        CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.RuleCount), 12);
+        CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.FallbackAction), 16);
+        CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.TotalSize), 20);
+        CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.ProcessPoolSize), 24);
+        CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.NetworkPoolCount), 28);
+    }
+
+    private static void VerifyProbeEvent()
+    {
+        CheckSize<ProbeEvent>(ProbeEventSize);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.Timestamp100ns), 0);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.Sequence), 8);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.ProcessId), 12);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.RemoteAddress), 16);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.LocalAddress), 32);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.RemotePort), 48);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.LocalPort), 50);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.RedirectPort), 52);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.Decision), 54);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.Family), 55);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.Action), 56);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.Branch), 57);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.MatchedRule), 60);
+    }
+
+    private static void VerifyProcessPathMeasurement()
+    {
+        CheckSize<ProcessPathMeasurement>(ProcessPathMeasurementSize);
+        CheckOffset<ProcessPathMeasurement>(nameof(ProcessPathMeasurement.Utf8Length), 0);
+        CheckOffset<ProcessPathMeasurement>(nameof(ProcessPathMeasurement.Reserved), 4);
+        CheckOffset<ProcessPathMeasurement>(nameof(ProcessPathMeasurement.Utf8), 8);
+    }
+
+    private static void VerifyRedirectContext()
+    {
+        CheckSize<RedirectContext>(RedirectContextSize);
+        CheckOffset<RedirectContext>(nameof(RedirectContext.Magic), 0);
+        CheckOffset<RedirectContext>(nameof(RedirectContext.RuleIndex), 4);
+        CheckOffset<RedirectContext>(nameof(RedirectContext.ProcessId), 8);
+        CheckOffset<RedirectContext>(nameof(RedirectContext.Version), 12);
+        CheckOffset<RedirectContext>(nameof(RedirectContext.OriginalPort), 14);
+        CheckOffset<RedirectContext>(nameof(RedirectContext.Family), 16);
+        CheckOffset<RedirectContext>(nameof(RedirectContext.Protocol), 17);
+        CheckOffset<RedirectContext>(nameof(RedirectContext.Reserved), 18);
+        CheckOffset<RedirectContext>(nameof(RedirectContext.OriginalAddress), 20);
+    }
+
+    private static void CheckSize<T>(int expected) where T : unmanaged
+    {
+        int managed = Unsafe.SizeOf<T>();
+        int marshalled = Marshal.SizeOf<T>();
+        if (managed != expected || marshalled != expected)
+        {
+            throw new InvalidOperationException(
+                $"{typeof(T).Name} 布局不一致：期望 {expected} 字节，Unsafe.SizeOf={managed}，Marshal.SizeOf={marshalled}");
+        }
+    }
+
+    private static void CheckOffset<T>(string field, int expected) where T : unmanaged
+    {
+        long actual = (long)Marshal.OffsetOf<T>(field);
+        if (actual != expected)
+        {
+            throw new InvalidOperationException(
+                $"{typeof(T).Name}.{field} 偏移不一致：期望 {expected}，实际 {actual}");
+        }
+    }
+}

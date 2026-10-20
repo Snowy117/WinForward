@@ -2,11 +2,14 @@ using WinForward.Userland.Tests;
 
 if (args.Length == 0 || args[0] == "test")
 {
-    LayoutTests.Register();
-    CompilerTests.Register();
-    InvalidInputTests.Register();
-    ProcessPathTests.Register();
-    DifferentialTests.Register();
+    RegisterAll();
+    return TestRunner.RunAll();
+}
+
+if (args[0] == "abi")
+{
+    DeviceAbiTests.Register();
+    WinForward.Userland.Tests.Abi.AbiConsistencyTests.Register();
     return TestRunner.RunAll();
 }
 
@@ -18,6 +21,25 @@ if (args[0] == "emit-fixtures")
     return 0;
 }
 
+if (args[0] == "vm-check")
+{
+    return await VmChecks.RunAsync(args[1..]);
+}
+
 Console.Error.WriteLine($"未知子命令：{args[0]}");
-Console.Error.WriteLine("用法：WinForward.Userland.Tests [test | emit-fixtures [目录]]");
+Console.Error.WriteLine("用法：WinForward.Userland.Tests [test | abi | emit-fixtures [目录] | vm-check]");
 return 2;
+
+static void RegisterAll()
+{
+    LayoutTests.Register();
+    CompilerTests.Register();
+    InvalidInputTests.Register();
+    ProcessPathTests.Register();
+    DifferentialTests.Register();
+    ConfigurationTests.Register();
+    RuleOrderTests.Register();
+    DeviceAbiTests.Register();
+    RelayPumpTests.Register();
+    WinForward.Userland.Tests.Abi.AbiConsistencyTests.Register();
+}

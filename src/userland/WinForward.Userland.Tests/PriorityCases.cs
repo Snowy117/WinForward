@@ -55,12 +55,12 @@ internal static class PriorityCases
 
         Differential.Case(
             "priority-specific-rule-first",
-            "把具体规则（443）放在前面：443 命中 redirect，其余 svchost 落到第二条 block",
+            "把具体规则（443）放在前面：443 命中 redirect，8080 命中后面的 block（block 规则必须收窄到与更早规则不相交的端口，否则编译期会拒绝歧义配置）",
             RuleAction.Permit,
             new[]
             {
                 Differential.Rule(RuleAction.Redirect, process: Differential.Svchost, ports: PortRange.Single(443)),
-                Differential.Rule(RuleAction.Block, process: Differential.Svchost),
+                Differential.Rule(RuleAction.Block, process: Differential.Svchost, ports: PortRange.Single(8080)),
             },
             Differential.Expectations(
                 RuleAction.Permit,
@@ -72,28 +72,29 @@ internal static class PriorityCases
 
         Differential.Case(
             "mixed-rules-report-rule-index",
-            "三条互不相同的规则 + 兜底 block：逐条连接检查命中的规则序号",
-            RuleAction.Block,
+            "三条互不相同的规则 + 兜底 permit：block 写在最前（写在 redirect 之后会构成歧义配置，编译期拒绝），逐条连接检查命中的规则序号",
+            RuleAction.Permit,
             new[]
             {
-                Differential.Rule(RuleAction.Redirect, network: "10.1.0.0/16"),
                 Differential.Rule(RuleAction.Block, ports: PortRange.Single(80)),
+                Differential.Rule(RuleAction.Redirect, network: "10.1.0.0/16"),
                 Differential.Rule(RuleAction.Redirect, family: RuleAddressFamily.Ipv6),
             },
             Differential.Expectations(
-                RuleAction.Block,
-                (0, RuleAction.Redirect, 0),  // 0 ipv4 10.1.2.3:443
-                (1, RuleAction.Redirect, 0),  // 1 ipv4 10.1.2.3:80 先命中规则 0
+                RuleAction.Permit,
+                (0, RuleAction.Redirect, 1),  // 0 ipv4 10.1.2.3:443
+                (1, RuleAction.Block, 0),     // 1 ipv4 10.1.2.3:80 端口规则在前
                 (3, RuleAction.Redirect, 2),  // 3 ipv6 443 落到族规则
-                (4, RuleAction.Block, 1),     // 4 ipv6 80 命中端口规则
-                (5, RuleAction.Redirect, 0),  // 5 ipv4 10.1.2.3:1
-                (6, RuleAction.Redirect, 0),  // 6 ipv4 10.1.2.3:65535
-                (7, RuleAction.Redirect, 0),  // 7 大写路径
-                (8, RuleAction.Redirect, 0),  // 8 .bak 后缀
-                (9, RuleAction.Redirect, 0),  // 9 无进程路径
+                (4, RuleAction.Block, 0),     // 4 ipv6 80 命中端口规则
+                (5, RuleAction.Redirect, 1),  // 5 ipv4 10.1.2.3:1
+                (6, RuleAction.Redirect, 1),  // 6 ipv4 10.1.2.3:65535
+                (7, RuleAction.Redirect, 1),  // 7 大写路径
+                (8, RuleAction.Redirect, 1),  // 8 .bak 后缀
+                (9, RuleAction.Redirect, 1),  // 9 无进程路径
                 (10, RuleAction.Redirect, 2), // 10 ipv6 8443
-                (12, RuleAction.Redirect, 0), // 12 udp 10.1.2.3:443
-                (13, RuleAction.Redirect, 0))), // 13 ipv4 10.1.2.4:443
+                (12, RuleAction.Redirect, 1), // 12 udp 10.1.2.3:443
+                (13, RuleAction.Redirect, 1))), // 13 ipv4 10.1.2.4:443
+
 
         Differential.Case(
             "network-record-dedup-two-rules",
@@ -136,13 +137,13 @@ internal static class PriorityCases
         Differential.Case(
             "all-any-single-rule",
             "一条什么选择器都不写的规则：任意进程、任意网段、任意端口、任意协议、任意族",
-            RuleAction.Block,
+            RuleAction.Permit,
             new[]
             {
                 Differential.Rule(RuleAction.Redirect),
             },
             Differential.Expectations(
-                RuleAction.Block,
+                RuleAction.Permit,
                 (0, RuleAction.Redirect, 0),  // 0
                 (1, RuleAction.Redirect, 0),  // 1
                 (2, RuleAction.Redirect, 0),  // 2
@@ -162,14 +163,14 @@ internal static class PriorityCases
         Differential.Case(
             "protocol-tcp-rule-then-any",
             "先一条 TCP 规则、再一条任意协议规则：udp 连接落到第二条",
-            RuleAction.Block,
+            RuleAction.Permit,
             new[]
             {
                 Differential.Rule(RuleAction.Block, protocol: RuleProtocol.Tcp),
                 Differential.Rule(RuleAction.Permit),
             },
             Differential.Expectations(
-                RuleAction.Block,
+                RuleAction.Permit,
                 (0, RuleAction.Block, 0),     // 0 tcp
                 (1, RuleAction.Block, 0),     // 1 tcp
                 (2, RuleAction.Block, 0),     // 2 tcp

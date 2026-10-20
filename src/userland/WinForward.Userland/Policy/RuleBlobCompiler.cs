@@ -13,7 +13,18 @@ namespace WinForward.Userland.Policy;
 /// </remarks>
 public static class RuleBlobCompiler
 {
-    public static byte[] Compile(PolicyTable table, IProcessPathNormalizer processPathNormalizer)
+    public static byte[] Compile(PolicyTable table, IProcessPathNormalizer processPathNormalizer) =>
+        Build(table, processPathNormalizer, validatePolicy: true);
+
+    /// <summary>
+    /// 测试专用入口：跳过顺序冲突检查，用来构造「驱动必须独立拒绝」的负向夹具。
+    /// 产品路径只用 <see cref="Compile"/>；这个方法由 InternalsVisibleTo 只暴露给测试工程。
+    /// </summary>
+    internal static byte[] CompileUnchecked(PolicyTable table, IProcessPathNormalizer processPathNormalizer) =>
+        Build(table, processPathNormalizer, validatePolicy: false);
+
+
+    private static byte[] Build(PolicyTable table, IProcessPathNormalizer processPathNormalizer, bool validatePolicy)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(processPathNormalizer);
@@ -33,6 +44,14 @@ public static class RuleBlobCompiler
 
         byte[] processBytes = processPool.ToBytes();
         RuleBlobNetworkPrefix[] networks = networkPool.ToArray();
+
+        // 与驱动 rule_order_valid 相同的判定：block 规则会被编译成独立的 AUTH_CONNECT 过滤器，
+        // 若更早的非 block 规则可能与它命中同一条连接，语义就会与「首个命中」相矛盾。
+        if (validatePolicy)
+        {
+            RuleOrderValidator.ValidateFallback(table.FallbackAction, entries);
+            RuleOrderValidator.Validate(entries, processBytes, networks);
+        }
 
         int rulesOffset = RuleBlobLayout.HeaderSize;
         int processOffset = rulesOffset + (entries.Length * RuleBlobLayout.RuleSize);
