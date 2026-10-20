@@ -3,7 +3,7 @@
 ## 批次
 
 - [ ] B1 Phase 0 探针（`wfp-phase0-probe`）
-- [ ] B2 可移植核心（`wfp-portable-core`）
+- [x] B2 可移植核心（`wfp-portable-core`）—— 58 个用例，commit `b4bbae2`
 - [ ] B3 驱动规则表与 IOCTL（`wfp-driver-rules`）
 - [ ] B4 C# 控制器与中继（`wfp-userland`）
 - [ ] B5 端到端与验收（`wfp-e2e`）

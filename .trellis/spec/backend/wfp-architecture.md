@@ -118,6 +118,8 @@
 - **每一次 acquire 都必须配对一次 `FwpsApplyModifiedLayerData0`**，即使什么都没改；
 - 「只读不修改、本意放行」的分支必须显式恢复 `rights |= FWPS_RIGHT_ACTION_WRITE` 与 `actionType = FWP_ACTION_PERMIT`，再 apply。漏掉这一步会把连接**拒掉**，而代码看起来像是在放行——这是本层最容易犯、也最难看出来的错。
 
+**但只要不写数据，就不要 acquire。** 只读判断（例如读 `FWPS_CONNECT_REQUEST0::previousVersion`）可以直接读 raw layer data，把它放在 acquire 之前，这条分支就整段没有 handle 生命周期，配对问题也就不存在。本仓库的 already-redirected 分支就是这么收的。
+
 ### 7.3 connect-redirect 层的可写范围
 
 可写：`remoteAddressAndPort`、`portReservationToken`、`localRedirectTargetPID`、`localRedirectHandle`、`localRedirectContext(Size)`。
@@ -135,7 +137,9 @@
 
 ### 7.6 卸载必须检查注销返回值
 
-`FwpsCalloutUnregisterById0` 返回 `STATUS_DEVICE_BUSY` 时必须重试，**不能忽略返回值继续卸载**——否则引擎里会留下指向已卸载代码的 callout。
+`FwpsCalloutUnregisterById0` 返回 `STATUS_DEVICE_BUSY` / `STATUS_FWP_IN_USE` 时必须重试，`STATUS_FWP_CALLOUT_NOT_FOUND` 视为已注销。**绝不能在未注销成功时继续卸载**——引擎里留下指向已卸载代码的 callout，之后在任意上下文随机崩，最难查。
+
+重试窗口 2 秒；耗尽后主动 `KeBugCheckEx`，把故障钉在卸载路径上，而不是留给未来的一次随机蓝屏。这个窗口按本驱动的当前不变量不可达（不关联 flow context、单线程卸载），bugcheck 的作用是把「不可达」这个假设变成可验证的——假设一旦不成立，立刻可见。
 
 ### 7.7 构建约束
 
@@ -143,3 +147,11 @@
 - `fwpmk.h` / `fwpsk.h` 需要 `INITGUID`；
 - `$(VC_IncludePath)` 必须前置，否则 WDK 自带的 `km\crt` 旧 `cstddef` 会遮蔽 MSVC 的 `std::size_t`；
 - clang-format 会重排 include，与「include 顺序有语义」直接冲突——这类区块必须用 `// clang-format off` / `on` 包住。
+
+### 7.8 放行分支的写权限终态只能选一种
+
+`actionType = FWP_ACTION_PERMIT` 时把 `FWPS_RIGHT_ACTION_WRITE` 置位还是清除，两种都合法，但**同一个驱动里必须统一**，并在注释里写明理由，不要一半置位一半清位。
+
+本仓库取「直接 PERMIT + 清位、定终态」：filter 是 terminating，不需要留给低权重 callout 二次修改。
+
+引用 WDK 示例给决定背书之前，**先去看示例源码**。WFPSampler 用的是 `rights ^= FWPS_RIGHT_ACTION_WRITE`，且都发生在 `FwpsAcquireWritableLayerDataPointer0` **之后**——acquire 已清位，XOR 等价于置位。在 acquire 之前照抄这句话，结论正好相反。
