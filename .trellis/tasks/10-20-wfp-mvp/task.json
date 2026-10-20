@@ -22,7 +22,8 @@
     "10-20-wfp-phase0-probe",
     "10-20-wfp-portable-core",
     "10-20-wfp-driver-rules",
-    "10-20-wfp-csharp-blob"
+    "10-20-wfp-csharp-blob",
+    "10-21-wfp-userland"
   ],
   "parent": null,
   "relatedFiles": [],

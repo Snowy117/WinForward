@@ -209,7 +209,13 @@ WDK 头里的注释也一致：“Arbitrary callout supplied context allocated u
 监听者，连接被 RST。池计数从 `1234/1234` 变成 `1235/1235`，outstanding 仍为 0 —— 即使代理端没接住
 这条连接，WFP 也会在 flow 结束时释放 context。失败的是连接本身，不是所有权语义。
 
-另外：重定向 context 分配失败时，现在的处理是配对 apply 之后 BLOCK 该连接（fail-closed），这是刻意语义 —— 没有 context 就带不回原始目的地，放行会让代理拿到不完整的连接信息。
+另外：重定向 context 分配失败时，现在的处理是配对 apply 之后放行该连接。
+
+> **订正（10-20-wfp-driver-rules 实测）**：`ALE_CONNECT_REDIRECT` **不执行拦截**。Phase 0 当时
+> 写的“BLOCK 该连接（fail-closed，这是刻意语义）”是错的——在该层返回 BLOCK 并不会阻断，连接
+> 实际会**直连真实目的地**。所以这三条 redirect 失败路径的真实语义是 **fail-open（直连）**，
+> 事件/计数也必须按“直连”记（已在新驱动里改成 permit + `redirect_failures`），不能再说
+> fail-closed。若产品需要“拿不到 context 就拒绝”，必须在 ALE_AUTH_CONNECT 层执行。
 
 ## 6. 失败的尝试与踩坑
 
@@ -340,7 +346,7 @@ wfprobe.exe selftest --remote 1.2.3.4:443 --bind 192.168.100.2 --port 18080 --it
 | 级别 | 问题 | 处理 | 验证 |
 |---|---|---|---|
 | 高 | 设备默认 DACL 为 `RW Everyone`，IOCTL 可被任意登录用户滥用 | `IoCreateDeviceSecure` + `SDDL_DEVOBJ_SYS_ALL_ADM_ALL`；IOCTL 入口加 `SeTokenIsAdmin` | accesschk 只剩 SYSTEM / Administrators；完整流程复跑全绿 |
-| 中 | acquire 之后未配对 apply，already-redirected 分支实际把连接 BLOCK | `finish_classify` 统一配对：每次 acquire writable 成功后必 apply，再写回 PERMIT/BLOCK；分配失败改为有意的 fail-closed | 编译通过；200 次连接与两条分支复跑 PASS |
+| 中 | acquire 之后未配对 apply，already-redirected 分支实际把连接 BLOCK | `finish_classify` 统一配对：每次 acquire writable 成功后必 apply，再写回 PERMIT/BLOCK；分配失败改为放行（该层不执行拦截，实际是直连；见本文件订正） | 编译通过；200 次连接与两条分支复跑 PASS |
 | 中低 | `FwpsCalloutUnregisterById0` 返回值被丢弃 | 只对 `STATUS_DEVICE_BUSY`/`STATUS_FWP_IN_USE` 重试 2s；耗尽后 DbgPrint 并 `KeBugCheckEx(0x8000FFE0)`，不继续卸载；按当前不变量该路径不可达 | 3 轮 load/unload 的 stop 均在毫秒级，未触发 bugcheck |
 | 低 | `SelfTest` 的 PASS 判据漏了 `echoOk` | 判据加 `echoOk == iterations` | 全绿 |
 | 低 | redirect records 固定 1KiB 且失败不重试 | 16KiB 起步，`WSAEMSGSIZE`/`WSAEINVAL`/122 时按需放大到 256KiB | 实测单条 records 772B，读取正常 |
@@ -396,7 +402,7 @@ wfprobe.exe selftest --remote 1.2.3.4:443 --bind 192.168.100.2 --port 18080 --it
   `finish_classify` 的注释现在直接引用文档：acquire 会把 actionType 置 BLOCK、清掉
   `FWPS_RIGHT_ACTION_WRITE`，并且每次调用都必须配对 apply。两条放行路径统一为“置 PERMIT 后清位、
   定终态”：filter 是 FWP_ACTION_CALLOUT_TERMINATING，不需要把改许可的权利留给低权重 callout。
-  acquire writable 失败的分支也补了注释：classifyOut 可能停在 BLOCK，是有意的 fail-closed。
+  acquire writable 失败的分支也补了注释；**订正**：classifyOut 可能停在 BLOCK，但该层不执行拦截，实际是直连（fail-open）。
 
 ### 12.4 最终正向复跑
 
@@ -427,4 +433,5 @@ edge-cases verdict: PASS
 - 3 轮 load/unload 实测 stop 耗时：36.6 ms / 31.6 ms / 34.1 ms，均远小于 2 s 重试窗口；
   未触发 bugcheck，VM uptime 未变。
 - 两条放行路径统一为“置 PERMIT + 清 FWPS_RIGHT_ACTION_WRITE、定终态”；acquire writable 失败分支
-  补注释说明 classifyOut 可能停在 BLOCK，是有意的 fail-closed。
+  补注释说明 classifyOut 可能停在 BLOCK。**订正**：该层不执行拦截，所以失败路径实际是直连
+  （fail-open），不是 fail-closed。

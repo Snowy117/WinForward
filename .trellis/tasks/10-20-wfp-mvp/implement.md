@@ -5,7 +5,8 @@
 - [x] B1 Phase 0 探针（`wfp-phase0-probe`）—— 三条验证成立，commit `e3d4193`
 - [x] B2 可移植核心（`wfp-portable-core`）—— 58 个用例，commit `b4bbae2`
 - [ ] B3 驱动规则表与 IOCTL（`wfp-driver-rules`）
-- [ ] B4 C# 控制器与中继（`wfp-userland`）
+- [x] B4a C# 规则编译器与差分测试（`wfp-csharp-blob`）—— 46 用例 + 480 条决策断言，commit `d4e91b8`
+- [ ] B4b C# 控制器：配置解析、IOCTL 下发、监听与中继（原 B4 的后半）
 - [ ] B5 端到端与验收（`wfp-e2e`）
 - [ ] B6 MVP 之后的性能验证：借原仓库 `benchmarks/WinForward.E2E` 跑可运行的测试子集，取得 CPU 数据并与现状对比
 

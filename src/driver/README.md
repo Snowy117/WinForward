@@ -1,43 +1,64 @@
-# WFP Phase 0 探针驱动
+# WFP 重定向驱动（规则表版）
 
-最小 WDM 驱动，只在 `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4` 上挂一个 callout，用来验证三件事：
-
-1. `localAddressAndPort` 是 ANY 时把连接改到 loopback、否则改到该 local 地址，两条分支是否都能落到本地监听端口；
-2. 写进 `localRedirectContext` 的 `winforward::wfp::redirect_context` 能否被用户态用
-   `SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT` 原样读回；
-3. `localRedirectContext` 的所有权归谁。
+WDM 驱动，在 `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4/V6` 上挂 callout，按用户态下发的规则 blob
+决定放行 / 重定向；block 规则由 `FWPM_LAYER_ALE_AUTH_CONNECT_V4/V6` 上的 `FWP_ACTION_BLOCK`
+filter 执行。Phase 0 的硬编码探针行为已被规则表取代。
 
 ## 文件
 
 | 文件 | 内容 |
 |---|---|
-| `probe_ioctl.h` | 驱动与 C# 测试程序之间的控制面 ABI（IOCTL 码、配置、计数、事件） |
-| `probe_driver.h` | 驱动内部共享面（状态、窄接口、callout 原型） |
-| `probe_driver.cpp` | `DriverEntry` / 卸载、WFP 对象注册与拆除、设备与 IOCTL |
-| `probe_classify.cpp` | classify：各道闸、两条重定向分支、redirect context 分配 |
+| `probe_ioctl.h` | 控制面 ABI v2：IOCTL 码、配置、计数、规则表回读、事件 |
+| `rule_table.h/.cpp` | 规则 blob 的池内存副本、校验（含 selector UTF-8/511、fallback 冲突、顺序冲突）、引用计数、原子替换与退役链 |
+| `probe_driver.h` | 驱动内部共享面（状态、锁、窄接口、callout 原型、include 顺序约束） |
+| `probe_driver.cpp` | `DriverEntry`/卸载、设备、WFP provider/callout/filter 的注册与拆除 |
+| `block_filters.cpp` | 把 block 规则编译成 ALE_AUTH_CONNECT 的 `FWP_ACTION_BLOCK` filter（增删/滚动替换） |
+| `probe_control.cpp` | IOCTL 处理：配置（含 0↔1 切换时 block filter 的挂/摘）、规则下发、计数、事件、调用者校验 |
+| `probe_classify.cpp` | classify：facts、四道防循环闸、matcher、三个动作、重定向 |
+| `process_path.cpp` | `ALE_APP_ID` 的 UTF-16 → UTF-8 转换（511 字节边界、代理对）与 0x807 诊断 |
 | `wfprobe.vcxproj` | WDK 工程，`SignMode=Off`，签名在构建后用 signtool 手工完成 |
 
-## 构建
+## 控制面
 
-在 `WinLTSC` 上（工程文件里的 `..\..\src\common` 指向 `redirect_context.h`，所以目录结构要保持）：
+- `ioctl_set_rule_blob`：下发整块 `rule_blob`（`src/common/rule_blob.h`）。校验失败返回
+  `STATUS_INVALID_PARAMETER`，当前规则表保持不变；成功则原子替换并 `generation++`。
+- `ioctl_get_rule_info`：规则数、兜底动作、总长、generation。
+- `ioctl_get_config` / `ioctl_set_config`：启用开关、监听端口 / PID、self-PID 集合。
+- `ioctl_get_stats` / `ioctl_reset_stats`：classify 次数、各动作计数、被拒绝的 blob 数、
+  context 分配/失败、四道闸的细分计数、block 决策计数。
+- `ioctl_get_events`：64 条环形事件（decision / action / branch / 命中规则序号 / 地址族）。
+- `ioctl_measure_process_path`（0x807，诊断，**发布前可移除**）：把 UTF-16LE 缓冲区按
+  `collect_process_path` 的规则转成 UTF-8，用于验证 511 字节边界与代理对行为；只读、无状态、
+  admin-only。存在的唯一理由是长路径进程无法在测试环境构造，删掉它那段逻辑就不可验证。
+
+全部 IOCTL 走 `caller_is_admin`；设备用 `IoCreateDeviceSecure` + `SDDL_DEVOBJ_SYS_ALL_ADM_ALL`。
+`FILE_ANY_ACCESS` 没有放宽访问控制：DACL 与调用者校验才是边界。
+
+## 规则与防循环
+
+规则 blob 的第一条命中决定动作（`permit` / `block` / `redirect`，未命中用 `fallback_action`）。
+classify 依次检查：
+
+1. 目标端口等于配置的监听端口 → 放行（闸 1）；
+2. `previousVersion->localRedirectHandle` 非空（别的 callout 已改写）→ 放行；
+3. `FwpsQueryConnectionRedirectState0` 报告 BY_SELF / PREVIOUSLY_BY_SELF → 放行（闸 2）；
+4. 条件标志含 `IS_CONNECTION_REDIRECTED` 或 `IS_PROXY_CONNECTION` → 放行（闸 3）；
+5. 发起进程在 self-PID 集合里 → 放行（闸 4）。
+
+`block` 决策在 redirect 层只记账并放行；真正的拒绝由 auth 层的 block filter 完成
+（详见 `.trellis/tasks/10-20-wfp-driver-rules/research/findings.md` §2）。
+
+## 构建与签名
+
+在 `WinLTSC` 上（工程用 `..\..\src\common` 指向共享头，目录结构要保持）：
 
 ```powershell
 $msb = "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
 & $msb C:\wfbench\wfprobe\src\driver\wfprobe.vcxproj -restore -p:Configuration=Debug -p:Platform=x64
 ```
 
-产物：`src\driver\x64\Debug\wfprobe.sys`。
-
-## 签名
-
-模板里的 `sign.ps1` 走 `/f <pfx>` 会报 `Store::ImportCertObject() failed (0x80090010)`，改用证书库里已有的那张：
-
-```powershell
-$thumb = (Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.Subject -like '*WinForward Test Driver*' }).Thumbprint
-& "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe" sign /fd SHA256 /sha1 $thumb /v <sys>
-```
-
-注意：签名必须走 `/sha1 <thumbprint>`，`/f <pfx>` 这条路在本机不可用（导入私钥报 0x80090010）。
+产物：`src\driver\x64\Debug\wfprobe.sys`。签名用证书库里的 `CN=WinForward Test Driver` +
+`/sha1 <thumbprint>`（模板的 `/f <pfx>` 在本机不可用）。
 
 ## 安装与卸载
 
@@ -50,21 +71,11 @@ sc.exe start wfprobe
 sc.exe query wfprobe
 ```
 
-卸载顺序：先 `sc.exe stop wfprobe`（触发 `DriverUnload`），再 `sc.exe delete wfprobe`。
-
-## 设备安全
-
-- 设备对象用 `IoCreateDeviceSecure` + `SDDL_DEVOBJ_SYS_ALL_ADM_ALL` 创建，DACL 只允许
-  SYSTEM 与 Builtin\Administrators；`accesschk64.exe -q -o \Device\WfProbe` 可验证。
-- 每个 IOCTL 入口再用 `SeTokenIsAdmin` 校验调用者。`FILE_DEVICE_SECURE_OPEN` 只影响设备
-  命名空间的打开路径，不替代 DACL。
-- DACL 收紧后，测试程序必须以管理员身份运行。
-
-## 与 design.md 的差异
-
-- **设备对象先建、callout 后注册**：`FwpsCalloutRegister1` 在 WDM 下需要设备对象，而 design.md
-  的列表把设备创建写在 callout 注册之后。拆除顺序仍严格逆序。
-- **`<ndis.h>` 需要 `NDIS630`**：WFP callout 不属于 NDIS 驱动模型，必须在包含前定义 `NDIS630`，
-  否则 `fwpsk.h` 依赖的 `NET_BUFFER_LIST` 等类型不会被导出。
-- 重定向改的是 `remoteAddressAndPort`（官方文档与 WFPSampler 示例的写法）；`localAddressAndPort`
-  只是读取，用来判断 ANY 分支。`localAddressAndPort` 本身在 connect-redirect 层不可写。
+- block 规则编译成独立的 auth 层 filter；凡是“更早的非 block 规则可能与它重叠”的配置会在
+  换表时整块拒绝（`rule_order_valid`），绝不让 filter 抢掉 blob 里本应首个命中的 permit/redirect。
+- 进程选择器是 `ALE_APP_ID` 的 UTF-16 device path → UTF-8（ASCII 大小写折叠，代理对按标准
+  展开）。上限是 **UTF-8 511 字节（不含 NUL）**，缓冲区 512 字节含 NUL；超限/非法代理项整条
+  不匹配、不截断。中文路径与 511/512 边界都已实测。
+- 用户态要用 `FwpmGetAppIdFromFileName0` 取 app id；该 API 对 >MAX_PATH 的路径会失败，长路径
+  需要用户态自己拼 device path。
+- 闸 2 目前只由组合用例覆盖，未单独钉住（需要第二个 redirector，findings §5）。

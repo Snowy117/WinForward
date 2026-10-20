@@ -172,6 +172,9 @@
 注意 `FWP_V4_ADDR_AND_MASK` 的 `addr` 与 `mask` 是**主机字节序**（fwptypes.h 原文），写成网络序会得到 `FWP_E_INVALID_NET_MASK`。
 
 **遗留的语义偏差**：filter 只看自身条件，不参与 blob 的「首个命中」顺序。若一条 block 规则的匹配集被更早的 permit 规则覆盖，filter 仍然会拦，与配置作者的本意相反。这类重叠必须在**编译期拒绝**，不许静默改变语义。
+**失败路径的语义要写实话**：既然这一层不执行拦截，那么任何「失败就 BLOCK」的写法的实际效果都是**放行到真实目的地**（fail-open），而计数器还会记成 `blocked`——既没保护也不诚实。正确的做法是如实置 PERMIT 并单独计数（`redirect_failures`），让「重定向失败 = 直连」成为一个可观测的事实。要真的拒绝，必须落到 `ALE_AUTH_CONNECT` 的 BLOCK filter 上。
+
+顺带一条同类教训：`fallback_action = block` 会生成**无条件**的 auth BLOCK filter，把同表里所有 permit / redirect 规则变成死规则，而 classify 仍按规则表报 `permitted`。这类「兜底与规则组合起来自相矛盾」的配置必须在编译期拒绝，驱动侧再拒绝一次。
 
 ### 7.10 进程选择器的字节契约
 

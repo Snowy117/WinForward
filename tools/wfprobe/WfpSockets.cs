@@ -31,11 +31,26 @@ internal static class WfpSockets
     [DllImport("ws2_32.dll")]
     private static extern int WSAGetLastError();
 
-    public static byte[] QueryRedirectContext(Socket socket) =>
-        Query(socket, SioQueryWfpConnectionRedirectContext);
+    public static byte[] QueryRedirectContext(Socket socket) => Query(socket, SioQueryWfpConnectionRedirectContext);
 
-    public static byte[] QueryRedirectRecords(Socket socket) =>
-        Query(socket, SioQueryWfpConnectionRedirectRecords);
+    public static byte[] QueryRedirectRecords(Socket socket) => Query(socket, SioQueryWfpConnectionRedirectRecords);
+
+    public static void SetRedirectRecords(Socket socket, byte[] records)
+    {
+        IntPtr buffer = Marshal.AllocHGlobal(records.Length);
+        try
+        {
+            Marshal.Copy(records, 0, buffer, records.Length);
+            int result = WSAIoctl(socket.Handle, SioSetWfpConnectionRedirectRecords, buffer, (uint)records.Length,
+                                  IntPtr.Zero, 0, out _, IntPtr.Zero, IntPtr.Zero);
+            if (result != 0)
+                throw new Win32Exception(WSAGetLastError(), "SIO_SET_WFP_CONNECTION_REDIRECT_RECORDS 失败");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
 
     public static byte[] Query(Socket socket, uint ioControlCode)
     {

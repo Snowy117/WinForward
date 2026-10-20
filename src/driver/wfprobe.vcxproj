@@ -39,8 +39,15 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ItemGroup>
+    <ClCompile Include="block_filters.cpp" />
     <ClCompile Include="probe_classify.cpp" />
+    <ClCompile Include="redirect_target.cpp" />
+    <ClCompile Include="process_path.cpp" />
+    <ClCompile Include="probe_control.cpp" />
+
     <ClCompile Include="probe_driver.cpp" />
+    <ClCompile Include="rule_table.cpp" />
+
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.WDK.x64" Version="10.0.28000.2526" />

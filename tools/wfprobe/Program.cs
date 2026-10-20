@@ -43,12 +43,22 @@ internal static class Program
                     return PrintEvents(options);
                 case "pooltag":
                     return PrintPoolTag(options);
+                case "appid":
+                    return PrintAppId(options);
                 case "listen":
                     return await ListenAsync(options);
                 case "client":
                     return await ClientAsync(options);
+                case "relay":
+                    return await Relay.RunAsync(options);
+                case "blockprobe":
+                    return await BlockProbe.RunAsync(options);
                 case "selftest":
                     return await SelfTest.RunAsync(options);
+                case "rules":
+                    return await RuleSuite.RunAsync(options);
+                case "gates":
+                    return await GateSuite.RunAsync(options);
                 default:
                     PrintUsage();
                     return 1;
@@ -64,34 +74,26 @@ internal static class Program
     private static void PrintUsage()
     {
         Console.WriteLine(@"用法:
-  wfprobe control [--enabled 0|1] [--mode documented|loopback|local] [--port N]
-                  [--target-pid PID] [--listener-pid PID] [--local-address A.B.C.D]
-  wfprobe stats
-  wfprobe reset
+  wfprobe control [--enabled 0|1] [--port N] [--listener-pid PID]
+                  [--self-pid PID]... [--clear-self]
+  wfprobe stats | reset | pooltag [--tag WfPr]
   wfprobe events [--count N]
-  wfprobe pooltag [--tag WfPr]
+  wfprobe appid [--path FILE]
   wfprobe listen --bind A.B.C.D --port N --count K
-  wfprobe client --remote A.B.C.D:PORT [--bind A.B.C.D] [--payload TEXT] [--delay-ms N] [--timeout-ms N]
-  wfprobe selftest --remote A.B.C.D:PORT --bind A.B.C.D --port N
-                  [--mode documented|loopback|local] [--source A.B.C.D]
-                  [--local-address A.B.C.D] [--iterations K] [--expect-address A.B.C.D]
-                  [--expect-branch loopback|local] [--settle-ms N] [--timeout-ms N]");
+  wfprobe client --remote HOST:PORT [--bind A.B.C.D] [--payload TEXT] [--delay-ms N] [--timeout-ms N]
+  wfprobe relay --bind A.B.C.D --port N [--expect-accepts K] [--accept-window-ms N]
+                 [--outbound HOST:PORT] [--outbound-records 0|1] [--linger-ms N]
+  wfprobe selftest --remote HOST:PORT [--bind A.B.C.D] [--dual] [--iterations K] [--settle-ms N]
+  wfprobe rules [--iterations K]
+  wfprobe gates");
     }
 
-    internal static uint ParseMode(string text) => text switch
+    internal static uint ParseAction(string text) => text switch
     {
-        "documented" => Protocol.RedirectModeDocumented,
-        "loopback" => Protocol.RedirectModeForceLoopback,
-        "local" => Protocol.RedirectModeForceLocal,
-        _ => throw new ArgumentException($"未知 mode：{text}"),
-    };
-
-    internal static string ModeName(uint mode) => mode switch
-    {
-        Protocol.RedirectModeDocumented => "documented",
-        Protocol.RedirectModeForceLoopback => "loopback",
-        Protocol.RedirectModeForceLocal => "local",
-        _ => $"unknown({mode})",
+        "permit" => Protocol.RuleActionPermit,
+        "block" => Protocol.RuleActionBlock,
+        "redirect" => Protocol.RuleActionRedirect,
+        _ => throw new ArgumentException($"未知动作：{text}"),
     };
 
     internal static uint IpToNetworkUInt32(string text)
@@ -102,22 +104,26 @@ internal static class Program
         return BitConverter.ToUInt32(bytes, 0);
     }
 
-    internal static IPAddress NetworkUInt32ToIp(uint value) => new(BitConverter.GetBytes(value));
-
     internal static IPEndPoint ParseEndPoint(string text)
     {
         int separator = text.LastIndexOf(':');
         if (separator <= 0)
             throw new ArgumentException($"地址应为 A.B.C.D:PORT：{text}");
-        return new IPEndPoint(IPAddress.Parse(text[..separator]), int.Parse(text[(separator + 1)..], CultureInfo.InvariantCulture));
+        return new IPEndPoint(IPAddress.Parse(text[..separator]),
+                              int.Parse(text[(separator + 1)..], CultureInfo.InvariantCulture));
     }
 
     internal static void PrintConfig(string prefix, ProbeConfig config)
     {
-        Console.WriteLine(
-            $"[{prefix}] config: abi={config.AbiVersion} enabled={config.Enabled} mode={ModeName(config.Mode)} " +
-            $"target-pid={config.TargetProcessId} listener-pid={config.ListenerProcessId} port={config.ListenerPort} " +
-            $"local-override={NetworkUInt32ToIp(config.LocalAddressOverride)}");
+        var ids = new List<uint>();
+        unsafe
+        {
+            for (int index = 0; index < config.SelfProcessCount; index++)
+                ids.Add(config.SelfProcessIds[index]);
+        }
+        Console.WriteLine($"[{prefix}] config: abi={config.AbiVersion} enabled={config.Enabled} " +
+                          $"listener-pid={config.ListenerProcessId} port={config.ListenerPort} " +
+                          $"self-pids=[{string.Join(",", ids)}]");
     }
 
     private static int Control(Options options)
@@ -128,16 +134,27 @@ internal static class Program
 
         if (options.Has("enabled"))
             config.Enabled = options.GetUInt("enabled", 1);
-        if (options.Has("mode"))
-            config.Mode = ParseMode(options.Require("mode"));
         if (options.Has("port"))
             config.ListenerPort = (ushort)options.GetUInt("port", 0);
-        if (options.Has("target-pid"))
-            config.TargetProcessId = options.GetUInt("target-pid", 0);
         if (options.Has("listener-pid"))
             config.ListenerProcessId = options.GetUInt("listener-pid", 0);
-        if (options.Has("local-address"))
-            config.LocalAddressOverride = IpToNetworkUInt32(options.Require("local-address"));
+        if (options.Has("clear-self"))
+            config.SelfProcessCount = 0;
+
+        List<string?> selfPids = options.GetAll("self-pid");
+        if (selfPids.Count > 0)
+        {
+            if (selfPids.Count > Protocol.MaxSelfProcessIds)
+                throw new ArgumentException($"self-pid 最多 {Protocol.MaxSelfProcessIds} 个");
+            unsafe
+            {
+                for (int index = 0; index < Protocol.MaxSelfProcessIds; index++)
+                    config.SelfProcessIds[index] = index < selfPids.Count
+                                                       ? uint.Parse(selfPids[index]!, CultureInfo.InvariantCulture)
+                                                       : 0;
+            }
+            config.SelfProcessCount = (uint)selfPids.Count;
+        }
 
         device.SetConfig(config);
         PrintConfig("control", device.GetConfig());
@@ -148,13 +165,22 @@ internal static class Program
     {
         using var device = new WfpDevice();
         ProbeStats stats = device.GetStats();
-        Console.WriteLine($"[stats] classify={stats.ClassifyCalls} redirected={stats.Redirected} " +
-                          $"contexts_allocated={stats.ContextsAllocated} alloc_failures={stats.ContextAllocFailures} " +
-                          $"apply_failures={stats.ApplyFailures} last_status=0x{stats.LastStatus:X8}");
-        Console.WriteLine($"[stats] permitted: disabled={stats.PermittedDisabled} wrong_pid={stats.PermittedWrongProcess} " +
-                          $"listener_port={stats.PermittedListenerPort} redirect_state={stats.PermittedRedirectState} " +
-                          $"already_redirected={stats.PermittedAlreadyRedirected} no_write_right={stats.PermittedNoWriteRight} " +
-                          $"non_tcp={stats.PermittedNonTcp}");
+        Console.WriteLine($"[stats] classify={stats.ClassifyCalls} permitted={stats.Permitted} blocked={stats.Blocked} " +
+                          $"redirected={stats.Redirected} rules_replaced={stats.RulesReplaced} " +
+                          $"rejected_blobs={stats.RejectedBlobs}");
+        Console.WriteLine($"[stats] contexts_allocated={stats.ContextsAllocated} " +
+                          $"alloc_failures={stats.ContextAllocFailures} apply_failures={stats.ApplyFailures} " +
+                          $"redirect_failures={stats.RedirectFailures} deferred_blocks={stats.DeferredBlocks} " +
+                          $"process_path_metadata={stats.ProcessPathMetadataSeen} " +
+                          $"last_status=0x{stats.LastStatus:X8}");
+        Console.WriteLine($"[stats] permitted: disabled={stats.PermittedDisabled} no_rules={stats.PermittedNoRules} " +
+                          $"no_write_right={stats.PermittedNoWriteRight} unsupported={stats.PermittedUnsupported} " +
+                          $"non_tcp={stats.PermittedNonTcp} listener_port={stats.PermittedListenerPort} " +
+                          $"redirect_state={stats.PermittedRedirectState} condition_flags={stats.PermittedConditionFlags} " +
+                          $"already_redirected={stats.PermittedAlreadyRedirected} self_process={stats.PermittedSelfProcess}");
+        Console.WriteLine($"[stats] matched: permit={stats.MatchedPermit} block={stats.MatchedBlock} " +
+                          $"redirect={stats.MatchedRedirect} fallback: permit={stats.FallbackPermit} " +
+                          $"block={stats.FallbackBlock} redirect={stats.FallbackRedirect}");
         return 0;
     }
 
@@ -177,30 +203,52 @@ internal static class Program
         return 0;
     }
 
-    private static unsafe void PrintEvent(ProbeEvent item)
+    internal static unsafe void PrintEvent(ProbeEvent item)
     {
-        Console.WriteLine(
-            $"[event] seq={item.Sequence} pid={item.ProcessId} decision={DecisionName(item.Decision)} " +
-            $"mode={ModeName(item.Mode)} branch={BranchName(item.Branch)} " +
-            $"original={AddressText(item.OriginalAddress)}:{item.OriginalPort} " +
-            $"local={AddressText(item.LocalAddress)}:{item.LocalPort} redirect-port={item.RedirectPort}");
+        string remote = AddressText(item.RemoteAddress, item.Family);
+        string local = AddressText(item.LocalAddress, item.Family);
+        string rule = item.MatchedRule == Protocol.InvalidRuleIndex ? "-" : item.MatchedRule.ToString(CultureInfo.InvariantCulture);
+        Console.WriteLine($"[event] seq={item.Sequence} pid={item.ProcessId} decision={DecisionName(item.Decision)} " +
+                          $"action={ActionName(item.Action)} branch={BranchName(item.Branch)} family={item.Family} " +
+                          $"rule={rule} remote={remote}:{item.RemotePort} local={local}:{item.LocalPort} " +
+                          $"redirect-port={item.RedirectPort}");
     }
 
-    internal static unsafe string AddressText(byte* address) => new IPAddress(new ReadOnlySpan<byte>(address, 4)).ToString();
+    internal static unsafe string AddressText(byte* address, byte family)
+    {
+        int length = family == 6 ? 16 : 4;
+        return new IPAddress(new ReadOnlySpan<byte>(address, length)).ToString();
+    }
 
     internal static string DecisionName(byte decision) => decision switch
     {
-        0 => "permitted_disabled",
-        1 => "permitted_wrong_process",
-        2 => "permitted_listener_port",
-        3 => "permitted_redirect_state",
-        4 => "permitted_already_redirected",
-        5 => "permitted_no_write_right",
-        6 => "permitted_non_tcp",
-        7 => "redirected",
-        8 => "redirect_failed",
-        9 => "context_alloc_failed",
+        Protocol.DecisionPermittedDisabled => "permitted_disabled",
+        Protocol.DecisionPermittedNoWriteRight => "permitted_no_write_right",
+        Protocol.DecisionPermittedNonTcp => "permitted_non_tcp",
+        Protocol.DecisionPermittedListenerPort => "permitted_listener_port",
+        Protocol.DecisionPermittedConditionFlags => "permitted_condition_flags",
+        Protocol.DecisionPermittedRedirectState => "permitted_redirect_state",
+        Protocol.DecisionPermittedAlreadyRedirected => "permitted_already_redirected",
+        Protocol.DecisionPermittedSelfProcess => "permitted_self_process",
+        Protocol.DecisionPermittedNoRules => "permitted_no_rules",
+        Protocol.DecisionPermittedUnsupported => "permitted_unsupported",
+        Protocol.DecisionPermittedFallback => "permitted_fallback",
+        Protocol.DecisionPermittedRule => "permitted_rule",
+        Protocol.DecisionBlockedRule => "blocked_rule",
+        Protocol.DecisionBlockedFallback => "blocked_fallback",
+        Protocol.DecisionRedirected => "redirected",
+        Protocol.DecisionRedirectFailed => "redirect_failed",
+        Protocol.DecisionContextAllocFailed => "context_alloc_failed",
+        Protocol.DecisionPermittedDeferredBlock => "permitted_deferred_block",
         _ => $"unknown({decision})",
+    };
+
+    internal static string ActionName(byte action) => action switch
+    {
+        Protocol.ActionPermit => "permit",
+        Protocol.ActionBlock => "block",
+        Protocol.ActionRedirect => "redirect",
+        _ => $"unknown({action})",
     };
 
     internal static string BranchName(byte branch) => branch switch
@@ -210,6 +258,15 @@ internal static class Program
         2 => "local_address",
         _ => $"unknown({branch})",
     };
+
+    private static int PrintAppId(Options options)
+    {
+        string path = options.Get("path") ?? Environment.ProcessPath ??
+                      throw new InvalidOperationException("拿不到当前进程路径");
+        Console.WriteLine($"[appid] path={path}");
+        Console.WriteLine($"[appid] normalized={AppId.ForPath(path)}");
+        return 0;
+    }
 
     private static int PrintPoolTag(Options options)
     {
@@ -287,7 +344,7 @@ internal static class Program
         return 0;
     }
 
-    private static void PrintContext(byte[] raw)
+    internal static void PrintContext(byte[] raw)
     {
         if (raw.Length != 36)
         {
@@ -297,10 +354,11 @@ internal static class Program
 
         RedirectContext context = MemoryMarshal.Read<RedirectContext>(raw);
         Console.WriteLine($"[context] magic=0x{context.Magic:X8} version={context.Version} pid={context.ProcessId} " +
-                          $"family={context.Family} protocol={context.Protocol} port={context.OriginalPort}");
+                          $"rule={context.RuleIndex} family={context.Family} protocol={context.Protocol} " +
+                          $"port={context.OriginalPort}");
         unsafe
         {
-            Console.WriteLine($"[context] original={AddressText(context.OriginalAddress)}:{context.OriginalPort}");
+            Console.WriteLine($"[context] original={AddressText(context.OriginalAddress, context.Family)}:{context.OriginalPort}");
         }
     }
 
@@ -336,7 +394,7 @@ internal static class Program
 
 internal sealed class Options
 {
-    private readonly Dictionary<string, string?> values = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<string?>> values = new(StringComparer.OrdinalIgnoreCase);
 
     public Options(string[] args)
     {
@@ -359,13 +417,21 @@ internal sealed class Options
                 value = args[++index];
             }
 
-            values[key] = value;
+            if (!values.TryGetValue(key, out List<string?>? list))
+            {
+                list = new List<string?>();
+                values.Add(key, list);
+            }
+            list.Add(value);
         }
     }
 
     public bool Has(string key) => values.ContainsKey(key);
 
-    public string? Get(string key) => values.TryGetValue(key, out string? value) ? value : null;
+    public string? Get(string key) => values.TryGetValue(key, out List<string?>? list) ? list[^1] : null;
+
+    public List<string?> GetAll(string key) =>
+        values.TryGetValue(key, out List<string?>? list) ? list : new List<string?>();
 
     public string Require(string key) => Get(key) ?? throw new ArgumentException($"缺少 --{key}");
 

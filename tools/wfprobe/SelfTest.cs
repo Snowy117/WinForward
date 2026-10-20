@@ -9,65 +9,74 @@ internal static class SelfTest
     public static async Task<int> RunAsync(Options options)
     {
         int iterations = options.GetInt("iterations", 5);
-        int port = options.GetInt("port", 18080);
         int timeoutMs = options.GetInt("timeout-ms", 5000);
-        int settleMs = options.GetInt("settle-ms", 1500);
-        uint mode = Program.ParseMode(options.Get("mode") ?? "documented");
-        string bind = options.Get("bind") ?? "127.0.0.1";
-        string? source = options.Get("source");
-        string? expectAddress = options.Get("expect-address");
-        string? expectBranch = options.Get("expect-branch");
+        int settleMs = options.GetInt("settle-ms", 1000);
+        bool dual = options.Has("dual") && options.GetInt("dual", 1) != 0;
         IPEndPoint remote = Program.ParseEndPoint(options.Require("remote"));
-        uint overrideAddress = options.Get("local-address") is { } localText ? Program.IpToNetworkUInt32(localText) : 0u;
         int processId = Environment.ProcessId;
 
         using var device = new WfpDevice();
         device.ResetStats();
-        PoolTagUsage? poolBefore = PoolTags.Find(Protocol.PoolTag);
+
+        string bindText = options.Get("bind") ?? (dual ? "::1" : "127.0.0.1");
+        TcpListener listener = dual ? new TcpListener(IPAddress.IPv6Any, 0) : new TcpListener(IPAddress.Parse(bindText), 0);
+        if (dual)
+            listener.Server.DualMode = true;
+        listener.Start();
+        int listenerPort = ((IPEndPoint)listener.LocalEndpoint).Port;
 
         var config = new ProbeConfig
         {
             AbiVersion = Protocol.AbiVersion,
             Enabled = 1,
-            Mode = mode,
-            TargetProcessId = (uint)processId,
             ListenerProcessId = (uint)processId,
-            ListenerPort = (ushort)port,
-            LocalAddressOverride = overrideAddress,
+            ListenerPort = (ushort)listenerPort,
+            SelfProcessCount = 0,
         };
         device.SetConfig(config);
         Program.PrintConfig("selftest", device.GetConfig());
 
-        var listener = new TcpListener(IPAddress.Parse(bind), port);
-        listener.Start();
+        byte[] blob = BlobBuilder.Build(new[] { TestRule.RedirectPort(remote.Port) }, Protocol.RuleActionPermit);
+        device.SetRuleBlob(blob);
+        ProbeRuleInfo ruleInfo = device.GetRuleInfo();
+        Check.Equal(1, ruleInfo.RuleCount, "selftest 规则数");
+        Check.Equal(Protocol.RuleActionPermit, ruleInfo.FallbackAction, "selftest 兜底动作");
 
-        var endpointCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
         int failed = 0;
         int contextsOk = 0;
         int contextsFailed = 0;
         int echoOk = 0;
-        byte[] expectedAddressBytes = remote.Address.GetAddressBytes();
+        var endpointCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
         try
         {
             for (int index = 0; index < iterations; index++)
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs));
-                using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                client.NoDelay = true;
-                if (source is not null)
-                    client.Bind(new IPEndPoint(IPAddress.Parse(source), 0));
-
+                using var timeout = new CancellationTokenSource(timeoutMs);
                 ValueTask<Socket> acceptTask = listener.AcceptSocketAsync(timeout.Token);
+                Socket? client = null;
+                TcpClient? tcp = null;
                 try
                 {
-                    await client.ConnectAsync(remote, timeout.Token);
+                    if (dual)
+                    {
+                        tcp = new TcpClient();
+                        await Task.Run(() => tcp.Connect(remote.Address.ToString(), remote.Port));
+                        client = tcp.Client;
+                    }
+                    else
+                    {
+                        client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                        await client.ConnectAsync(remote, timeout.Token);
+                    }
                 }
                 catch (Exception ex)
                 {
                     failed++;
                     _ = acceptTask.AsTask().ContinueWith(task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
                     Console.WriteLine($"[selftest] #{index} connect 失败：{ex.GetType().Name}: {ex.Message}");
+                    client?.Dispose();
+                    tcp?.Dispose();
                     continue;
                 }
 
@@ -80,6 +89,8 @@ internal static class SelfTest
                 {
                     failed++;
                     Console.WriteLine($"[selftest] #{index} accept 失败：{ex.GetType().Name}: {ex.Message}");
+                    client?.Dispose();
+                    tcp?.Dispose();
                     continue;
                 }
 
@@ -91,7 +102,7 @@ internal static class SelfTest
                         endpointCounts[key] = endpointCounts.TryGetValue(key, out int seen) ? seen + 1 : 1;
                     }
 
-                    if (TryReadContext(server, remote, processId, expectedAddressBytes, out string contextText, out string contextHex))
+                    if (TryCheckContext(server, remote, processId, dual, out string contextText, out string contextHex))
                     {
                         contextsOk++;
                         if (index == 0)
@@ -106,7 +117,7 @@ internal static class SelfTest
                     try
                     {
                         byte[] payload = { 0x5A };
-                        client.ReceiveTimeout = timeoutMs;
+                        client!.ReceiveTimeout = timeoutMs;
                         server.ReceiveTimeout = timeoutMs;
                         client.Send(payload);
                         byte[] buffer = new byte[16];
@@ -124,6 +135,9 @@ internal static class SelfTest
                         Console.WriteLine($"[selftest] #{index} echo 失败：{ex.GetType().Name}: {ex.Message}");
                     }
                 }
+
+                client?.Dispose();
+                tcp?.Dispose();
             }
         }
         finally
@@ -133,16 +147,10 @@ internal static class SelfTest
 
         config.Enabled = 0;
         device.SetConfig(config);
-
         await Task.Delay(settleMs);
 
         ProbeStats stats = device.GetStats();
         ProbeEvent[] events = device.GetEvents(64);
-        PoolTagUsage? poolAfter = PoolTags.Find(Protocol.PoolTag);
-
-        int eventRedirected = events.Count(item => item.Decision == 7);
-        int eventLoopback = events.Count(item => item.Branch == 1);
-        int eventLocal = events.Count(item => item.Branch == 2);
 
         Console.WriteLine($"[selftest] iterations={iterations} completed={iterations - failed} failures={failed} " +
                           $"contexts_ok={contextsOk} contexts_failed={contextsFailed} echo_ok={echoOk}");
@@ -150,39 +158,29 @@ internal static class SelfTest
         Console.WriteLine($"[selftest] stats: classify={stats.ClassifyCalls} redirected={stats.Redirected} " +
                           $"contexts_allocated={stats.ContextsAllocated} alloc_failures={stats.ContextAllocFailures} " +
                           $"apply_failures={stats.ApplyFailures}");
-        Console.WriteLine($"[selftest] events(recent {events.Length}): redirected={eventRedirected} " +
-                          $"any_to_loopback={eventLoopback} local_address={eventLocal} " +
-                          $"wrong_pid={events.Count(item => item.Decision == 1)} " +
-                          $"listener_port={events.Count(item => item.Decision == 2)}");
-        Console.WriteLine($"[selftest] pool tag {Protocol.PoolTag}: " + FormatPool(poolBefore, poolAfter));
+        Console.WriteLine($"[selftest] events(recent {events.Length}): redirected={events.Count(e => e.Decision == Protocol.DecisionRedirected)} " +
+                          $"any_to_loopback={events.Count(e => e.Branch == 1)} local_address={events.Count(e => e.Branch == 2)}");
 
-        bool addressOk = true;
-        if (expectAddress is not null)
-            addressOk = endpointCounts.Keys.All(key => key.StartsWith(expectAddress + ":", StringComparison.Ordinal));
+        Check.Equal(iterations, iterations - failed, "连接数");
+        Check.Equal(iterations, contextsOk, "context 全部读回并通过校验");
+        Check.Equal(iterations, echoOk, "echo 全部成功");
+        Check.Equal(iterations, (long)stats.Redirected, "redirected 计数与连接数一致");
+        Check.Equal(iterations, (long)stats.ContextsAllocated, "contexts_allocated 与连接数一致");
+        bool addressOk = endpointCounts.Keys.All(key => dual
+                                                             ? key.Contains("::", StringComparison.Ordinal)
+                                                             : key.StartsWith("127.0.0.1:", StringComparison.Ordinal));
+        Check.True(addressOk, "accepted 端点在预期地址族", string.Join(",", endpointCounts.Keys));
 
-        bool branchOk = true;
-        if (expectBranch is not null)
-        {
-            branchOk = expectBranch switch
-            {
-                "loopback" => eventLoopback > 0 && eventLocal == 0,
-                "local" => eventLocal > 0 && eventLoopback == 0,
-                _ => false,
-            };
-        }
-
-        bool pass = failed == 0 && contextsFailed == 0 && contextsOk == iterations && echoOk == iterations &&
-                   addressOk && branchOk;
-        Console.WriteLine($"[selftest] verdict={(pass ? "PASS" : "FAIL")} address_ok={addressOk} branch_ok={branchOk}");
-        return pass ? 0 : 5;
+        Console.WriteLine($"[selftest] verdict={(Check.Failures == 0 ? "PASS" : "FAIL")} dual={dual} family={(dual ? 6 : 4)}");
+        return Check.Failures == 0 ? 0 : 5;
     }
 
-    private static bool TryReadContext(Socket socket,
-                                       IPEndPoint remote,
-                                       int processId,
-                                       byte[] expectedAddress,
-                                       out string text,
-                                       out string hex)
+    private static bool TryCheckContext(Socket socket,
+                                        IPEndPoint remote,
+                                        int processId,
+                                        bool dual,
+                                        out string text,
+                                        out string hex)
     {
         text = string.Empty;
         hex = string.Empty;
@@ -196,21 +194,45 @@ internal static class SelfTest
             RedirectContext context = MemoryMarshal.Read<RedirectContext>(raw);
             if (context.Magic != Protocol.RedirectContextMagic ||
                 context.Version != Protocol.RedirectContextVersion ||
-                context.Family != 4 ||
-                context.Protocol != 6 ||
                 context.ProcessId != (uint)processId ||
                 context.OriginalPort != (ushort)remote.Port)
                 return false;
 
+            byte[] remoteBytes = remote.Address.GetAddressBytes();
+            byte expectedFamily = dual ? (byte)6 : (byte)4;
+            if (context.Family != expectedFamily)
+                return false;
+
             unsafe
             {
-                for (int index = 0; index < 4; index++)
+                if (dual)
                 {
-                    if (context.OriginalAddress[index] != expectedAddress[index])
+                    if (remoteBytes.Length != 4)
                         return false;
+                    for (int index = 0; index < 10; index++)
+                    {
+                        if (context.OriginalAddress[index] != 0)
+                            return false;
+                    }
+                    if (context.OriginalAddress[10] != 0xFF || context.OriginalAddress[11] != 0xFF)
+                        return false;
+                    for (int index = 0; index < 4; index++)
+                    {
+                        if (context.OriginalAddress[12 + index] != remoteBytes[index])
+                            return false;
+                    }
+                }
+                else
+                {
+                    for (int index = 0; index < 4; index++)
+                    {
+                        if (context.OriginalAddress[index] != remoteBytes[index])
+                            return false;
+                    }
                 }
 
-                text = $"pid={context.ProcessId} original={Program.AddressText(context.OriginalAddress)}:{context.OriginalPort}";
+                text = $"pid={context.ProcessId} family={context.Family} " +
+                       $"original={Program.AddressText(context.OriginalAddress, context.Family)}:{context.OriginalPort}";
             }
 
             return true;
@@ -219,15 +241,5 @@ internal static class SelfTest
         {
             return false;
         }
-    }
-
-    private static string FormatPool(PoolTagUsage? before, PoolTagUsage? after)
-    {
-        static string One(PoolTagUsage? usage) => usage is { } value
-            ? $"allocs={value.NonPagedAllocs} frees={value.NonPagedFrees} " +
-              $"outstanding={value.NonPagedOutstanding} bytes={value.NonPagedUsed}"
-            : "missing";
-
-        return $"before[{One(before)}] after[{One(after)}]";
     }
 }

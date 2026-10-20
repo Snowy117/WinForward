@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace WinForward.Probe;
@@ -20,7 +21,8 @@ internal sealed class WfpDevice : IDisposable
         handle = CreateFileW(DevicePath, GenericRead | GenericWrite, ShareRead | ShareWrite, IntPtr.Zero, OpenExisting, 0,
                              IntPtr.Zero);
         if (handle.IsInvalid)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), @"打开 \.\WfProbe 失败：驱动未加载，或当前用户没有访问该设备的权限（设备 DACL 只允许 SYSTEM 与 Administrators）");
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                                     @"打开 \.\WfProbe 失败：驱动未加载，或当前用户没有访问该设备的权限（设备 DACL 只允许 SYSTEM 与 Administrators）");
     }
 
     public unsafe void SetConfig(ProbeConfig config)
@@ -56,6 +58,27 @@ internal sealed class WfpDevice : IDisposable
         return events;
     }
 
+    public void SetRuleBlob(byte[] blob) => Ioctl(Protocol.SetRuleBlobCode, blob, 0);
+
+    // 诊断：把 UTF-16LE 字节交给内核的 collect_process_path，回读 UTF-8 长度与内容。
+    public (uint Utf8Length, string Text) MeasureProcessPath(byte[] utf16)
+    {
+        byte[] data = Ioctl(Protocol.MeasureProcessPathCode, utf16, 520);
+        if (data.Length != 520)
+            throw new InvalidOperationException($"MeasureProcessPath 返回 {data.Length} 字节");
+        uint length = MemoryMarshal.Read<uint>(data);
+        int safeLength = (int)Math.Min(length, 512u);
+        return (length, Encoding.UTF8.GetString(data, 8, safeLength));
+    }
+
+    public ProbeRuleInfo GetRuleInfo()
+    {
+        byte[] data = Ioctl(Protocol.GetRuleInfoCode, ReadOnlySpan<byte>.Empty, Marshal.SizeOf<ProbeRuleInfo>());
+        if (data.Length != Marshal.SizeOf<ProbeRuleInfo>())
+            throw new InvalidOperationException($"GetRuleInfo 返回 {data.Length} 字节");
+        return MemoryMarshal.Read<ProbeRuleInfo>(data);
+    }
+
     private unsafe byte[] Ioctl(uint code, ReadOnlySpan<byte> input, int outputSize)
     {
         IntPtr inputBuffer = IntPtr.Zero;
@@ -71,8 +94,12 @@ internal sealed class WfpDevice : IDisposable
             if (outputSize > 0)
                 outputBuffer = Marshal.AllocHGlobal(outputSize);
 
-            if (!DeviceIoControl(handle, code, inputBuffer, input.Length, outputBuffer, outputSize, out int returned, IntPtr.Zero))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), $"DeviceIoControl 0x{code:X8} 失败");
+            if (!DeviceIoControl(handle, code, inputBuffer, input.Length, outputBuffer, outputSize, out int returned,
+                                 IntPtr.Zero))
+            {
+                int error = Marshal.GetLastWin32Error();
+                throw new Win32Exception(error, $"DeviceIoControl 0x{code:X8} 失败（Win32={error}）");
+            }
 
             byte[] result = new byte[returned];
             if (returned > 0)

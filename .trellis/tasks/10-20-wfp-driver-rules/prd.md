@@ -7,7 +7,7 @@
 ## Requirements
 
 - 规则表：从用户态接收 `rule_blob`，校验后原子替换；classify 用 rundown 保护读取旧表。
-- classify：命中 `redirect` 才重定向、`block` 置 `FWP_ACTION_BLOCK`、`permit` / 未命中走 fail-closed 之外的正常放行（未命中用 `fallback_action`）。
+- classify：命中 `redirect` 才重定向（redirect 失败 = 直连，该层不执行拦截）、`block` 由 AUTH_CONNECT 的 `FWP_ACTION_BLOCK` filter 执行、`permit` / 未命中按 `fallback_action` 放行。
 - **V6 callout**：同时注册 `ALE_CONNECT_REDIRECT_V6`。只挂 V4 会漏掉 dual-mode socket（.NET 与浏览器默认），见 spec §7.5。
 - 防循环四道闸：self-PID 集合、监听端口排除、`FwpsQueryConnectionRedirectState0`、`FWP_CONDITION_FLAG_IS_CONNECTION_REDIRECTED`。
 - 计数器：classify 次数、各动作次数、重定向次数，经 IOCTL 回读。
