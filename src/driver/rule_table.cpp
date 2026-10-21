@@ -264,8 +264,10 @@ rule_table* allocate_rule_table(const std::uint8_t* data, std::uint32_t size) no
     for (std::uint32_t index = 0; index < table->view.rule_count; ++index)
     {
         const rule& selected = table->view.rules[index];
+        // <mutation id="selector-utf8-guard">
         if (selected.process_index != rule_pool_index_any &&
             !valid_utf8_selector(table->view.process_pool + selected.process_index))
+        // </mutation>
         {
             DbgPrint("wfprobe: rule %u has an invalid or over-long process selector\n", index);
             ExFreePoolWithTag(table, rule_pool_tag);
@@ -275,7 +277,9 @@ rule_table* allocate_rule_table(const std::uint8_t* data, std::uint32_t size) no
 
     // fallback=block 会生成无条件 block filter；只要表里还有任何非 block 规则，它们就永远
     // 执行不到（classify 会报 permitted，但连接在 auth 层被拒）。这种矛盾配置整块拒绝。
+    // <mutation id="fallback-block-conflict">
     if (table->view.fallback_action == rule_action::block)
+    // </mutation>
     {
         for (std::uint32_t index = 0; index < table->view.rule_count; ++index)
         {
@@ -290,7 +294,9 @@ rule_table* allocate_rule_table(const std::uint8_t* data, std::uint32_t size) no
 
     std::uint32_t earlier_rule = 0;
     std::uint32_t blocking_rule = 0;
+    // <mutation id="rule-order-conflict">
     if (!rule_order_valid(table->view, earlier_rule, blocking_rule))
+    // </mutation>
     {
         DbgPrint("wfprobe: rule %u would shadow block rule %u; blob rejected\n", earlier_rule, blocking_rule);
         ExFreePoolWithTag(table, rule_pool_tag);

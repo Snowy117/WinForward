@@ -51,10 +51,12 @@ NTSTATUS apply_config(const void* buffer, ULONG input_length) noexcept
         // 0↔1 切换要和换表共用一把锁：禁用必须真的撤掉 block filter，启用则按当前表重建。
         KeWaitForSingleObject(&state.rule_mutex, Executive, KernelMode, FALSE, nullptr);
         NTSTATUS status = STATUS_SUCCESS;
+        // <mutation id="disable-keeps-block-filters">
         if (!next_enabled)
         {
             probe_delete_block_filters(state.block_filter_ids, state.block_filter_count);
         }
+        // </mutation>
         else
         {
             UINT64 ids[max_block_filters]{};
@@ -145,11 +147,13 @@ NTSTATUS apply_rule_blob(const void* buffer, ULONG input_length) noexcept
     }
 
     rule_table* table = allocate_rule_table(static_cast<const std::uint8_t*>(buffer), input_length);
+    // <mutation id="invalid-blob-accepted">
     if (table == nullptr)
     {
         probe_increment(state.stats.rejected_blobs);
         return STATUS_INVALID_PARAMETER;
     }
+    // </mutation>
 
     // 换表与 block filter 的增删必须串行：先把新规则的 block filter 挂上，再换表，最后撤掉
     // 旧 filter。任何窗口里都不会出现「规则可见但没人执行」或「filter 常驻但没有对应规则」。

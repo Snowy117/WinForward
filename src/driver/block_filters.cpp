@@ -170,7 +170,9 @@ NTSTATUS probe_install_block_filters(const blob_view& view, UINT64* ids, std::ui
     for (std::uint32_t rule_index = 0; rule_index < view.rule_count; ++rule_index)
     {
         const rule& selected = view.rules[rule_index];
+        // <mutation id="block-filter-skip">
         if (selected.action != rule_action::block)
+        // </mutation>
         {
             continue;
         }

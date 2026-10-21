@@ -407,7 +407,9 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
     }
 
     // 闸 1：目标端口就是监听端口。监听端接到入站连接后转发时若再指向自己，会形成回环。
+    // <mutation id="gate-listener-port">
     const bool listener_port_hit = config.listener_port != 0 && facts.remote_port == config.listener_port;
+    // </mutation>
     if (listener_port_hit)
     {
         probe_increment(state.stats.permitted_listener_port);
@@ -435,8 +437,10 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
         redirect_state =
             FwpsQueryConnectionRedirectState0(in_meta_values->redirectRecords, state.redirect_handle, nullptr);
     }
+    // <mutation id="gate-redirect-state">
     const bool redirect_state_hit = redirect_state == FWPS_CONNECTION_REDIRECTED_BY_SELF ||
                                     redirect_state == FWPS_CONNECTION_PREVIOUSLY_REDIRECTED_BY_SELF;
+    // </mutation>
     if (redirect_state_hit)
     {
         probe_increment(state.stats.permitted_redirect_state);
@@ -447,8 +451,10 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
     // 闸 3：条件标志。FWP_CONDITION_FLAG_IS_PROXY_CONNECTION 是 ALE_CONNECT_REDIRECT 层上
     // 真正可能置位的那个（带 previous redirect records 的代理连接）；IS_CONNECTION_REDIRECTED
     // 按文档只适用于 ALE_AUTH_CONNECT，这里一并检查作为纵深防御。
+    // <mutation id="gate-condition-flags">
     const bool condition_flags_hit = (facts.condition_flags & (FWP_CONDITION_FLAG_IS_CONNECTION_REDIRECTED |
                                                                FWP_CONDITION_FLAG_IS_PROXY_CONNECTION)) != 0;
+    // </mutation>
     if (condition_flags_hit)
     {
         probe_increment(state.stats.permitted_condition_flags);
@@ -458,7 +464,9 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
     }
 
     // 闸 4：self-PID 集合。代理自己的出站连接（新 socket，没有 redirect records）靠这一道。
+    // <mutation id="gate-self-process">
     const bool self_process_hit = process_id_in_set(config, facts.process_id);
+    // </mutation>
     if (self_process_hit)
     {
         probe_increment(state.stats.permitted_self_process);
@@ -476,8 +484,12 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
 
     const match_result result = match(rules->view, connection);
     const std::uint32_t rule_index = result.matched ? result.rule_index : invalid_rule_index;
+    // <mutation id="classify-redirect-branch">
     const bool redirect_wanted = result.action == rule_action::redirect;
+    // </mutation>
+    // <mutation id="classify-block-branch">
     const bool block_wanted = result.action == rule_action::block;
+    // </mutation>
 
     if (redirect_wanted)
     {
@@ -502,12 +514,16 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
         return;
     }
 
+    // <mutation id="permit-counter">
     probe_increment(result.matched ? state.stats.matched_permit : state.stats.fallback_permit);
+    // </mutation>
+    // <mutation id="permit-branch">
     permit_classification(state,
                           facts,
                           rule_index,
                           result.matched ? probe_decision::permitted_rule : probe_decision::permitted_fallback,
                           classify_out);
+    // </mutation>
 }
 
 NTSTATUS NTAPI probe_notify_fn(FWPS_CALLOUT_NOTIFY_TYPE notify_type,

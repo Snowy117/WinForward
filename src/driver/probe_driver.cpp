@@ -316,8 +316,10 @@ NTSTATUS start_wfp() noexcept
         state.v6, callout_key_v6, FWPM_LAYER_ALE_CONNECT_REDIRECT_V6, probe_classify_fn, callout_name_v6);
     if (NT_SUCCESS(status))
     {
+        // <mutation id="v6-filter-not-added">
         status = add_layer_filter(
             state.v6, filter_key_v6, FWPM_LAYER_ALE_CONNECT_REDIRECT_V6, callout_key_v6, filter_name_v6, false);
+        // </mutation>
     }
     if (!NT_SUCCESS(status))
     {

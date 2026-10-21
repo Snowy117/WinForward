@@ -51,7 +51,9 @@ void collect_process_path(const void* data, std::uint32_t byte_count, char* targ
             return;
         }
 
+        // <mutation id="process-path-non-ascii">
         std::uint8_t encoded[4]{};
+        // </mutation>
         std::uint32_t encoded_length = 0;
         if (code_point < 0x80)
         {
