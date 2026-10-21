@@ -288,11 +288,8 @@ void redirect_classification(probe_state& state,
 
     auto* request = static_cast<FWPS_CONNECT_REQUEST0*>(writable_data);
 
-#pragma warning(push)
-#pragma warning(disable : 4996)
     auto* context =
-        static_cast<redirect_context*>(ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(redirect_context), pool_tag));
-#pragma warning(pop)
+        static_cast<redirect_context*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(redirect_context), pool_tag));
     if (context == nullptr)
     {
         // 分配不到 context 就带不回原始目的地；仍然配对 apply（此时数据还没改），然后放行——

@@ -48,6 +48,18 @@ classify 依次检查：
 `block` 决策在 redirect 层只记账并放行；真正的拒绝由 auth 层的 block filter 完成
 （详见 `.trellis/tasks/10-20-wfp-driver-rules/research/findings.md` §2）。
 
+## 系统要求
+
+池内存用 `ExAllocatePool2(POOL_FLAG_NON_PAGED, ...)` 分配（`cpp/drivers/wdk-deprecated-api` 的修复），
+最低支持 **Windows 10 2004（10.0.19041）**；更早的系统上 `wfprobe.sys` 会因缺少该导出而加载失败。
+要覆盖旧系统时，改为运行时用 `MmGetSystemRoutineAddress` 取 `ExAllocatePool2`、缺失时回退到
+`ExAllocatePoolWithTag`。
+
+`DriverEntry` 用 `extern "C" DRIVER_INITIALIZE DriverEntry;` 声明角色类型。CodeQL 的
+`cpp/drivers/illegal-field-access-2` 与 PREfast 的 C28175 都按这条声明判定 DriverEntry 上下文，
+`probe_driver_entry` / `create_device` 里的 `DriverObject->MajorFunction`、`DriverUnload` 赋值才不会被
+判成越权访问——只有 SAL 注解（`_Function_class_(DRIVER_INITIALIZE)`）不够。
+
 ## 构建、签名与安装
 
 在任意一台装有 Visual Studio Build Tools（MSVC + WDK）的 Windows 机器上，以管理员 PowerShell 运行仓库门禁：

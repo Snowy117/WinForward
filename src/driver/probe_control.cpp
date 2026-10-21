@@ -299,10 +299,14 @@ _Dispatch_type_(IRP_MJ_DEVICE_CONTROL) NTSTATUS dispatch_device_control(PDEVICE_
         std::uint16_t utf16[process_path_measure_input_max / 2]{};
         static_assert(sizeof(utf16) == process_path_measure_input_max, "本地 UTF-16 缓冲区必须与上限一致");
         RtlCopyMemory(utf16, buffer, input_length);
-        auto* measurement = static_cast<process_path_measurement*>(buffer);
-        RtlZeroMemory(measurement, sizeof(*measurement));
-        probe_measure_process_path(utf16, input_length, measurement->utf8, measurement->utf8_length);
-        measurement->reserved = 0;
+
+        // 先在本地结构里生成输出再整体拷回：取自 IOCTL 缓冲区的指针不参与解引用，静态分析
+        // 不必猜这块内存归谁（METHOD_BUFFERED 下 SystemBuffer 是内核副本）；失败路径也不会
+        // 在输出缓冲区里留下半成品。
+        process_path_measurement measurement{};
+        probe_measure_process_path(utf16, input_length, measurement.utf8, measurement.utf8_length);
+        measurement.reserved = 0;
+        RtlCopyMemory(buffer, &measurement, sizeof(measurement));
         information = sizeof(process_path_measurement);
         status = STATUS_SUCCESS;
         break;

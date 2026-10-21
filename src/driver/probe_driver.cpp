@@ -407,8 +407,14 @@ NTSTATUS probe_driver_entry(PDRIVER_OBJECT driver_object) noexcept
 
 } // namespace winforward::wfp::probe
 
-extern "C" _Function_class_(DRIVER_INITIALIZE) NTSTATUS
-    DriverEntry(_In_ PDRIVER_OBJECT driver_object, _In_ PUNICODE_STRING registry_path)
+// 角色类型声明：CodeQL 的 WdmDriverEntry 与 PREfast 的 C28175 都按声明项上的
+// DRIVER_INITIALIZE typedef 判定「是否处于 DriverEntry 上下文」，只有 SAL 注解不够。
+// 少了这条声明，辅助函数里给 DriverObject 成员赋值的语句会被判成越权访问。
+extern "C" DRIVER_INITIALIZE DriverEntry;
+
+extern "C" _Function_class_(DRIVER_INITIALIZE) _IRQL_requires_same_ _IRQL_requires_(PASSIVE_LEVEL)
+NTSTATUS
+DriverEntry(_In_ PDRIVER_OBJECT driver_object, _In_ PUNICODE_STRING registry_path)
 {
     UNREFERENCED_PARAMETER(registry_path);
     return winforward::wfp::probe::probe_driver_entry(driver_object);

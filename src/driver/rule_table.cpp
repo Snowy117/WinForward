@@ -239,11 +239,8 @@ rule_table* allocate_rule_table(const std::uint8_t* data, std::uint32_t size) no
         return nullptr;
     }
 
-#pragma warning(push)
-#pragma warning(disable : 4996)
     auto* table =
-        static_cast<rule_table*>(ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(rule_table) + size, rule_pool_tag));
-#pragma warning(pop)
+        static_cast<rule_table*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(rule_table) + size, rule_pool_tag));
     if (table == nullptr)
     {
         return nullptr;

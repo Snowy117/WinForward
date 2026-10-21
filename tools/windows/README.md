@@ -152,7 +152,7 @@ MSBuild 的中间产物按常规落在 `src\driver\obj\` 与 `src\driver\x64\`�
 | 建库（含追踪构建） | 52–68 s（冷树首次带 `-restore` 约 74 s） |
 | 分析（106 条查询） | 114–120 s |
 | 数据库 / SARIF | 22 MB / 约 400 KB |
-| 当前基线 | 14 条：unprobeddereference ×7、illegal-field-access-2 ×4、wdk-deprecated-api ×2、usermodememoryoutsidetry ×1 |
+| 当前基线 | 0 条（2026-10-21 逐条处理完；14 条的原始定位与结论见 `.trellis/tasks/10-21-quality-followups/codeql-baseline.md`） |
 
 同一个数据库上重复跑 `-SkipDatabase`：分析步约 26 s，整进程约 38.6 s（命中 CodeQL 查询结果缓存）；
 上表是重建数据库后的完整耗时。
@@ -161,11 +161,20 @@ MSBuild 的中间产物按常规落在 `src\driver\obj\` 与 `src\driver\x64\`�
 `cpp/extractor/summary` 记的是 successes=1、failures=0；抽取失败的数据库即使 0 条结果也会 FAIL。
 旧版本脚本建的数据库可能没带 `-D__ptr32=`，自检会失败；删掉 `build\codeql\db` 重建即可。
 
-**0 命中不能直接当门禁，当前基线本身也不是 0**：退出码 `1` 表示有结果，或建库/分析/抽取自检失败
-（看末行 `CODEQL-RESULT`：`FINDINGS results=N` / `FAIL`）；`2` 是环境/依赖缺失。判断回归要看
-`ruleId` 集合与位置有没有变化。变红能力做过注入实验：在 `src/driver/probe_classify.cpp` 里加一个
-`if (value + increment < value)`（`UINT16` 参数会提升到 `int`），重跑后 SARIF 出现
-`cpp/bad-addition-overflow-check`；恢复源码后结果与基线逐条一致。
+**基线现在是 0 条，但“0 命中”仍然不是唯一判据**：退出码 `0` 且 `CODEQL-RESULT=PASS` 表示 0 条结果
+且抽取自检通过；`1` 表示有结果，或建库/分析/抽取自检失败（看末行 `CODEQL-RESULT`：
+`FINDINGS results=N` / `FAIL`）；`2` 是环境/依赖缺失。判断回归要同时看 `ruleId` 集合与位置有没有变化。
+变红能力做过注入实验：在 `src/driver/probe_classify.cpp` 里加一个 `if (value + increment < value)`
+（`UINT16` 参数会提升到 `int`），重跑后 SARIF 出现 `cpp/bad-addition-overflow-check`；恢复源码后
+结果与基线逐条一致。
+
+基线归零的三类根因（逐条记录见任务文档 `codeql-baseline.md`）：
+
+- `wdk-deprecated-api`：`ExAllocatePoolWithTag` → `ExAllocatePool2(POOL_FLAG_NON_PAGED, ...)`；
+- `illegal-field-access-2`：`DriverEntry` 补 `DRIVER_INITIALIZE` 角色类型声明，查询才能把
+  `probe_driver_entry` / `create_device` 认成 DriverEntry 调用链；
+- `unprobeddereference` / `usermodememoryoutsidetry`：`ioctl_measure_process_path` 改为在局部
+  `process_path_measurement` 里生成输出再整体拷回，取自 IOCTL 缓冲区的指针不再流向解引用点。
 
 ### 已知限制
 
