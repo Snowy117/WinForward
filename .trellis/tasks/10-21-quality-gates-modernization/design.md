@@ -132,7 +132,7 @@ msbuild wfprobe.vcxproj -restore -t:Rebuild -p:Configuration=Debug -p:Platform=x
 // </mutation>
 ```
 
-16 条用例覆盖 17 个区域。脚本按 `id` 定位并整体替换，命中数不为 1 立即失败；全部用例结束后校验文件与原始内容逐字节一致。
+16 条用例共 17 次替换、覆盖 16 个区域（`gate-redirect-state` 被两条用例共用）。脚本按 `id` 定位并整体替换，命中数不为 1 立即失败；全部用例结束后校验文件与原始内容逐字节一致。
 
 ## 6. CodeQL
 
@@ -185,7 +185,7 @@ wf.local.example.json              # 2.2 契约
 - `check-effective-lines.py` 的 CLI 不变，默认目标变宽（现状全绿）。
 - `build/`、`cmake-build-debug/` 原样保留；检查使用独立 `build/check`。
 - Windows 脚本改名后参数名保持不变，文档同步更新；`sync.sh` 删除，其职责移交 `local/`。
-- 生产代码改动三处：删除 `block_classification`；17 个变异区域标记；一处 cppcheck 抑制。
+- 生产代码改动三处：删除 `block_classification`；16 个变异区域标记（32 行）；一处 cppcheck 抑制。
 
 ## 9. 风险与回滚
 
@@ -194,7 +194,7 @@ wf.local.example.json              # 2.2 契约
 | cppcheck 误报/漏报 | 抑制写在定义处并附理由；已知盲区（模板、宏拼接）在脚本文档中注明。 |
 | cppcheck 解析不了某些 WDK 语法 | 只覆盖 `src/`；解析失败会以 `syntaxError` 出现，不会被当成通过。 |
 | `/WX` 在 WDK 升级后冒新告警 | 预期行为，门禁失败即暴露；回滚只需删两行。 |
-| 区域标记污染源码 | 17 处、每处 2 行；不接受可退回子串锚点，但需接受重构即失效。 |
+| 区域标记污染源码 | 16 处、每处 2 行（32 行）；不接受可退回子串锚点，但需接受重构即失效。 |
 | CodeQL 许可 | 已记录；仓库开源后自然消解。 |
 | `local/` 缺失 | 只是相关档位 SKIP，不影响宿主检查。 |
 
