@@ -167,12 +167,88 @@ class rundown_guard;
 
 ## 8. 格式与门禁
 
+### 8.1 工具与范围
+
 - **格式化**：`.clang-format` 是唯一事实来源（Allman、4 空格、120 列、指针左贴类型）。clang-format 版本由 `flake.nix` 锁定在 21.x——换版本会产生输出漂移，门禁会误报。
 - **命名检查**：`.clang-tidy` 里的 `readability-identifier-naming` 把 §3 的规则变成可执行检查。
 - **管辖范围**：clang-tidy 只跑可移植代码与用户态代码。含 WDK 头的内核翻译单元 clang 解析不了，那部分靠评审。
 - **禁止对仓库整体跑 `clang-tidy --fix`**：`--fix` 的实际改写范围不受 `--header-filter` 约束——它会把 filter 之外、只要被当前翻译单元包含到的头文件一并改掉。需要自动修时，先看诊断清单位置再逐个文件处理，或者直接手工改。
 - **include 顺序有语义的地方用 `// clang-format off` / `on` 包住**：WDK 要求 `<ndis.h>` 前先定义 `NDIS630`、`fwpmk.h`/`fwpsk.h` 需要 `INITGUID`，而 clang-format 会按分类重排 include，两者直接冲突。
 - **文档语言**：本项目文档以中文书写。
+
+### 8.2 宿主门禁清单
+
+宿主侧唯一入口是 `tools/check.sh`：
+
+| 档位 | 步骤 | 预算 |
+|---|---|---|
+| `--fast`（默认） | 格式、有效行、cppcheck、禁止模式 | < 5 s |
+| `--full` | `--fast` + 配置 `build/check` + clang-tidy 逐 TU + 构建并运行 `wf_check` | < 3 min |
+| `--staged` | 只检查暂存区（索引）里的格式与禁止模式 | < 2 s |
+
+`--fast --staged` 是提交前钩子的组合：格式与禁止模式看索引，其余快速检查照常看工作区。`--staged` 读的是 `git show :<path>` 的 blob，不是工作区文件。格式与禁止模式共用同一份 C++ 扩展名列表（`.c`/`.cc`/`.cpp`/`.cxx`/`.h`/`.hh`/`.hpp`/`.hxx`/`.inl`）——只在一侧加扩展名会让钩子漏文件。退出码只有三种：`0` 通过、`1` 有发现、`2` 环境或参数问题（检查器自身报错也算 2）。
+
+cppcheck 与格式、禁止模式共用同一份扩展名列表，但只扫 `src/`——`tests/host` 由宿主编译器的 `-Wall -Werror` 覆盖，这是有意的范围差异。
+
+### 8.3 禁止模式检查
+
+`tools/lint/forbidden.py` 读 `tools/lint/forbidden-rules.txt`，行格式 `规则ID <TAB> glob <TAB> 正则 <TAB> 说明`。检查范围是 `src/driver/**` 与 `src/common/**` 的 C++ 源文件（扩展名列表与 `tools/check.sh` 共用：`.c`/`.cc`/`.cpp`/`.cxx`/`.h`/`.hh`/`.hpp`/`.hxx`/`.inl`）；匹配前剥离注释与字符串，所以注释与字符串字面量里的字样不会命中。
+
+| 规则 ID | 模式 | 依据 |
+|---|---|---|
+| `stl` | 容器与字符串 blocklist：`\bstd::(…)\b`。覆盖 `array`、`basic_string`、`basic_string_view`、`deque`、`flat_map`/`flat_set` 等 `flat_*`、`forward_list`、`function`、`function_ref`、`list`、`map`/`multimap`/`multiset`/`set`、`mdspan`、`priority_queue`、`queue`、`shared_ptr`/`unique_ptr`/`weak_ptr`、`span`、`stack`、`string`/`wstring`/`u8string`/`u16string`/`u32string` 及各自的 `_view`、`unordered_*`、`vector`。这里只是摘要，完整正则见 `tools/lint/forbidden-rules.txt` | §5.1 标准库容器与字符串 |
+| `exceptions` | `\b(throw\|try\|catch)\b` | §5.1 |
+| `rtti` | `\b(dynamic_cast\|typeid)\b` | §5.1 |
+| `heap` | **两个模式合列**（规则文件里是两行）：`(?P<allowed>operator\s+new\b\|<new>\|new\s*\((?!\s*(?:std::)?nothrow)(?!\s*(?:std::)?align_val_t))\|(?P<hit>\bnew\b)` 与 `(?P<allowed>=\s*delete\b\|operator\s+delete\b)\|(?P<hit>\bdelete\b)` | §5.1（排除项见下） |
+
+`stl` 是 blocklist 不是白名单：它只拦已知依赖堆分配或异常的标准库设施，不碰 §5.2 允许的 `<cstddef>`/`<cstdint>`/`<limits>`/`<type_traits>`/`<utility>`/`<bit>`。新增被禁的设施时，先改规则文件再改本表。
+
+`heap` 的两条正则用命名组 `hit`：只有 `hit` 参与匹配才算命中。`allowed` 分支排除 `<new>` 头、placement new、`operator new`/`operator delete` 声明与 `= delete` 声明——其中 `new (` 只在 placement new 时放行，`new (std::nothrow)`、`new (nothrow)`、`new (align_val_t{…})`、`new (std::align_val_t{…})` 仍算分配、必须报（§5.2 只允许用 `<new>` 做 placement new）。`delete *p`、`delete ::p`、`delete &x`、`delete[]` 仍然算命中。显式调用 `operator new(...)` / `operator delete(...)` 是罕见写法，不在正则里区分，由评审覆盖。
+
+**已知局限（行内正则有边界）**：
+
+- 跨 token 空白不覆盖：`std :: vector`、`std::` 换行 `vector`、`std/**/::vector` 都不会命中；
+- 跨行写法不覆盖：placement new 的 `new` 与 `(` 分在两行、`=` 与 `delete` 分在两行；
+- 这些只有评审能可靠识别，按 §5.1 逐条看。
+
+**豁免语法**：在命中行或它的上一行写
+
+```cpp
+// WF-LINT-ALLOW(stl): 这里要复用共享头里的容器类型，理由写在这里
+std::vector<int> values;
+```
+
+- 规则 ID 必须存在；一行里要豁免多条规则时用逗号分隔（`WF-LINT-ALLOW(stl, heap): …`）。
+- **理由不能为空**：`// WF-LINT-ALLOW(stl):` 是无效豁免，检查会报 `[WF-LINT-ALLOW]`，命中照旧算发现。
+- 豁免只认**原始行**里的注释；被字符串包住的字样不算。
+- 豁免是逐行、逐规则的，没有文件级或目录级开关。
+
+命中输出 `文件:行: [规则ID] 说明`，退出码 1。新增规则要同时改规则文件与本节的表格。
+
+### 8.4 §5.1 与自动检查的对应
+
+| §5.1 条目 | 执行方式 |
+|---|---|
+| `throw` / `try` / `catch` | 自动：`exceptions` |
+| `dynamic_cast` / `typeid` | 自动：`rtti` |
+| 标准库容器与字符串（`std::vector`、`std::string`、`std::map` …） | 自动：`stl` |
+| 标准库智能指针与 `std::function`（§5.1「依赖堆分配与异常」口径的延伸） | 自动：`stl`（同一规则 ID，在规则文件里占同一行） |
+| `new` / `delete` | 自动：`heap`（`<new>` 头、placement new、`operator new/delete`、`= delete` 除外；`nothrow`/`align_val_t` 的 `new (…)` 不算 placement new） |
+| 全局或静态对象的动态初始化 | 评审：正则分不清定义与声明，也看不出构造时机 |
+| 函数内静态局部变量 | 评审：同上，`static` 在合法位置也会出现 |
+| `__try` / `__except` 与"持有析构函数的对象"同处一个作用域 | 评审：需要作用域与析构可见性分析 |
+| `DISPATCH_LEVEL` 及以上的浮点运算 | 评审：需要 IRQL 传播分析 |
+
+§5.1 共 8 条：4 条自动（本节按规则拆成 5 行——`stl` 拆成容器与字符串、智能指针两行）+ 4 条评审。自动项由门禁拦下；评审项没有自动检查，按 §5.1 逐条看。规则文件里多出本表的条目，就是文档没写清的规则，必须补进本表。
+
+### 8.5 提交前钩子
+
+钩子只做一件事：`tools/check.sh --fast --staged`。
+
+- 安装：`.githooks/install.sh`（写 **local** 的 `core.hooksPath=.githooks`，安装前 local 的值记在 `<git-dir>/wf-hooks-path.state`）。
+- 卸载：`.githooks/install.sh --uninstall`（按记录复原 local 的值；原来 local 没设过就清空，原来有值就写回——原本就是 `.githooks` 也照原样写回）。
+- 两个操作都是一条命令，只动本仓库 local 作用域的配置；global / system 里的 `core.hooksPath` 不读也不写。没有安装记录且 local 未设置时，卸载是无操作。
+- 绕过：`git commit --no-verify` 只跳过钩子，`tools/check.sh --fast` 仍是最终判据。
 
 ---
 

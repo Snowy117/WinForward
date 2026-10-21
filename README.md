@@ -12,16 +12,16 @@
 
 ```bash
 nix develop             # 或 direnv allow，让 .envrc 加载 devShell
-tools/check.sh --fast   # 默认档：格式、有效行、cppcheck
-tools/check.sh --full   # 快速档 + 配置 build/check + 构建并运行 wf_check
-tools/check.sh --staged # 提交前：按索引内容检查暂存区里的 C++ 文件格式
+tools/check.sh --fast   # 默认档：格式、有效行、cppcheck、禁止模式
+tools/check.sh --full   # 快速档 + 配置 build/check + clang-tidy + 构建并运行 wf_check
+tools/check.sh --staged # 提交前：按索引内容检查暂存区的格式与禁止模式
 ```
 
 | 档位 | 内容 | 预算 |
 |---|---|---|
-| `--fast`（默认） | clang-format 漂移、有效行上限 500、cppcheck `unusedFunction` | < 5 s |
-| `--full` | `--fast` + `cmake -S . -B build/check -G Ninja` + `cmake --build --target wf_check` | 视机器而定 |
-| `--staged` | 按索引内容检查暂存区 C++ 文件的格式；与 `--fast` 组合时其余快速检查照常 | < 2 s |
+| `--fast`（默认） | clang-format 漂移、有效行上限 500、cppcheck `unusedFunction`、禁止模式 | < 5 s |
+| `--full` | `--fast` + 配置 `build/check` + clang-tidy 逐 TU 检查 + `cmake --build --target wf_check` | 视机器而定（本机约 60 s） |
+| `--staged` | 按索引内容检查暂存区 C++ 文件的格式与禁止模式；与 `--fast` 组合时其余快速检查照常 | < 2 s |
 
 `--build-dir <目录>` 可替换 `--full` 的构建目录（默认 `build/check`）。
 
@@ -30,15 +30,50 @@ tools/check.sh --staged # 提交前：按索引内容检查暂存区里的 C++ �
 退出码只有三种：
 
 - `0`：全部通过；
-- `1`：有检查发现（格式漂移、有效行超限、死符号、构建或测试失败）；
-- `2`：环境或参数问题（缺 `git` / `clang-format` / `cppcheck` / `python3` / `cmake` / `ninja` / `dotnet`、
-  参数非法）。环境问题不会被伪装成检查失败。
+- `1`：有检查发现（格式漂移、有效行超限、死符号、禁用写法、构建或测试失败）；
+- `2`：环境或参数问题（缺 `git` / `clang-format` / `cppcheck` / `python3` / `cmake` / `ninja` /
+  `dotnet` / `clang-tidy`、参数非法、检查器自身报错）。环境问题不会被伪装成检查失败。
 
 每一步输出一行 `[check] <名称> ... PASS|FAIL|SKIP`，末尾给出汇总与总耗时。`SKIP` 表示这一步
 没有可检查的对象（例如暂存区没有 C++ 文件、配置失败导致 `wf_check` 未执行），不计为失败。
 
-快速档的三项检查都做过「故意破坏后变红」的反向验证。缺工具时脚本以 2 退出，不会把
+快速档的四项检查都做过「故意破坏后变红」的反向验证。缺工具时脚本以 2 退出，不会把
 环境问题算成代码问题。
+
+### 禁止模式检查
+
+快速档的最后一步是 `tools/lint/forbidden.py`：按 `tools/lint/forbidden-rules.txt` 检查
+`src/driver/**` 与 `src/common/**` 的禁用写法（标准库容器与字符串、异常、RTTI、`new`/`delete`）。
+规则行是 `规则ID <TAB> glob <TAB> 正则 <TAB> 说明`；匹配前剥离注释与字符串，所以注释里写
+`std::vector` 不会误报。规则是 blocklist：`#include <new>`、placement new（不带
+`nothrow`/`align_val_t` 的 `new (…)`）、
+`operator new`、`operator delete` 与 `= delete` 声明都不算命中；`delete *p`、`delete ::p`、
+`delete[]` 仍然会报。规则与 `cpp-conventions.md` §5.1 的逐条对应见该文档 §8.4。
+
+确有必要时，在命中行或它的上一行写豁免，**理由不能为空**：
+
+```cpp
+// WF-LINT-ALLOW(stl): 这里要复用共享头里的容器类型，理由写在这里
+std::vector<int> values;
+```
+
+`// WF-LINT-ALLOW(stl):` 这种空理由会被判为无效豁免，检查仍会失败。
+
+### 提交前钩子
+
+仓库自带 `.githooks/pre-commit`，只做一件事：`tools/check.sh --fast --staged`，其中格式与
+禁止模式检查的是**索引内容**（`git show :<path>` 的 blob），不是工作区。
+
+```bash
+.githooks/install.sh              # 安装：git config --local core.hooksPath .githooks
+.githooks/install.sh --status     # 看当前状态
+.githooks/install.sh --uninstall  # 卸载：把 local core.hooksPath 复原成安装前的值
+```
+
+安装脚本只改本仓库 local 作用域的 git 配置，不会自动改任何人的全局配置；安装前的值记在
+`<git-dir>/wf-hooks-path.state`，卸载时据此复原。钩子没生效时先看 `git config --get core.hooksPath`
+是不是 `.githooks`。确实需要绕过时用 `git commit --no-verify`——它只跳过钩子，
+`tools/check.sh --fast` 仍是最终判据。
 
 ## 本地配置
 
@@ -89,5 +124,6 @@ MSBuild、signtool、accesschk 都按机器上的安装情况发现（C# 工具�
 | `src/userland/` | 规则编译、控制器、重定向中继与测试 |
 | `tests/host/` | 宿主上的 C++ 单测与跨语言差分测试 |
 | `tools/` | 宿主门禁、Windows 侧脚本与测试替身 |
+| `.githooks/` | 提交前钩子与安装/卸载脚本 |
 
 构建与测试的细节见 `src/driver/README.md`、`src/userland/README.md`。

@@ -2,11 +2,11 @@
 # 宿主侧质量门禁入口。
 #
 # 三个档位：
-#   --fast（默认）   格式、有效行、cppcheck
-#   --full           fast + CMake 配置 + 构建并运行 wf_check
-#   --staged         只检查暂存区里的 C++ 文件格式（提交前钩子）
+#   --fast（默认）   格式、有效行、cppcheck、禁止模式
+#   --full           fast + CMake 配置 + clang-tidy + 构建并运行 wf_check
+#   --staged         只检查暂存区里的 C++ 文件格式与禁止模式（提交前钩子）
 #
-# --fast 与 --staged 可以组合：快速档，但格式只看暂存区文件。
+# --fast 与 --staged 可以组合：快速档，但格式与禁止模式只看暂存区文件。
 # --full 与 --staged 不能组合：前者构建工作区，后者检查索引。
 #
 # 退出码：0 通过；1 有检查发现；2 环境或参数问题。
@@ -29,8 +29,20 @@ staged=0
 pass_count=0
 fail_count=0
 skip_count=0
+env_failure=0
 
 temp_paths=()
+
+# 格式、禁止模式与暂存区镜像共用的 C++ 扩展名列表：
+# 两边不一致时，钩子会漏掉 .cc / .cxx 一类文件。
+cpp_source_globs=('*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' '*.inl')
+
+# cppcheck 与格式/禁止模式共用扩展名列表，但只看 src/：
+# tests/host 由宿主编译器的 -Wall -Werror 覆盖。
+src_cpp_globs=()
+for glob in "${cpp_source_globs[@]}"; do
+    src_cpp_globs+=("src/${glob}")
+done
 
 # shellcheck disable=SC2329 # 由 trap EXIT 间接调用
 cleanup_temp_paths() {
@@ -51,16 +63,16 @@ usage() {
     cat <<'EOF'
 用法：tools/check.sh [--fast | --full] [--staged] [--build-dir <目录>]
 
-  --fast             格式、有效行、cppcheck（默认）
-  --full             在 --fast 基础上配置并构建 wf_check（会跑 C# 测试与 ctest）
-  --staged           只检查暂存区里的 C++ 文件格式
+  --fast             格式、有效行、cppcheck、禁止模式（默认）
+  --full             在 --fast 基础上配置、跑 clang-tidy、构建并运行 wf_check
+  --staged           只检查暂存区里的 C++ 文件格式与禁止模式
   --build-dir <目录>  指定 --full 使用的构建目录（默认 build/check）
   -h, --help         显示本帮助
 
---fast 与 --staged 可以组合：快速档，但格式只检查暂存区文件。
+--fast 与 --staged 可以组合：快速档，但格式与禁止模式只检查暂存区文件。
 --full 与 --staged 不能组合：前者构建工作区，后者检查索引。
 
-退出码：0 通过；1 有检查发现；2 环境或参数问题。
+退出码：0 通过；1 有检查发现；2 环境或参数问题（含检查器自身报错）。
 本地配置 wf.local.json 由使用它的脚本读取；本脚本不依赖它，缺失不是错误。
 EOF
 }
@@ -126,6 +138,7 @@ tool_version() {
         ninja) ninja --version 2>/dev/null | head -n 1 ;;
         dotnet) dotnet --version 2>/dev/null | head -n 1 ;;
         git) git --version 2>/dev/null | awk '{print $3}' ;;
+        clang-tidy) clang-tidy --version 2>/dev/null | awk '/LLVM version/ {print $3}' | head -n 1 ;;
         *) "$1" --version 2>/dev/null | head -n 1 ;;
     esac
 }
@@ -186,12 +199,13 @@ fi
 required_tools=(git clang-format)
 case "${mode}" in
     staged)
+        required_tools+=(python3)
         ;;
     fast)
         required_tools+=(cppcheck python3)
         ;;
     full)
-        required_tools+=(cppcheck python3 cmake ninja dotnet)
+        required_tools+=(cppcheck python3 cmake ninja dotnet clang-tidy)
         ;;
 esac
 
@@ -230,7 +244,7 @@ pass "环境" "${env_detail}"
 # ---------- 格式 ----------
 run_format_check_worktree() {
     local -a files=()
-    if ! collect_git_paths files ls-files -z -- '*.cpp' '*.h' '*.hpp' '*.inl'; then
+    if ! collect_git_paths files ls-files -z -- "${cpp_source_globs[@]}"; then
         fail "格式" "git ls-files 失败"
         return
     fi
@@ -249,49 +263,82 @@ run_format_check_worktree() {
     fi
 }
 
-run_format_check_staged() {
+# ---------- 暂存区索引镜像 ----------
+# 格式与禁止模式都要看「将要提交的内容」而不是工作区：把每个暂存 blob（git show :path）
+# 写进同一棵临时镜像树，两个检查共用；报告路径再映射回仓库相对路径。
+staged_mirror_state=""
+staged_mirror_root=""
+staged_mirror_error=""
+staged_mirror_rel=()
+staged_mirror_abs=()
+
+prepare_staged_mirror() {
+    case "${staged_mirror_state}" in
+        ready|empty) return 0 ;;
+        error) return 1 ;;
+    esac
+
     local -a files=()
     if ! collect_git_paths files diff --cached --name-only --diff-filter=ACMR -z -- \
-        '*.cpp' '*.h' '*.hpp' '*.inl'; then
-        fail "格式" "git diff --cached 失败"
-        return
+        "${cpp_source_globs[@]}"; then
+        staged_mirror_state="error"
+        staged_mirror_error="git diff --cached 失败"
+        return 1
     fi
 
     if (( ${#files[@]} == 0 )); then
+        staged_mirror_state="empty"
+        return 0
+    fi
+
+    local tmp_root
+    if ! tmp_root="$(mktemp -d)"; then
+        staged_mirror_state="error"
+        staged_mirror_error="无法创建临时目录"
+        return 1
+    fi
+    temp_paths+=("${tmp_root}")
+    staged_mirror_root="${tmp_root}"
+
+    local file
+    for file in "${files[@]}"; do
+        if ! mkdir -p "${tmp_root}/$(dirname -- "${file}")"; then
+            staged_mirror_state="error"
+            staged_mirror_error="无法创建临时目录：${file}"
+            return 1
+        fi
+        if ! git show ":${file}" >"${tmp_root}/${file}"; then
+            staged_mirror_state="error"
+            staged_mirror_error="读取暂存区内容失败：${file}"
+            return 1
+        fi
+        staged_mirror_rel+=("${file}")
+        staged_mirror_abs+=("${tmp_root}/${file}")
+    done
+
+    staged_mirror_state="ready"
+    return 0
+}
+
+run_format_check_staged() {
+    if ! prepare_staged_mirror; then
+        fail "格式" "${staged_mirror_error}"
+        return
+    fi
+
+    if [[ "${staged_mirror_state}" == "empty" ]]; then
         skip "格式" "暂存区里没有 C++ 文件"
         return
     fi
 
-    # 按索引内容检查：git show 读的是将要提交的 blob，不是工作区文件。
-    local tmp_root
-    tmp_root="$(mktemp -d)" || {
-        fail "格式" "无法创建临时目录"
-        return
-    }
-    temp_paths+=("${tmp_root}")
-
-    local -a staged_files=()
-    local file
-    for file in "${files[@]}"; do
-        mkdir -p "${tmp_root}/$(dirname -- "${file}")" || {
-            fail "格式" "无法创建临时目录：${file}"
-            return
-        }
-        if ! git show ":${file}" >"${tmp_root}/${file}"; then
-            fail "格式" "读取暂存区内容失败：${file}"
-            return
-        fi
-        staged_files+=("${tmp_root}/${file}")
-    done
-
     local style="file:${repo_root}/.clang-format"
     local output
-    if output="$(clang-format --dry-run --Werror --style="${style}" "${staged_files[@]}" 2>&1)"; then
-        pass "格式" "暂存区 ${#files[@]} 个文件"
+    if output="$(clang-format --dry-run --Werror --style="${style}" "${staged_mirror_abs[@]}" 2>&1)"; then
+        pass "格式" "暂存区 ${#staged_mirror_rel[@]} 个文件"
     else
-        fail "格式" "暂存区 ${#files[@]} 个文件有漂移"
+        fail "格式" "暂存区 ${#staged_mirror_rel[@]} 个文件有漂移"
         # clang-format 看到的是临时镜像路径，这里映射回仓库相对路径。
-        output="${output//"${tmp_root}/"/}"
+        output="${output//"${staged_mirror_root}/"/}"
         indent_tail "${output}" 80
     fi
 }
@@ -334,7 +381,7 @@ run_effective_lines_check() {
 # ---------- cppcheck ----------
 run_cppcheck_check() {
     local -a files=()
-    if ! collect_git_paths files ls-files -z -- 'src/*.cpp' 'src/*.h'; then
+    if ! collect_git_paths files ls-files -z -- "${src_cpp_globs[@]}"; then
         fail "cppcheck" "git ls-files 失败"
         return
     fi
@@ -378,12 +425,77 @@ run_fast_checks() {
     run_format_check
     run_effective_lines_check
     run_cppcheck_check
+    run_forbidden_check
+}
+
+# ---------- 禁止模式 ----------
+forbidden_detail() { # forbidden_detail <脚本输出>：取末尾那行汇总
+    printf '%s\n' "$1" | sed -n 's/^forbidden: //p' | tail -n 1
+}
+
+report_forbidden_result() { # report_forbidden_result <退出码> <脚本输出>
+    local status="$1"
+    local output="$2"
+    local detail
+    detail="$(forbidden_detail "${output}")"
+    [[ -n "${detail}" ]] || detail="检查脚本没有输出汇总"
+
+    if (( status == 0 )); then
+        pass "禁止模式" "${detail}"
+        printf '%s\n' "${output}" | grep '^forbidden: 警告' | sed 's/^/    /' || true
+        return
+    fi
+
+    if (( status == 2 )); then
+        env_failure=1
+        fail "禁止模式" "检查脚本报环境或参数问题"
+        indent_tail "${output}" 40
+        return
+    fi
+
+    fail "禁止模式" "${detail}"
+    printf '%s\n' "${output}" | grep -v '^forbidden: ' | sed 's/^/    /'
+}
+
+run_forbidden_check_worktree() {
+    local output status
+    output="$(python3 tools/lint/forbidden.py 2>&1)"
+    status=$?
+    report_forbidden_result "${status}" "${output}"
+}
+
+run_forbidden_check_staged() {
+    if ! prepare_staged_mirror; then
+        fail "禁止模式" "${staged_mirror_error}"
+        return
+    fi
+
+    if [[ "${staged_mirror_state}" == "empty" ]]; then
+        skip "禁止模式" "暂存区里没有 C++ 文件"
+        return
+    fi
+
+    # 与格式检查共用同一棵索引镜像树：路径用 --prefix 换成镜像根，
+    # 报告里仍然是仓库相对路径，规则里的 glob 也按仓库相对路径匹配。
+    local output status
+    output="$(python3 tools/lint/forbidden.py --prefix "${staged_mirror_root}" \
+        -- "${staged_mirror_rel[@]}" 2>&1)"
+    status=$?
+    report_forbidden_result "${status}" "${output}"
+}
+
+run_forbidden_check() {
+    if (( staged )); then
+        run_forbidden_check_staged
+    else
+        run_forbidden_check_worktree
+    fi
 }
 
 # ---------- --full：配置与 wf_check ----------
 run_configure_check() {
     local output
-    if output="$(cmake -S . -B "${build_dir}" -G Ninja 2>&1)"; then
+    if output="$(cmake -S . -B "${build_dir}" -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1)"; then
         pass "配置" "${build_dir}"
         return 0
     fi
@@ -391,6 +503,70 @@ run_configure_check() {
     fail "配置" "${build_dir}"
     indent_tail "${output}" 60
     return 1
+}
+# ---------- clang-tidy ----------
+# 按编译数据库逐 TU 检查，任一诊断即失败（--warnings-as-errors='*'）。
+# 编译数据库由 run_configure_check 里的 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 生成。
+run_clang_tidy_check() {
+    local database="${build_dir}/compile_commands.json"
+    if [[ ! -f "${database}" ]]; then
+        env_failure=1
+        fail "clang-tidy" "缺少 ${database}（环境问题：编译数据库没有生成）"
+        return
+    fi
+
+    local extract='import json, sys; [print(entry["file"]) for entry in json.load(open(sys.argv[1], encoding="utf-8"))]'
+    local listing
+    if ! listing="$(python3 -c "${extract}" "${database}" 2>&1)"; then
+        env_failure=1
+        fail "clang-tidy" "读不懂 ${database}（环境问题）"
+        indent_tail "${listing}" 20
+        return
+    fi
+
+    local -a units=()
+    mapfile -t units <<<"${listing}"
+    if (( ${#units[@]} == 0 )) || [[ -z "${units[0]}" ]]; then
+        skip "clang-tidy" "编译数据库里没有翻译单元"
+        return
+    fi
+
+    local output status
+    local collected=""
+    local -a failed_units=()
+    local -a tool_errors=()
+    local unit
+    for unit in "${units[@]}"; do
+        output="$(clang-tidy -p "${build_dir}" --warnings-as-errors='*' "${unit}" 2>&1)"
+        status=$?
+        if (( status == 2 )); then
+            # clang-tidy 自己报错（内部错误、参数或配置读不懂）是环境问题，不是代码发现。
+            env_failure=1
+            tool_errors+=("${unit}")
+            collected+="${output}"$'\n'
+        elif (( status != 0 )); then
+            failed_units+=("${unit}")
+            collected+="${output}"$'\n'
+        fi
+    done
+
+    if (( ${#tool_errors[@]} > 0 )); then
+        fail "clang-tidy" "工具自身报错（环境问题，${#tool_errors[@]} 个翻译单元）"
+        printf '    工具报错的单元：\n'
+        printf '      %s\n' "${tool_errors[@]}"
+        indent_tail "${collected}" 40
+        return
+    fi
+
+    if (( ${#failed_units[@]} == 0 )); then
+        pass "clang-tidy" "${#units[@]} 个翻译单元"
+        return
+    fi
+
+    fail "clang-tidy" "${#failed_units[@]}/${#units[@]} 个翻译单元有诊断"
+    printf '    诊断来自：\n'
+    printf '      %s\n' "${failed_units[@]}"
+    indent_tail "${collected}" 80
 }
 
 run_wf_check() {
@@ -409,6 +585,7 @@ run_wf_check() {
 case "${mode}" in
     staged)
         run_format_check
+        run_forbidden_check
         ;;
     fast)
         run_fast_checks
@@ -416,8 +593,10 @@ case "${mode}" in
     full)
         run_fast_checks
         if run_configure_check; then
+            run_clang_tidy_check
             run_wf_check
         else
+            skip "clang-tidy" "配置失败，没有编译数据库"
             skip "wf_check" "配置失败，未构建"
         fi
         ;;
@@ -430,6 +609,11 @@ printf '\n[check] 汇总：%d PASS，%d FAIL，%d SKIP（共 %d 项，耗时 %d.
     "${pass_count}" "${fail_count}" "${skip_count}" \
     "$((pass_count + fail_count + skip_count))" \
     "$((total_ms / 1000))" "$((total_ms % 1000))"
+
+if (( env_failure )); then
+    printf '[check] 结论：环境或参数问题（退出码 2）\n'
+    exit 2
+fi
 
 if (( fail_count > 0 )); then
     printf '[check] 结论：FAIL\n'

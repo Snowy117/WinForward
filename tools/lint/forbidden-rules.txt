@@ -1,0 +1,23 @@
+# 禁止模式规则表：`tools/lint/forbidden.py` 的唯一规则来源。
+#
+# 每行四个 TAB 分隔字段：规则ID <TAB> glob <TAB> 正则 <TAB> 说明
+#   - 空行与 # 开头的行忽略；字段之间必须是 TAB，说明里可以有空格与中文。
+#   - glob 字段可以写多个模式，用逗号分隔；`*` 会跨越 `/`，所以 `src/driver/**` 覆盖整棵子树。
+#   - 正则用 Python re 语法，匹配的是剥离注释与字符串之后的 C++ 源码行。
+#   - 同一规则 ID 可以有多行（不同模式或不同范围）；命中报告里仍用同一个 ID。
+#   - 只检查 C++ 源文件（.c/.cc/.cpp/.cxx/.h/.hh/.hpp/.hxx/.inl），与 tools/check.sh 的扩展名列表一致。
+#   - 豁免：在命中行或它的上一行写 `// WF-LINT-ALLOW(规则ID): 理由`；理由为空视为无效豁免。
+#
+# 正则里可以出现命名组 `hit`：出现时只有 `hit` 捕获到的匹配才算命中，其余分支用来精确
+# 排除合法写法。heap 的两行就是靠这个排除 `<new>`、placement new、operator new/delete、
+# `= delete`——它们是声明或 §5.2 明确允许的用法，不是堆分配。
+#
+# 依据：.trellis/spec/backend/cpp-conventions.md §5.1；设计见
+# .trellis/tasks/10-21-quality-gates-modernization/design.md §4.5。
+# 新增规则时同步更新 cpp-conventions.md §8.3 的表格与 §8.4 的对应关系。
+
+stl	src/driver/**,src/common/**	\bstd::(array|basic_string|basic_string_view|deque|flat_map|flat_multimap|flat_multiset|flat_set|forward_list|function|function_ref|list|map|mdspan|multimap|multiset|priority_queue|queue|set|shared_ptr|span|stack|u16string|u16string_view|u32string|u32string_view|u8string|u8string_view|unique_ptr|unordered_map|unordered_multimap|unordered_multiset|unordered_set|vector|weak_ptr|wstring|wstring_view|string|string_view)\b	内核方言不使用标准库容器与字符串（§5.1）
+exceptions	src/driver/**,src/common/**	\b(throw|try|catch)\b	内核 C++ 不使用异常（§5.1）
+rtti	src/driver/**,src/common/**	\b(dynamic_cast|typeid)\b	内核 C++ 关闭 RTTI（§5.1）
+heap	src/driver/**,src/common/**	(?P<allowed>operator\s+new\b|<new>|new\s*\((?!\s*(?:std::)?nothrow)(?!\s*(?:std::)?align_val_t))|(?P<hit>\bnew\b)	内核方言不使用 new，内存走池分配；<new> 头、placement new（非 nothrow/align_val_t）、operator new 声明不算（§5.1、§5.2）
+heap	src/driver/**,src/common/**	(?P<allowed>=\s*delete\b|operator\s+delete\b)|(?P<hit>\bdelete\b)	内核方言不使用 delete；`= delete` 声明与 operator delete 不算（§5.1）
