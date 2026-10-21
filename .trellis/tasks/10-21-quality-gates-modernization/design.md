@@ -158,14 +158,18 @@ codeql database analyze build/codeql/db \
 | 步骤 | 结果 |
 |---|---|
 | 下载 bundle | 667 MB / 40 s |
-| 建库（含追踪构建） | 56 s |
-| 分析（recommended 106 条查询） | 127 s |
-| 库内容 | 11,274 个函数；`probe_classify.cpp` 的 22 个函数全部在库 |
-| 当前代码命中 | 0 |
+| 建库（含追踪构建） | 53–68 s（5 次实测） |
+| 分析（recommended 106 条查询） | 114–120 s |
+| 库内容 | 11,274 个函数 |
+| 当前代码命中 | **14 条**：`unprobeddereference`×7、`illegal-field-access-2`×4、`wdk-deprecated-api`×2、`usermodememoryoutsidetry`×1 |
 
-两个已知噪声，均不影响成库：提取器在 `wdm.h:7909` 报 `POINTER_32`（`__ptr32`）解析错误；追踪构建时 `link.exe` 找不到 `Wdmsec.lib` / `fwpkclnt.lib`（不在 `LIB` 路径上），提取器在链接阶段退出码 3。
+**提取器噪声必须显式压掉**：CodeQL 2.27.3 的 C++ 前端在 WDK `wdm.h:7909` 遇到 `__ptr32` 会报错并以 exit 3 结束，导致 `cpp/extractor/summary` 恒为 `successes=0 / failures=1`——即使数据库能出结果。建库时用 `--extractor-options-file` 给**提取器前端**传 `-D__ptr32=`（只影响 CodeQL 前端，MSBuild/cl 编译不受影响），summary 变为 1/0。不带该选项建出来的旧库会被抽取自检判 FAIL，需删除重建。
 
-**0 命中不能直接当门禁**：必须先做注入实验证明它会变红（implement P6 的必做项）。
+另一条噪声不影响成库：追踪构建时 `link.exe` 找不到 `Wdmsec.lib` / `fwpkclnt.lib`（不在 `LIB` 路径上），提取器在链接阶段退出码 3。
+
+**基线是 14 条，不是 0。** 早期一次测得 0 命中，当时数据库的抽取自检是失败的（`extractor-failures=1`）；具体成因未能完整复现，但结论明确——**0 结果必须先通过抽取自检才可采信**。脚本因此把 `cpp/extractor/summary` 作为硬门：`successes > 0` 且 `failures == 0` 且 summary 存在，三者缺一即 FAIL。注入 `if (value + increment < value)` 时变 17 条并出现 `cpp/bad-addition-overflow-check`；恢复源码后逐条回到 14 条。
+
+深度档的判定：**有结果即 `CODEQL-RESULT=FINDINGS`、退出码 1**，预期用法是看相对基线的增量，不要求 0。
 
 ## 7. 文件布局
 
