@@ -51,7 +51,7 @@ public sealed class WfpController : IAsyncDisposable
             device.SetConfig(ProbeConfig.Disabled());
 
             ListenerSet listeners = ListenerSet.Bind();
-            relay = RelayServer.Start(listeners, settings.Report, settings.AttachRedirectRecords);
+            relay = RelayServer.Start(listeners, settings.Report, settings.AttachRedirectRecords, settings.Socks5);
 
             device.SetRuleBlob(settings.RuleBlob);
             VerifyRules(device, settings);
@@ -63,6 +63,11 @@ public sealed class WfpController : IAsyncDisposable
             ReportConfig(device, settings.Report);
             // 就绪信号必须在规则与配置都生效之后发：E2E 拿它当「可以建连了」的信号，
             // 提前打印会留下「进程说 ready、驱动还没启用」的窗口，门禁偶发失败就来自这里。
+            if (settings.Socks5 is not null)
+            {
+                Report(settings.Report, $"controller-upstream socks5={settings.Socks5}");
+            }
+
             Report(settings.Report, $"controller-ready pid={Environment.ProcessId} port={relay.Port} " +
                                     $"listener={DescribeListeners(listeners)}");
 

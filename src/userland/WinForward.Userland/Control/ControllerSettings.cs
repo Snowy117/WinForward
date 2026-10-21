@@ -1,3 +1,4 @@
+using WinForward.Userland.Configuration;
 using WinForward.Userland.Policy;
 
 namespace WinForward.Userland.Control;
@@ -16,6 +17,9 @@ public sealed class ControllerSettings
     /// false 时不带 records，靠 self-PID 闸（闸 4）排除自流量。
     /// </summary>
     public bool AttachRedirectRecords { get; init; } = true;
+
+    /// <summary>上游 SOCKS5；null（默认）表示直连，行为与没有这个功能时完全一致。</summary>
+    public Socks5Endpoint? Socks5 { get; init; }
 
     public TimeSpan ShutdownTimeout { get; init; } = TimeSpan.FromSeconds(3);
 }

@@ -17,12 +17,12 @@ internal static class RunCommand
         string? reportPath = line.Get("report");
         bool attachRedirectRecords = !line.Has("no-redirect-records");
 
-        PolicyTable policy;
+        ControllerConfiguration configuration;
         byte[] blob;
         try
         {
-            policy = PolicyConfigurationDocument.Load(configPath);
-            blob = RuleBlobCompiler.Compile(policy, FwpmAppIdNormalizer.ForWindows());
+            configuration = PolicyConfigurationDocument.LoadConfiguration(configPath);
+            blob = RuleBlobCompiler.Compile(configuration.Policy, FwpmAppIdNormalizer.ForWindows());
         }
         catch (Exception exception) when (exception is ConfigurationException or PolicyCompileException)
         {
@@ -31,8 +31,10 @@ internal static class RunCommand
         }
 
         using ReportWriter report = new(reportPath);
+        PolicyTable policy = configuration.Policy;
         report.WriteLine($"policy rules={policy.Rules.Count} fallback={policy.FallbackAction} blob={blob.Length} " +
-                         $"config={configPath} records={attachRedirectRecords}");
+                         $"config={configPath} records={attachRedirectRecords} " +
+                         $"socks5={configuration.Socks5?.ToString() ?? "none"}");
 
         using CancellationTokenSource shutdown = new();
         ConsoleCancelEventHandler onCancel = (_, eventArgs) =>
@@ -51,6 +53,7 @@ internal static class RunCommand
                 RuleBlob = blob,
                 Report = report,
                 AttachRedirectRecords = attachRedirectRecords,
+                Socks5 = configuration.Socks5,
             });
 
             await WaitForShutdownAsync(shutdown.Token, durationMs, stopFile, report);

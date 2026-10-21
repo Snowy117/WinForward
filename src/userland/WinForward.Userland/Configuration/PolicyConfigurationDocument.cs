@@ -17,6 +17,7 @@ namespace WinForward.Userland.Configuration;
 /// <code>
 /// {
 ///   "fallbackAction": "permit" | "block" | "redirect",
+///   "socks5": { "host": "127.0.0.1", "port": 1080 },   // 可选；不写就是直连
 ///   "rules": [
 ///     {
 ///       "name": "可选的诊断名",
@@ -39,7 +40,9 @@ public static class PolicyConfigurationDocument
         CommentHandling = JsonCommentHandling.Disallow,
     };
 
-    public static PolicyTable Load(string path)
+    public static PolicyTable Load(string path) => LoadConfiguration(path).Policy;
+
+    public static ControllerConfiguration LoadConfiguration(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         string json;
@@ -52,10 +55,12 @@ public static class PolicyConfigurationDocument
             throw new ConfigurationException($"读取配置文件失败：{path}（{exception.Message}）", exception);
         }
 
-        return Parse(json);
+        return ParseConfiguration(json);
     }
 
-    public static PolicyTable Parse(string json)
+    public static PolicyTable Parse(string json) => ParseConfiguration(json).Policy;
+
+    public static ControllerConfiguration ParseConfiguration(string json)
     {
         ArgumentNullException.ThrowIfNull(json);
 
@@ -76,9 +81,10 @@ public static class PolicyConfigurationDocument
             {
                 throw new ConfigurationException($"配置根节点必须是对象，实际是 {root.ValueKind}");
             }
-            RejectUnknownProperties(root, string.Empty, "fallbackAction", "rules");
+            RejectUnknownProperties(root, string.Empty, "fallbackAction", "rules", "socks5");
 
             RuleAction fallbackAction = ParseAction(root, "fallbackAction", required: true);
+            Socks5Endpoint? socks5 = ParseSocks5(root);
             List<PolicyRule> rules = new();
 
             if (TryGetProperty(root, "rules", "根节点", required: false, out JsonElement rulesElement))
@@ -96,8 +102,36 @@ public static class PolicyConfigurationDocument
                 }
             }
 
-            return new PolicyTable(rules, fallbackAction);
+            return new ControllerConfiguration { Policy = new PolicyTable(rules, fallbackAction), Socks5 = socks5 };
         }
+    }
+
+    private static Socks5Endpoint? ParseSocks5(JsonElement root)
+    {
+        if (!TryGetProperty(root, "socks5", "根节点", required: false, out JsonElement element))
+        {
+            return null;
+        }
+
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw new ConfigurationException($"socks5 必须是对象，实际是 {element.ValueKind}");
+        }
+
+        RejectUnknownProperties(element, "socks5", "host", "port");
+        string host = ReadString(element, "socks5.host", required: true) ?? string.Empty;
+        _ = TryGetProperty(element, "port", "socks5", required: true, out JsonElement portElement);
+        if (portElement.ValueKind != JsonValueKind.Number || !portElement.TryGetInt32(out int port))
+        {
+            throw new ConfigurationException($"socks5.port 必须是 1..65535 的十进制整数，实际是 {portElement.ValueKind}");
+        }
+
+        if (port is < 1 or > 65535)
+        {
+            throw new ConfigurationException($"socks5.port 必须在 1..65535，实际是 {port}");
+        }
+
+        return new Socks5Endpoint(host, port);
     }
 
     private static PolicyRule ParseRule(JsonElement element, string path)

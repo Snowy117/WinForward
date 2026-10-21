@@ -62,6 +62,39 @@ windows-vm "$session" bye
 再用两个独立客户端进程（V4 与 V6，各 1 MiB 伪随机数据）对照 SHA-256；结束前恢复 `enabled=0`。
 脚本里每条断言失败都会让退出码非 0；末行是 `E2E-RESULT=PASS/FAIL`（ASCII，便于跨控制台代码页解析）。
 
+## SOCKS5 上游端到端
+
+形态是「客户端 → 驱动重定向 → 控制器 → SOCKS5 替身（VM loopback）→ 跨机 target」，
+对齐基线里「WinForward → sing-box 走 loopback」的那一跳。宿主与 VM 各自起一个进程：
+
+```bash
+# 宿主：跨机 target（裸 TCP 回显），端口要落在防火墙开放的 40000–41000
+dotnet build tools/socks5/wf-socks5.csproj -c Release
+dotnet tools/socks5/bin/Release/net10.0/wf-socks5.dll echo \
+    --listen 0.0.0.0 --port 40001 --connections 1 --timeout-ms 120000 --report /tmp/echo-target.txt
+```
+
+```powershell
+# VM：同步源码，构建用户态与替身（sync.sh 会把 tools/socks5 一起带上）
+tools/vm/sync.sh "$session" 'C:\wfbench\wfprobe-socks5'
+dotnet build C:\wfbench\wfprobe-socks5\src\userland\WinForward.Userland.slnx -c Release
+dotnet build C:\wfbench\wfprobe-socks5\tools\socks5\wf-socks5.csproj -c Release
+
+# 驱动没装时先装
+& "C:\wfbench\wfprobe-socks5\tools\vm\load-driver.ps1" -Root "C:\wfbench\wfprobe-socks5"
+
+# 跑两轮：失败轮（socks5 指向没人监听的端口）+ 成功轮（1 MiB 经 SOCKS5 到跨机 target）
+& "C:\wfbench\wfprobe-socks5\tools\vm\userland-socks5-e2e.ps1" -Root "C:\wfbench\wfprobe-socks5" -KeepWork
+```
+
+脚本会自己写配置：`socks5` 段 + **放行替身进程的 permit 规则** + 指向 target 端口的 redirect 规则。
+permit 那条是必需的——替身的出站连接同样会走 `ALE_CONNECT_REDIRECT`，没有这条规则它会被
+同一条 redirect 规则改回控制器，形成环。成功轮断言 `relay connected ... via=socks5:...`、
+替身的 `socks5-done connections=1 connects=1 bytes_in=<N> bytes_out=<N>`、以及客户端自己算的
+SHA-256 两边一致；失败轮断言客户端明确失败、控制器记 `relay error ... Socks5Exception`、
+且没有 `relay connected`（静默回退直连会在这里露馅）。target 侧的 `echo-done connections=` 在宿主上核对。
+
+
 ## 反向验证（Linux 侧）
 
 ```bash

@@ -3,6 +3,8 @@
 日期：2026-10-21
 目的：MVP 跑通后，用原仓库的 `benchmarks/WinForward.E2E` 取第一组性能数据，与 2026-10-18 CPU 分析的现状对比。
 
+> **先看最后一节**：直连中继的初测（90.4%）与经真实 sing-box 的复测（81.3%）是两次不同的测量，与基线同形的是后者。
+
 ## 1. 方法
 
 沿用原仓库 harness 的 THRU 臂，参数对齐 CPU 分析那一轮：
@@ -57,3 +59,62 @@ Phase 0 的判据是「480 Mbps THRU 代理路径的进程 CPU 不能降到 110%
 - 宿主 `192.168.100.4` 与 VM `192.168.100.2` 同网段，ICMP 通，但**所有 TCP 端口从 VM 侧均超时**（测过 19000 / 30053 / 30006 / 30010）。
 - 因此跨机测量需要宿主放行端口（需 root），或把 target 放进 VM。
 - 跨机那一版的失败现场保留在 findings 里：`relay error: OperationCanceledException`，`bytes_in=0`——中继出站连不上，客户端只看到协议错误。这本身就是"出站不可达时客户端无诊断信息"的一个实例。
+---
+
+# 附加：经真实 sing-box 的复测（与基线同形）
+
+日期：2026-10-21（同一天，初测之后）
+
+初测是直连中继，与基线的「WinForward → sing-box」不同形。这一轮把上游补齐，路径与 2026-10-18 那轮一致：
+
+```
+WinForward.E2E client (VM) → WFP 重定向 → WinForward.Controller (VM) → 127.0.0.1:1080
+  sing-box 1.14.2-singfix (direct outbound) → 192.168.100.4:40000 target (宿主)
+```
+
+## 上游的来历
+
+按 `WinForward` 仓库 `benchmarks/WinForward.E2E/AGENTS.local.md` §5 的指导，从源码构建：
+
+- sing-box `v1.14.2` + `SagerNet/sing@87c33f17688f`，打补丁
+  `.trellis/tasks/10-06-e2e-competitor-benchmark/research/sing-socks-pipelined-payload.patch`
+  （SOCKS5 握手后流水线字节被 `bufio.Reader` 吞掉）
+- 补丁自带的 `TestPipelinedRequestPayloadReachesHandler`：打前 FAIL、打后 PASS
+- 另编了一个**撤销补丁的对照版**：同一流水线测试下，打过补丁的回显 41 字节完整帧（26 ms），
+  未打补丁的读超时——证明补丁确实解决了这个问题
+- 配置与仓库模板 `scripts/singbox/base-singbox-socks5.json` 逐字节相同
+
+## 结果
+
+| 项 | 值 |
+|---|---|
+| goodput | **479.88 Mbps**（目标 480） |
+| 帧 | 发出 54874、回显 54874、`corrupt=0`、`protocolErrors=0` |
+| 中继 | 4 条连接全部 `via=socks5:127.0.0.1:1080`，`bytes_in=1,799,998,548` |
+| **`WinForward.Controller` CPU** | **81.3%**（23.55 CPU-s / 28.96 s） |
+| **`sing-box` CPU** | **53.0%**（15.36 CPU-s / 28.95 s） |
+
+与 2026-10-18 基线的对照：
+
+| 项 | 旧（NDISAPI 包级 + sing-box） | 新（WFP 重定向 + sing-box） | 变化 |
+|---|---:|---:|---:|
+| 代理路径进程 | 154.0% | **81.3%** | **−47.2%** |
+| sing-box | 47.0% | 53.0% | +12.8% |
+| 两者合计 | 201.0% | 134.3% | −33.2% |
+
+`sing-box` 这一行是环境校验：同一个二进制、同样的配置与目标，53.0% 对 47.0% 偏高 12.8%，
+说明这台 VM 当前状态与当年并非完全一致（构建工具链是 nixpkgs 的 go1.26.7，官方 release 用的不是它），
+因此 81.3% 也应带同样的折扣看，不宜当作精确复现值。
+
+## 关于 kill criteria
+
+Phase 0 的判据是「480 Mbps THRU 代理路径的进程 CPU 不能降到 110% 以下就停止完整重写」。
+
+本轮**代理路径 = 81.3%**，与基线同形、同一 harness、同一计划、同一台 VM。判据满足，且留有约 26% 的余量。
+
+## 可比性限制（这一轮的）
+
+1. **sing-box 的构建链不同**（源码自建 vs 官方 release），其 CPU 偏高 12.8% 提示环境有差异。
+2. **单次运行**，与基线同样只有一轮样本。
+3. 目标在宿主机、客户端与控制器在 VM，跨 vNIC——这一点与基线一致。
+4. 上游在 `127.0.0.1:1080`（loopback），与基线一致。

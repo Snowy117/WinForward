@@ -40,6 +40,8 @@ static void RegisterAll()
     ConfigurationTests.Register();
     RuleOrderTests.Register();
     DeviceAbiTests.Register();
+    Socks5Tests.Register();
+    Socks5ConfigurationTests.Register();
     RelayPumpTests.Register();
     WinForward.Userland.Tests.Abi.AbiConsistencyTests.Register();
 }

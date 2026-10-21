@@ -1,0 +1,3 @@
+# .NET 构建产物：obj/ 是 restore 与中间文件，bin/ 是输出。
+bin/
+obj/

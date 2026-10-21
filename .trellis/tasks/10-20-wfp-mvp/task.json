@@ -23,7 +23,8 @@
     "10-20-wfp-portable-core",
     "10-20-wfp-driver-rules",
     "10-20-wfp-csharp-blob",
-    "10-21-wfp-userland"
+    "10-21-wfp-userland",
+    "10-21-wfp-socks5"
   ],
   "parent": null,
   "relatedFiles": [],

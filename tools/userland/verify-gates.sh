@@ -127,6 +127,49 @@ sed -i 's/"remotePorts", "remoteNetwork", "process"/"remotePortsX", "remoteNetwo
 expect_mutation_red "配置/让未知字段被静默忽略" dotnet run --project "$tests_project" -c Release -- test
 cp "$configuration.bak" "$configuration"
 
+# ---------- 4.5 SOCKS5 客户端与配置 ----------
+backup src/userland/WinForward.Userland/Relay/Socks5Client.cs
+socks5_client="src/userland/WinForward.Userland/Relay/Socks5Client.cs"
+
+sed -i 's/private const byte AddressDomain = 0x03;/private const byte AddressDomain = 0x01;/' "$socks5_client"
+expect_mutation_red "SOCKS5/把域名地址类型写成 IPv4" dotnet run --project "$tests_project" -c Release -- test
+cp "$socks5_client.bak" "$socks5_client"
+
+sed -i 's/private const byte AddressIpv6 = 0x04;/private const byte AddressIpv6 = 0x01;/' "$socks5_client"
+expect_mutation_red "SOCKS5/把 IPv6 地址类型写成 IPv4" dotnet run --project "$tests_project" -c Release -- test
+cp "$socks5_client.bak" "$socks5_client"
+
+sed -i 's/request\[offset\] = (byte)(port >> 8);/request[offset] = (byte)(port \& 0xFF);/' "$socks5_client"
+expect_mutation_red "SOCKS5/端口字节序写反" dotnet run --project "$tests_project" -c Release -- test
+cp "$socks5_client.bak" "$socks5_client"
+
+sed -i 's/catch (OperationCanceledException exception) when (!token.IsCancellationRequested)/catch (OperationCanceledException exception) when (false)/' "$socks5_client"
+expect_mutation_red "SOCKS5/握手超时不包装成 Socks5Exception" dotnet run --project "$tests_project" -c Release -- test
+cp "$socks5_client.bak" "$socks5_client"
+
+sed -i 's/if (rep != 0)/if (false)/' "$socks5_client"
+expect_mutation_red "SOCKS5/忽略 rep 非 0" dotnet run --project "$tests_project" -c Release -- test
+cp "$socks5_client.bak" "$socks5_client"
+
+sed -i 's/if (reply\[1\] == MethodNoneAcceptable)/if (false)/' "$socks5_client"
+sed -i 's/if (reply\[1\] != MethodNoAuthentication)/if (false)/' "$socks5_client"
+expect_mutation_red "SOCKS5/接受上游拒绝 no-auth" dotnet run --project "$tests_project" -c Release -- test
+cp "$socks5_client.bak" "$socks5_client"
+
+sed -i 's/if (character > 0x7F)/if (false)/' "$socks5_client"
+expect_mutation_red "SOCKS5/非 ASCII 域名不校验" dotnet run --project "$tests_project" -c Release -- test
+cp "$socks5_client.bak" "$socks5_client"
+
+backup src/userland/WinForward.Userland/Relay/OutboundConnector.cs
+connector="src/userland/WinForward.Userland/Relay/OutboundConnector.cs"
+sed -i 's/if (_socks5 is not null)/if (false)/' "$connector"
+expect_mutation_red "SOCKS5/配了上游却走直连（静默回退）" dotnet run --project "$tests_project" -c Release -- test
+cp "$connector.bak" "$connector"
+
+sed -i 's/Socks5Endpoint? socks5 = ParseSocks5(root);/Socks5Endpoint? socks5 = null;/' "$configuration"
+expect_mutation_red "配置/静默忽略 socks5 段" dotnet run --project "$tests_project" -c Release -- test
+cp "$configuration.bak" "$configuration"
+
 # ---------- 5. 还原后必须重新变绿 ----------
 expect_green "还原后/ABI 一致性" abi
 expect_green "还原后/全部单测" test

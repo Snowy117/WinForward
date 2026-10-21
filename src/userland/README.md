@@ -14,7 +14,7 @@ blob 格式一旦对不上，症状是规则静默不生效而不是报错，所
 | `WinForward.Userland/Configuration/` | 暂定 JSON 配置 → `PolicyTable`（**唯一**的格式感知层） |
 | `WinForward.Userland/Device/` | 控制面 IOCTL：ABI 结构镜像、布局断言、设备客户端 |
 | `WinForward.Userland/Control/` | 产品生命周期：下发规则 → 起监听 → 告诉驱动端口与 self-PID → 退出 |
-| `WinForward.Userland/Relay/` | accept → 读回原始目的地 → 建出站 → 双向转发 |
+| `WinForward.Userland/Relay/` | accept → 读回原始目的地 → 建出站（直连或经 SOCKS5）→ 双向转发 |
 | `WinForward.Controller/` | 控制台入口：`run` / `check` / `state` / `disable` / `echo` / `client` |
 | `WinForward.Userland.Tests/` | 零依赖测试驱动、布局断言、ABI 一致性、差分用例表与夹具生成 |
 | `Directory.Build.props` | 公共属性：`net10.0`、nullable、warnings-as-errors |
@@ -33,6 +33,7 @@ C# 工具链由 devShell 提供（`flake.nix` 的 `dotnet-sdk_10`，目标框架
 ```json
 {
   "fallbackAction": "permit",
+  "socks5": { "host": "127.0.0.1", "port": 1080 },
   "rules": [
     {
       "name": "web",
@@ -48,10 +49,29 @@ C# 工具链由 devShell 提供（`flake.nix` 的 `dotnet-sdk_10`，目标框架
 ```
 
 - `fallbackAction` 必填：`permit` / `block` / `redirect`。
+- `socks5` 可选：`{ "host": ..., "port": ... }`，**不写就是直连**。`host` 可以是 IP 或域名（由上游解析）。
 - 规则里只有 `action` 必填；`remotePorts` 支持 `"*"`、`"443"`、`"8000-8100"`。
 - 未知字段直接报错（带 JSON 路径），不静默忽略。
 - 解析层只做结构校验；语义校验（端口区间颠倒、规则顺序冲突、进程路径超长、兜底动作矛盾）
   统一在 `RuleBlobCompiler` 里做，错误消息带规则序号。
+
+## 上游 SOCKS5
+
+配置里写了 `socks5` 段，中继的每一条出站连接都先与上游完成一次 no-auth CONNECT，
+目标就是驱动读回的**原始目的地**；数据面仍然是纯转发，握手只付一次。地址形态随目标而定：
+IPv4（`atyp=1`）、IPv6（`atyp=4`）、域名（`atyp=3`，ASCII，最长 255 字节）。
+
+没有 `socks5` 段时走直连，与没有这个能力时的行为完全一致。
+
+**失败一律上报，不退回直连**：上游不可达、握手超时（沿用 10 秒建连预算）、方法协商被拒、
+`rep != 0`、回复版本或地址类型不对，都抛具名 `Socks5Exception`，由会话级 catch 记成
+`relay error #<id> ...`，客户端看到的是连接被关，而不是悄悄成功。`relay connected` 行带
+`via=direct` / `via=socks5:host:port`，报告里能直接看出这条会话走了哪条路。
+
+`tools/socks5/` 是一个独立的、最小 SOCKS5 服务端（no-auth + CONNECT，带 `connections=` /
+`connects=` / 字节计数）和裸 TCP 回显目标，只做端到端测试替身，不进产品工程。
+端到端脚本见 `tools/vm/userland-socks5-e2e.ps1`，形态是「客户端 → 驱动重定向 → 控制器 →
+SOCKS5（VM loopback）→ 跨机 target」。
 
 ## 编译期语义检查
 
@@ -102,7 +122,8 @@ C# 工具链由 devShell 提供（`flake.nix` 的 `dotnet-sdk_10`，目标框架
 5. 下发规则 blob，回读规则数/兜底动作/blob 长度并逐项核对；
 6. 下发配置：`listener_process_id` = 本进程、`listener_port` = P、self-PID 集合 = 本进程；
 7. 接受连接 → `SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT` 读回原始目的地 →
-   带 `SIO_QUERY_WFP_CONNECTION_REDIRECT_RECORDS`（有的话）建出站 → 双向转发；
+   带 `SIO_QUERY_WFP_CONNECTION_REDIRECT_RECORDS`（有的话）建出站（直连，或按 `socks5` 段 CONNECT 到上游）→
+   双向转发；
 8. 退出时先把 `enabled` 置 0，再停监听、等会话收尾，最后报告字节数。
 
 中继的出站连接默认带上原连接的 redirect records，驱动因此用**闸 2（redirect state）**放行；
@@ -115,6 +136,10 @@ C# 工具链由 devShell 提供（`flake.nix` 的 `dotnet-sdk_10`，目标框架
 会取消兄弟泵，避免会话任务与 socket 留到进程退出；半关闭后对端若一直不关，30 秒后强制收尾。
 
 已知限制：MVP 不限制并发会话数（`_sessions` 无界），也没有空闲超时；生产部署需要加连接上限。
+
+上游 SOCKS5 的验证分两层：`Socks5Tests` 用 loopback 假上游逐字节核对 IPv4 / IPv6 / 域名三种
+CONNECT 请求与每条失败路径（含「上游失败不回退直连」）；`tools/vm/userland-socks5-e2e.ps1`
+在 VM 上跑真实链路，客户端 1 MiB 数据自带 SHA-256 对照，替身报 `connections=` / `connects=`。
 
 
 ## 构建与测试

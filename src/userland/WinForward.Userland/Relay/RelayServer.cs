@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
+using WinForward.Userland.Configuration;
 
 namespace WinForward.Userland.Relay;
 
@@ -30,6 +31,7 @@ public sealed class RelayServer : IAsyncDisposable
     private readonly ConcurrentDictionary<int, Task> _sessions = new();
     private readonly Task[] _acceptLoops;
     private readonly bool _attachRedirectRecords;
+    private readonly OutboundConnector _outbound;
 
     private int _nextSessionId;
     private long _accepted;
@@ -37,22 +39,28 @@ public sealed class RelayServer : IAsyncDisposable
     private long _bytesClientToServer;
     private long _bytesServerToClient;
 
-    private RelayServer(ListenerSet listeners, TextWriter report, bool attachRedirectRecords)
+    private RelayServer(ListenerSet listeners, TextWriter report, bool attachRedirectRecords, Socks5Endpoint? socks5)
     {
         _listeners = listeners;
         _report = report;
         _attachRedirectRecords = attachRedirectRecords;
+        _outbound = new OutboundConnector(socks5);
         _acceptLoops = listeners.Listeners.Select(listener => AcceptLoopAsync(listener)).ToArray();
     }
+
     /// <param name="attachRedirectRecords">
     /// true：把原连接的 redirect records 挂到出站 socket（走驱动闸 2）；
     /// false：不带 records，靠 self-PID 闸（闸 4）排除自流量——E2E 用它真正走一遍闸 4。
     /// </param>
-    public static RelayServer Start(ListenerSet listeners, TextWriter report, bool attachRedirectRecords = true)
+    /// <param name="socks5">null（默认）表示直连；非 null 时所有出站连接先 CONNECT 到该上游。</param>
+    public static RelayServer Start(ListenerSet listeners,
+                                    TextWriter report,
+                                    bool attachRedirectRecords = true,
+                                    Socks5Endpoint? socks5 = null)
     {
         ArgumentNullException.ThrowIfNull(listeners);
         ArgumentNullException.ThrowIfNull(report);
-        return new RelayServer(listeners, report, attachRedirectRecords);
+        return new RelayServer(listeners, report, attachRedirectRecords, socks5);
     }
     public int Port => _listeners.Port;
 
@@ -143,25 +151,12 @@ public sealed class RelayServer : IAsyncDisposable
             Report($"relay accept #{id} original={destination} family={destination.FamilyText} " +
                    $"pid={destination.ProcessId} rule={destination.RuleIndex} client={clientText} records={records.Length}");
 
-            using Socket outbound = new(destination.EndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
-            {
-                NoDelay = true,
-            };
-
             try
             {
-                if (records.Length > 0)
-                {
-                    SocketIoctl.SetRedirectRecords(outbound, records);
-                }
+                using Socket outbound =
+                    await _outbound.ConnectAsync(destination.EndPoint, records, ConnectTimeout, _shutdown.Token);
 
-                using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token))
-                {
-                    connectTimeout.CancelAfter(ConnectTimeout);
-                    await outbound.ConnectAsync(destination.EndPoint, connectTimeout.Token);
-                }
-
-                Report($"relay connected #{id} to={destination}");
+                Report($"relay connected #{id} to={destination} via={_outbound.Route}");
 
                 (PumpOutcome up, PumpOutcome down, string reason) =
                     await PumpPair.RunAsync(client, outbound, SessionDrainTimeout, _shutdown.Token);
@@ -181,7 +176,8 @@ public sealed class RelayServer : IAsyncDisposable
 
             }
             catch (Exception exception) when (exception is SocketException or OperationCanceledException or IOException
-                                           or ObjectDisposedException or System.ComponentModel.Win32Exception)
+                                           or ObjectDisposedException or System.ComponentModel.Win32Exception
+                                           or Socks5Exception)
             {
                 Report($"relay error #{id} to={destination} {exception.GetType().Name}: {exception.Message}");
             }
