@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/prd.md", "reason": "父任务需求与环境边界，AC1/AC2/AC4 在本批落地"}
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/design.md", "reason": "检查项设计：3.1 格式、3.2 有效行、3.4 cppcheck、2 配置契约"}
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/implement.md", "reason": "P1/P2 的步骤与验证命令"}
+{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "C++ 规范：命名、有效行上限、门禁要求（§8、§9.4）"}
+{"file": "src/userland/scripts/check-effective-lines.py", "reason": "要改默认扫描目标的既有实现"}
+{"file": "tools/vm/mutation-test.ps1", "reason": "依赖 block_classification 的变异用例"}
