@@ -134,3 +134,62 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: Host UDP 正式接入驱动
+<!-- trellis-session: v=2 fp=host-udp-production-2026-10-22 -->
+
+**Date**: 2026-10-21 ~ 2026-10-22
+**Task**: Host UDP 正式接入驱动：规则化 redirect、per-datagram context 与生命周期
+**Branch**: `main`
+
+### Summary
+
+把路线 A 的 UDP local redirect 从实验探针转成正式能力：规则层接受 UDP，classify 按“本地端点+远端目的地”关联一次，redirect context 携带 protocol=17 与原始目的地；block 在 ALE_AUTH_CONNECT 用 6/17 两条 filter 实现，UDP 为静默丢包；控制面 ABI 升到 v3，增加 protocol 与 4 个 UDP 计数器；删除全部实验 UDP 脚手架，新增正式 `wfprobe udp-rules` U1–U13 与门禁。
+
+### Key Decisions
+
+- UDP block 接受连接级静默丢包：send 成功、对端收不到、recv 超时；不伪造错误码。
+- `protocol=any` 覆盖 TCP+UDP；`any`/fallback block 按 6/17 各一条 filter，避免 ALE_AUTH_CONNECT 误拦 ICMP。
+- 同 listener socket 回包复用入站重定向关联，不重新 classify；`self_process_ids` 用于中继新开 socket 的出站。
+- connected UDP 的 redirect context 由 WFP 持有，本 boot 不释放（1/10/60/180/300s 实测），U12 只对 unconnected 做严格池断言，connected 记 LIMIT。
+- ABI v3 为破坏性变更，驱动/用户态/wfprobe 同批升级。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d0f4793` | chore(task): 记录 Host UDP 规划与 spike 结论 |
+| `e078003` | feat(policy): 规则 blob 与编译链支持 UDP |
+| `c2b0c4f` | chore(task): 记录 Host UDP B1 交付与 Q1 裁决 |
+| `a3af7b2` | feat(driver): ABI v3 与删除 UDP 实验脚手架 |
+| `75e790a` | chore(task): 记录 Host UDP B2a 交付与 B2 拆分 |
+| `3ac192a` | feat(driver): UDP 正式进入 classify 与 block filter |
+| `9c26acb` | chore(task): 记录 Host UDP B2b 交付与 VM 崩溃证据 |
+| `dd15b5d` | feat(verification): 添加 Host UDP UdpSuite 与门禁 |
+| `2b4cd83` | docs: 更新 Host UDP 文档与 WFP 架构 |
+| `ed0c8ad` | chore(task): 记录 Host UDP B3 交付与最终门禁 |
+| `c889d4e` | chore(task): 归档 Host UDP B0-B3 与父任务 |
+
+### Testing
+
+- [OK] 宿主 `tools/check.sh --full`：8 PASS / 0 FAIL；C# 134/134；ctest 66/66
+- [OK] VM 干净启动 `gate.ps1`：GATE-RESULT=PASS，507 断言；同 boot 第二次 PASS，505 断言
+- [OK] `udp-rules` U1–U13：255–257 断言，0 失败；U7 any/fallback block 下 ICMP 2/2 通
+- [OK] `mutation.ps1 -OnlyIndex 16..21`：6 条 UDP 变异全红，源码逐字节还原
+- [OK] 同 boot 重复 gate：RuleSuite 改基线差值后稳定 PASS；卸载 WfPr 无新增 outstanding
+
+### Known Limits
+
+- connected UDP context 在本 boot 内不释放，`sc stop` 也不回收；这是 WFP 行为，文档与 U12 均按 LIMIT 记录，未伪绿。
+- VM 期间出现过一次 0x11D/0xc000021a；dump 栈在启动早期 ETW，崩溃模块无 wfprobe，证据不支持归因驱动。
+- `AGENTS.md` 被仓库 `.gitignore` 忽略，内容已更新但只在本机生效，未 force-add。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 无：Host UDP 的驱动、ABI、验证、文档与归档均已完成；后续若 WFP 释放 connected context，可收紧 U12。
+
