@@ -112,3 +112,25 @@
 ### Next Steps
 
 - 无：父任务的遗留项已清空；后续新批次另立任务
+
+
+## Session 4: Host UDP 路线 A 实验验证
+<!-- trellis-session: v=2 fp=9d8321e092206e8c -->
+
+**Date**: 2026-10-21
+**Task**: Host UDP 路线 A 实验验证
+**Branch**: `main`
+
+### Summary
+
+用 wfprobe 实验探针在 WinLTSC 上验证 WFP UDP local redirect：ALE_CONNECT_REDIRECT 对 connected/unconnected 均生效，IP_WFP_REDIRECT_CONTEXT cmsg 逐 datagram 带回原始目的地；connected 客户端接受 relay 普通回包，无需伪造源或注入。结论：路线 A 可行，产品化另立任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c3ce6bf` | feat(driver): 验证 UDP local redirect 与 per-datagram context |
+
+### Status
+
+[OK] **Completed**
