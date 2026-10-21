@@ -30,7 +30,9 @@ dotnet build tools/wfprobe/wfprobe.csproj -c Release: 0 warning / 0 error
 | 热替换 | 旧 socket 第一包 permit；换 block blob 后第二包无回显；新关联被丢 | 第一包 1/1/0/0；旧关联第二包 0/0/0/0；新关联 1/0/1/0 | 详见 §3 |
 
 补充：`udp-smoke` 启动时先设置 `enabled=0` 再 reset，随后配置 listener/self-PID；listener 在
-suite 进程内，客户端在子进程（`udp-smoke-child`），因此首包必须经过 classify，回包走 self-PID 闸。
+suite 进程内，客户端在子进程（`udp-smoke-child`），因此首包必须经过 classify。
+**修正（B3 实测）**：同 socket 回包复用入站关联，不重新进入 `ALE_CONNECT_REDIRECT`，
+`udp_classify_calls` 不增；此前“回包走 self-PID 闸”的描述不准确。
 
 ## 3. 热替换的实际观察
 

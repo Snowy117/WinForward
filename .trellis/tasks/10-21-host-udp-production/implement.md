@@ -12,7 +12,7 @@
 | B1 | `10-21-host-udp-rules` | 第 1–2 步：规则 blob / C# 编译链 / 宿主测试；驱动暂不匹配 UDP，block 规则有临时安全闸 | B0 |
 | B2a | `10-21-host-udp-abi` | 第 3、6 步：ABI v3、删除实验 ABI/模块、wfprobe ABI 镜像、redirect 读取方；classify 行为不变 | B1 |
 | B2b | `10-21-host-udp-classify` | 第 4–5 步：classify 匹配 UDP、block filter 覆盖 UDP、删除临时安全闸、事件/计数 | B2a |
-| B3 | `10-21-host-udp-verification` | 第 7–9 步：UdpSuite、gate.ps1、IPv6/生命周期、热替换、文档与 spec、全量门禁 | B2b |
+| B3 | `10-22-host-udp-verification` | 第 7–9 步：UdpSuite、gate.ps1、IPv6/生命周期、热替换、文档与 spec、全量门禁；A 工具/B 文档并行 | B2b |
 
 每批独立提交；B0 的临时代码改动不得进入提交。B1 已通过检查（结论：通过，4 条建议），
 其临时安全闸与已知基线记录在 B1 任务的 implement.md 末尾。
@@ -147,9 +147,9 @@
 - [ ] 池标签：unconnected 按“关闭 socket 后 1s 回基线”写；**connected 先测释放窗口**
       （B2b 观察 180s 仍 outstanding、`sc stop` 后仍存在），决定是延长等待、只对 unconnected
       严格断言，还是标成已知限制。不要直接断言 connected 立即归零。
-- [ ] U3 的测量窗口：listener 的 self-PID 回包也会产生一次 UDP classify（`udp_permitted` +1、
-      `udp_redirected` 不增）。断言前 reset，或先收包/读计数再回包，明确扣掉回包 classify；
-      不能把“N 条请求”直接断言成“N 次 classify”而不控制窗口。
+- [ ] U3 的测量窗口：listener 用同一个 socket 回包时复用入站关联，不重新进入
+      `ALE_CONNECT_REDIRECT`（`udp_classify_calls` 不增）。仍在发请求前 reset、收包后先读计数，
+      避免把中继新开 socket 的其他出站算进窗口。
 - [ ] 把 B2b 新增的 mutation 标记接入 `tools/windows/mutation.ps1`：
       `classify-udp-branch`、`udp-classify-counter`、`udp-permit-counter`、`udp-block-counter`、
       `udp-redirect-counter`、`block-filter-protocol`，并确认每条变异都有 UdpSuite 用例变红。
@@ -171,7 +171,7 @@
 - [ ] `.trellis/spec/backend/wfp-architecture.md`：
   - D7 从“v1 只做 host TCP”更新为“Host TCP + UDP”；
   - 新增 UDP 实现事实：不需要回程注入、context 每关联、auth block、IPv6 cmsg level、
-    `any` 覆盖 UDP、listener 回包走 self-PID 闸；
+    `any` 覆盖 UDP、同 socket 回包不重新 classify、self-PID 用于中继新开 socket；
   - 未决清单里 Host UDP 状态更新。
 - [ ] `AGENTS.md` 的“结构性缺口”列表把 Host UDP 移除或标注已完成，指向本任务。
 - [ ] `research/spike-udp.md` 与 findings 结论入库。

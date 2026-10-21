@@ -22,7 +22,8 @@
     "10-21-host-udp-spike",
     "10-21-host-udp-rules",
     "10-21-host-udp-abi",
-    "10-21-host-udp-classify"
+    "10-21-host-udp-classify",
+    "10-22-host-udp-verification"
   ],
   "parent": null,
   "relatedFiles": [],

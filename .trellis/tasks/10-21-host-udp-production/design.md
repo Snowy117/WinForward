@@ -255,7 +255,8 @@ std::uint64_t udp_redirected;     // 成功挂上 redirect context
 
 新增 `tools/wfprobe/UdpSuite.cs`，命令 `wfprobe udp-rules`，由 `gate.ps1` 调用。套件进程
 自己持有 listener（因此 `listener_pid = 当前 PID`），把当前 PID 放进 `self_process_ids`
-（让 listener 的回包被闸 4 放行）；UDP 客户端跑在子进程里（不是 self，首包必须被 redirect）。
+（用于中继新开 socket 的出站；同 socket 回包复用入站关联，不重新 classify）；UDP 客户端跑在子进程里
+（不是 self，首包必须被 redirect）。
 子进程使用同一个 `wfprobe.exe`，启动后打印 `pid=`，套件解析后用于断言 context 的 PID。
 
 `UdpSockets` 扩展：
@@ -327,7 +328,7 @@ U3 的断言按 spike 实测写成“K 个新关联 → K”，不再写“≤ N
 | `ALE_AUTH_CONNECT` 对 UDP 的 BLOCK 是否真的让 `send` 失败 | 第 0 步 spike 先验证；失败则回到规划，评估 `DATAGRAM_DATA` 方案，不在本设计里硬做 |
 | UDP 关联的 context 释放时机（UDP 终止不在 WFP 层上报） | spike 测分配/释放；池断言按实测值写；卸载后必须归零 |
 | IPv6 / dual-mode 的 cmsg level 与 redirect target | `IPV6_WFP_REDIRECT_CONTEXT=70` + 双 level 解析；U10 覆盖；失败记录为明确缺口 |
-| listener 回包被再次 classify | self-PID 闸覆盖；U2/U3 验证；relay 必须用同一 listener socket 回包 |
+| listener 同 socket 回包 | 实测复用入站重定向关联、不重新 classify（`udp_classify_calls` 不增）；self-PID 闸用于中继新开 socket 的出站 |
 | `protocol=any` 行为变化 | 发布说明 + 显式 `tcp` 的迁移路径 |
 | ABI v3 破坏旧客户端 | 同批发布；启动时 ABI 握手拒绝旧版 |
 | 规则热替换后旧关联的丢弃不经过 classify | 已在 B2b 实测：`udp_blocked` 定义成 classify 决策数；U13 固化并写进 README |
