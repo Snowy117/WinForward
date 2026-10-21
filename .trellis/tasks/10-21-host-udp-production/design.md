@@ -130,12 +130,15 @@ WinForward 产品侧的规则没有 `Protocol` 时匹配所有协议（TCP 包�
 `src/driver/block_filters.cpp` 当前对 `protocol=any` 强制写成 TCP
 （`block_filters.cpp:77`）。正式实现：
 
-- `protocol == tcp` → 加 `FWPM_CONDITION_IP_PROTOCOL = 6`。
-- `protocol == udp` → 加 `= 17`。
-- `protocol == any` → **不加协议条件**。`ALE_AUTH_CONNECT` 只仲裁 TCP 与 UDP 连接；
-  不写条件等价于两者都拦，也保持“filter 只增加拒绝、从不放行”的结构性保证。
-  这样 `max_block_filters` 不需要翻倍。
-- `fallback_action == block` 的无条件 filter 不变，它本来就覆盖该层所有协议。
+- `protocol == tcp` → `FWPM_CONDITION_IP_PROTOCOL = 6`。
+- `protocol == udp` → `= 17`。
+- `protocol == any` → **展开成 6 与 17 两条 filter**，每条都显式写协议条件；`fallback_action
+  == block` 同样按 6/17 展开，不再使用无条件 filter。
+- 原因：`ALE_AUTH_CONNECT` 在不写协议条件时还会匹配首个出站 ICMP（以及按 UDP 处理的
+  其他 IP 协议），而 classify 对这些协议走 `permitted_non_tcp` 早退——会造成“被丢但无
+  classify 记录”。显式 6/17 把策略限定在 TCP/UDP，ICMP 不被误拦。
+- 代价：`max_block_filters` 从 64 提到 128（any/fallback 每 layer 两条；31 条 any block +
+  fallback 或 64 条具体协议规则）。仍保留“filter 只增加拒绝、从不放行”的结构性保证。
 
 ### 5.2 可观测语义
 
@@ -151,6 +154,15 @@ WinForward 产品侧的规则没有 `Protocol` 时匹配所有协议（TCP 包�
 - 重叠判定不变；`protocol=any` 与 tcp/udp 都重叠，`tcp` 与 `udp` 不重叠（现有
   `protocols_overlap` 已经如此）。
 - 编译期与驱动侧都继续整块拒绝“更早的非 block 规则遮蔽后面的 block 规则”的配置。
+
+### 5.4 规则热替换（B2b 实测）
+
+- 先 permit 建立长活 UDP 关联，再换 block blob：旧关联的后续 datagram **会被新的 auth filter
+  丢弃**，但不会重新进入 `ALE_CONNECT_REDIRECT`，因此 `udp_classify_calls` / `udp_blocked`
+  不增加、也没有新事件；新关联按新 blob 正常 classify 并计 `udp_blocked`。
+- 因此 `udp_blocked` 的准确定义是“**classify 层的 block 决策数**”，不是“实际被丢的 datagram 数”。
+  文档要按这个口径写；U13 按实测固化。
+- 这是比设计初稿“旧关联可能继续放行”更强的保证，但不是每包可见。
 
 ## 6. ABI v3
 
@@ -265,13 +277,13 @@ std::uint64_t udp_redirected;     // 成功挂上 redirect context
 | U4 | 两个不同目的地 | 两条 context 的地址/端口不同；不串 |
 | U5 | permit 规则 | listener 超时；`udp_permitted` 增量、无 context 分配 |
 | U6 | block `protocol=udp` | 子进程 `send`/`sendto` 成功、对端收不到、`recv` 超时；listener 无包；`udp_blocked`、`deferred_blocks` 增量；未 block 端口可达 |
-| U7 | block `protocol=any` | 同 U6，证明 any 覆盖 UDP；另有一条 TCP block 用例证明 TCP 仍被拦 |
+| U7 | block `protocol=any` | 同 U6，证明 any 覆盖 UDP；另有 TCP block 用例；**ICMP ping 在 any/fallback block 下仍通**，证明没有被误拦 |
 | U8 | 进程选择器 | 匹配当前 exe 的规则命中；`OtherAppId` 规则不命中 |
 | U9 | fallback redirect / fallback permit | 未命中规则时按 fallback 动作；事件 matched_rule=0xFFFFFFFF |
 | U10 | dual-mode / IPv6 | listener `[::]`；v4-mapped unconnected 断言 family=4，v4-mapped connected / native v6 断言 family=6；原始地址按实际层 |
 | U11 | enabled 0↔1 | 关闭时 UDP 直连、listener 无包；重新启用后 redirect 恢复 |
-| U12 | 生命周期 | 干净启动基线；`WfPr` allocs 增量 == `udp_redirected`；客户端 socket 关闭后 1s 内 outstanding 回基线；`sc stop` 后 0 |
-| U13 | 规则热替换 | 先 permit 建立关联，再换 block blob：原关联可能继续放行（连接级 block 语义），新关联必须被丢；记录事实并写进 README |
+| U12 | 生命周期 | 干净启动基线；`WfPr` allocs 增量 == `udp_redirected`；**unconnected** 客户端 socket 关闭后 1s 内 outstanding 回基线；connected 的释放窗口待 B3 先测（B2b 观察：180s 仍 outstanding），不要直接断言 0 |
+| U13 | 规则热替换 | 先 permit 建立长活关联，再换 block blob：旧关联后续 datagram 被 auth filter 丢弃但不重新 classify（计数不增），新关联按新 blob 被丢；按实测写断言与 README 口径 |
 
 U3 的断言按 spike 实测写成“K 个新关联 → K”，不再写“≤ N”：同一 socket 对同一目的地发 N 条
 只产生 1 次 classify/redirect/context。U6 按静默丢包写，不写错误码（Q1 已确认）。
@@ -282,6 +294,8 @@ U3 的断言按 spike 实测写成“K 个新关联 → K”，不再写“≤ N
   redirect 次数。spike 已确认客户端 socket 关闭后立即释放：断言 frees == allocs、
   outstanding 回到基线；`sc stop` 后 outstanding == 0。池断言必须从干净启动开始，
   实验注入路径的 NBL 基线在正式实现删除后不再存在。
+  **B2b 新发现**：connected UDP 的 context 在客户端退出 180s 后仍 outstanding，`sc stop` 后
+  仍存在；B3 必须先测释放窗口/是否真泄漏，再决定 U12 是否只对 unconnected 做严格断言。
 - `WfTr`（规则表）：UDP 用例不改变规则表生命周期，沿用现有断言。
 - `gate.ps1` 新增 `udp-rules` 步骤；不改变现有 TCP 套件顺序与预算。
 
@@ -316,7 +330,7 @@ U3 的断言按 spike 实测写成“K 个新关联 → K”，不再写“≤ N
 | listener 回包被再次 classify | self-PID 闸覆盖；U2/U3 验证；relay 必须用同一 listener socket 回包 |
 | `protocol=any` 行为变化 | 发布说明 + 显式 `tcp` 的迁移路径 |
 | ABI v3 破坏旧客户端 | 同批发布；启动时 ABI 握手拒绝旧版 |
-| 已授权 UDP 关联在 block 规则热替换后继续放行 | B2 补一条热替换用例；按“连接级 block”记录为已知语义，不假装每包阻断 |
+| 规则热替换后旧关联的丢弃不经过 classify | 已在 B2b 实测：`udp_blocked` 定义成 classify 决策数；U13 固化并写进 README |
 
 回退：本任务不引入运行时 UDP 开关；回退靠 revert 整批提交。若只想临时停用，
 `enabled=0` 会停止所有 redirect，但 ABI v3 仍要求配套的新用户态。

@@ -82,9 +82,9 @@ UDP 与 TCP 一样参与规则匹配，按规则放行 / 重定向 / 拦截；�
    - 不为 UDP 建立驱动侧 flow 表；context 所有权仍归 WFP。
 3. **block filter 覆盖 UDP**
    - `protocol=udp` 的 block 规则生成 UDP auth filter；`protocol=tcp` 仍只覆盖 TCP。
-   - `protocol=any` 必须同时覆盖 TCP 与 UDP（不写 `IP_PROTOCOL` 条件，见 design.md §5.1），
-     且不改变“block filter 只增加拒绝、不放行”的结构性保证。
-   - `fallback_action=block` 的无条件 filter 同样覆盖 TCP + UDP。
+   - `protocol=any` 必须同时覆盖 TCP 与 UDP：按 6/17 各下发一条 filter（见 design.md §5.1），
+     不写协议条件会误拦 ICMP；`max_block_filters` 相应为 128。
+   - `fallback_action=block` 同样按 6/17 展开，ICMP 不被拦。
    - 规则顺序冲突校验与错误文案同步更新。
 4. **redirect context 与用户态读取**
    - 保持 36 字节布局；`try_read_original_destination` 接受 TCP / UDP；C# 侧

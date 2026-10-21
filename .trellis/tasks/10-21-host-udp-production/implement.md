@@ -112,9 +112,9 @@
 ## 5. block filter 覆盖 UDP
 
 - [ ] `src/driver/block_filters.cpp`
-  - 协议条件按规则协议生成：6 / 17；`any` 不写协议条件。
-  - 更新注释：该层仲裁 TCP 与 UDP；`any` 等价于两者都拦；不加协议条件不是放宽。
-  - `rule_applies_to_layer` 与 `max_block_filters` 不变。
+  - 所有 block filter 显式写协议条件：6 / 17；`any` 与 fallback 各展开两条。
+  - 原因：不写条件会误拦 ICMP；`max_block_filters` 64 → 128。
+  - `rule_applies_to_layer` 不变；仍只增加拒绝。
 - [ ] 删除 `rule_table.cpp` 的 `udp-block-temporary-guard`（B1 临安闸），补一条
       “UDP block 规则可加载”的 VM 用例；`protocol=any` block 同时验证 TCP/UDP 都被拦。
 - [ ] `tools/wfprobe/BlobBuilder.cs` / `TestRule`：增加协议参数与 UDP 规则 helper。
@@ -144,10 +144,21 @@
       listener 在套件进程，客户端在子进程；`self_process_ids = [当前 PID]`；
       解析子进程 `pid=` 与 `send-failed` / `recv=` 输出。
 - [ ] `Program.cs`：新增 `udp-rules` 命令；`--timeout-ms` / `--settle-ms`。
-- [ ] 池标签：按 spike 结论写 `WfPr` 断言；至少要钉住“同一目的地 N 条不产生 N 倍 context”。
+- [ ] 池标签：unconnected 按“关闭 socket 后 1s 回基线”写；**connected 先测释放窗口**
+      （B2b 观察 180s 仍 outstanding、`sc stop` 后仍存在），决定是延长等待、只对 unconnected
+      严格断言，还是标成已知限制。不要直接断言 connected 立即归零。
+- [ ] U3 的测量窗口：listener 的 self-PID 回包也会产生一次 UDP classify（`udp_permitted` +1、
+      `udp_redirected` 不增）。断言前 reset，或先收包/读计数再回包，明确扣掉回包 classify；
+      不能把“N 条请求”直接断言成“N 次 classify”而不控制窗口。
+- [ ] 把 B2b 新增的 mutation 标记接入 `tools/windows/mutation.ps1`：
+      `classify-udp-branch`、`udp-classify-counter`、`udp-permit-counter`、`udp-block-counter`、
+      `udp-redirect-counter`、`block-filter-protocol`，并确认每条变异都有 UdpSuite 用例变红。
+- [ ] `wfprobe control --clear-self`：`self_process_count=0` 时同时清零 `self_process_ids`，
+      避免驱动以 87 拒绝；补一条工具侧回归。
 - [ ] `tools/windows/gate.ps1`：在 `rules` 之后加 `udp-rules` 步骤；失败即 gate 失败。
 - [ ] 若采用“卸载后 outstanding=0”的断言，在 gate 的卸载路径里读取 `wfprobe pooltag --tag WfPr`
       并纳入断言；注意断言必须发生在结果汇总之前，不能在 `finally` 里做无效断言。
+      connected 的残留先按上一条的实测结论处理。
 - [ ] 可观测性：`wfprobe Program.PrintEvent` 输出 `protocol`；`PrintStats` 与
       `WinForward.Controller/StateCommand` 输出 4 个 UDP 计数器；U1/U6 依赖这些输出做断言。
 - [ ] VM 上跑 `gate.ps1`，至少一次完整 PASS；记录命令与输出。
@@ -155,7 +166,8 @@
 ## 8. 文档与规范
 
 - [ ] `src/driver/README.md`：ABI v3、UDP 规则/context/事件/计数、block 语义、any 行为变化、
-      中继回包要求与 self-PID 配置。
+      中继回包要求与 self-PID 配置；`udp_blocked` 明确定义为“classify 层 block 决策数”，
+      热替换后旧关联的丢弃发生在 auth 层、不会增加该计数。
 - [ ] `.trellis/spec/backend/wfp-architecture.md`：
   - D7 从“v1 只做 host TCP”更新为“Host TCP + UDP”；
   - 新增 UDP 实现事实：不需要回程注入、context 每关联、auth block、IPv6 cmsg level、

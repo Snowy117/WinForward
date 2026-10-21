@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/10-21-host-udp-classify/prd.md","reason":"本批验收"}
+{"file":".trellis/tasks/10-21-host-udp-classify/design.md","reason":"classify/计数/block 设计"}
+{"file":".trellis/tasks/10-21-host-udp-classify/implement.md","reason":"执行清单"}
+{"file":".trellis/tasks/10-21-host-udp-production/design.md","reason":"父任务整体设计"}
+{"file":".trellis/tasks/10-21-host-udp-spike/research/spike-udp.md","reason":"B0 实测结论"}
+{"file":".trellis/spec/backend/cpp-conventions.md","reason":"驱动方言与测试约定"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"门禁与变异要求"}
