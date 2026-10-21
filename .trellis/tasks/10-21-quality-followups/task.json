@@ -1,8 +1,8 @@
 {
   "id": "quality-followups",
   "name": "quality-followups",
-  "title": "池标签断言偶发失败",
-  "description": "RuleSuite 在禁用驱动后立即查 pool tag，清理完成时 tag 已消失，导致 ASSERT FAIL 偶发",
+  "title": "质量收尾遗留项：池标签断言与 CodeQL 基线",
+  "description": "RuleSuite 池标签断言在本次启动首次运行时误判失败（条目尚未创建）；CodeQL 基线 14 条逐条处置后清零",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
