@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/design.md", "reason": "§2 配置与边界、§5 Windows 侧脚本、§4.6 PREfast 判定"}
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/prd.md", "reason": "R5 / AC6：脚本与机器解耦"}
+{"file": "tools/vm/build-and-test.ps1", "reason": "要重构为 gate.ps1 的现状实现"}
+{"file": "tools/vm/mutation-test.ps1", "reason": "要改名为 mutation.ps1，匹配逻辑本期不动"}
+{"file": "tools/vm/load-driver.ps1", "reason": "要改为薄壳"}
+{"file": "tools/vm/README.md", "reason": "目录说明要同步"}
