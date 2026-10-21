@@ -10,10 +10,12 @@
 |---|---|---|---|
 | B0 | `10-21-host-udp-spike` | 第 0 步 spike；只产出研究结论，临时改动必须还原 | 无 |
 | B1 | `10-21-host-udp-rules` | 第 1–2 步：规则 blob / C# 编译链 / 宿主测试；驱动暂不匹配 UDP，block 规则有临时安全闸 | B0 |
-| B2 | `10-21-host-udp-driver` | 第 3–6 步：ABI v3、classify 转正、block filter、删除实验脚手架、用户态读取、wfprobe ABI 镜像 | B1 |
-| B3 | `10-21-host-udp-verification` | 第 7–9 步：UdpSuite、gate.ps1、IPv6/生命周期、文档与 spec、全量门禁 | B2 |
+| B2a | `10-21-host-udp-abi` | 第 3、6 步：ABI v3、删除实验 ABI/模块、wfprobe ABI 镜像、redirect 读取方；classify 行为不变 | B1 |
+| B2b | `10-21-host-udp-classify` | 第 4–5 步：classify 匹配 UDP、block filter 覆盖 UDP、删除临时安全闸、事件/计数 | B2a |
+| B3 | `10-21-host-udp-verification` | 第 7–9 步：UdpSuite、gate.ps1、IPv6/生命周期、热替换、文档与 spec、全量门禁 | B2b |
 
-每批独立提交；B0 的临时代码改动不得进入提交。
+每批独立提交；B0 的临时代码改动不得进入提交。B1 已通过检查（结论：通过，4 条建议），
+其临时安全闸与已知基线记录在 B1 任务的 implement.md 末尾。
 
 ## 0. Spike：先验证三个未知量（VM）
 
@@ -24,7 +26,7 @@
 > `.trellis/tasks/10-21-host-udp-spike/research/spike-udp.md`。结论：classify 按关联一次；
 > context 随客户端 socket 关闭立即释放；UDP auth block 是静默丢包（应用无错误）；
 > IPv6/dual-mode 可用，family 取决于实际层。S3 没有触发“拦不住”的 STOP，但推翻了
-> “应用可见错误”的 D1 假设，需 Q1 确认后写 B2 断言。
+> “应用可见错误”的 D1 假设，用户已确认接受静默丢包（2026-10-21），B2 按此写断言。
 
 - [ ] `windows-vm status` / `connect`；同步当前仓库（当前 HEAD 仍带实验探针）。
 - [ ] 基线构建/安装：`pwsh -File tools\windows\load-driver.ps1 -Root <repo>`。
@@ -43,8 +45,8 @@
       如果工具改动较大，可以只记录“需要哪些改动”，把实测放到第 8 步。
 - [ ] 产出 `research/spike-udp.md`：每个问题的命令、观察、结论、对设计的影响。
 - [ ] **门禁**：B0 已完成；S1/S2 结论写入 U3/U12 的断言（K 个关联 → K；关闭 socket 后
-      1s 内 outstanding 回基线），S3 的静默丢包写入 U6 并交 Q1 确认，S4 的 family 分支写入 U10。
-      不把“应用可见错误”写进断言，除非 Q1 改判。
+      1s 内 outstanding 回基线），S3 的静默丢包写入 U6（已确认），S4 的 family 分支写入 U10。
+      不把“应用可见错误”写进断言。
 
 ## 1. 规则 blob / matcher（C++ 共享层）
 

@@ -25,7 +25,7 @@
 - context 随客户端 socket 关闭立即释放（<1s）；socket 保持打开时 150s 内不因 idle 释放；
   `sc stop` 后本实例全回收。池断言从干净启动开始，正式实现删除注入路径后基线才为 0。
 - `ALE_AUTH_CONNECT` 能拦住 UDP，但应用侧是**静默丢包**（send 成功、对端收不到、recv 超时），
-  TCP 对照仍是 `AccessDenied(10013)`。D1 的“应用可见错误”不成立，需产品确认。
+  TCP 对照仍是 `AccessDenied(10013)`。用户已确认接受静默丢包（2026-10-21）。
 - IPv6 / dual-mode 可行；context family 取决于实际层（v4-mapped unconnected 走 V4）。
 
 ## 2. 端到端数据流
@@ -141,7 +141,7 @@ WinForward 产品侧的规则没有 `Protocol` 时匹配所有协议（TCP 包�
 
 - UDP block 由 auth filter 执行；spike 实测为**静默丢包**：应用的 `send` / `sendto` /
   `connect` 成功，对端收不到，`recv` 超时。没有找到让 UDP send 返回 socket 错误的 WFP
-  路径；这与包版 WinForward 的静默丢包一致。D1 是否接受需 Q1 确认。
+  路径；这与包版 WinForward 的静默丢包一致。用户已确认接受该语义（2026-10-21）。
 - redirect 层的 classify 仍然记 `blocked`、`matched_block` / `fallback_block`、
   `deferred_blocks`，事件 action=block；真实丢弃在 auth 层发生。
 - 不为 UDP 增加 `DATAGRAM_DATA` callout，也不维护 block flow 状态。
@@ -274,7 +274,7 @@ std::uint64_t udp_redirected;     // 成功挂上 redirect context
 | U13 | 规则热替换 | 先 permit 建立关联，再换 block blob：原关联可能继续放行（连接级 block 语义），新关联必须被丢；记录事实并写进 README |
 
 U3 的断言按 spike 实测写成“K 个新关联 → K”，不再写“≤ N”：同一 socket 对同一目的地发 N 条
-只产生 1 次 classify/redirect/context。U6 按静默丢包写，不写错误码，除非 Q1 改判。
+只产生 1 次 classify/redirect/context。U6 按静默丢包写，不写错误码（Q1 已确认）。
 
 ### 8.3 池标签与清理
 

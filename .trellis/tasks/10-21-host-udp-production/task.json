@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "10-21-host-udp-spike"
+    "10-21-host-udp-spike",
+    "10-21-host-udp-rules"
   ],
   "parent": null,
   "relatedFiles": [],

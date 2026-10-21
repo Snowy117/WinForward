@@ -150,7 +150,7 @@ UDP 与 TCP 一样参与规则匹配，按规则放行 / 重定向 / 拦截；�
       `fallback_action` 对 UDP 生效（permit 直连 / redirect 进 listener）。
 - [ ] **A5 block**：`protocol=udp` 的 block 规则使报文在 auth 层被丢弃：应用 `send` /
       `sendto` / `connect` 成功，对端收不到；未 block 的端口仍可达。redirect 层计数与
-      事件记为 blocked。应用侧是否接受“静默丢包”见 Open Questions Q1。
+      事件记为 blocked。静默丢包已由用户确认（2026-10-21），不再要求应用可见错误。
 - [ ] **A6 `protocol=any` 与进程选择器**：`any` 同时覆盖 TCP 与 UDP，block 规则不会只拦
       TCP；`permit` / `redirect` 对两种协议都生效；UDP 规则里的进程选择器能命中匹配的
       进程、放过不匹配的进程。
@@ -169,18 +169,12 @@ UDP 与 TCP 一样参与规则匹配，按规则放行 / 重定向 / 拦截；�
 - [ ] **A12 环境清理**：实验模块、临时 IOCTL、`DATAGRAM_DATA` callout、注入 handle、
       wfprobe 实验参数全部删除；README / spec / ABI 文档更新。
 
-## Open Questions
-
-- **Q1（阻塞 B2，不阻塞 B1）UDP block 的应用侧语义**：spike 证明 auth filter 能拦住 UDP，
-  但应用完全无感（`send` 成功、对端收不到、`recv` 超时）。这实际上与包版 WinForward 的
-  “静默丢包”一致。接受静默丢包，还是要求应用可见错误（需要重新设计，可能另起任务）？
-
 ## Key Decisions
 
-- **D1 UDP block 语义（待 Q1 确认）**：机制上继续用 `ALE_AUTH_CONNECT` 的
-  `FWP_ACTION_BLOCK` filter。spike 实测它会静默丢包：应用 `send` 成功、对端收不到，
-  **不是**可捕获的 socket 错误。需要产品确认接受静默丢包，还是回到规划另找可观测
-  错误的路径；在确认前不写“应用可见错误”的断言。
+- **D1 UDP block 语义（用户已确认，2026-10-21）**：继续用 `ALE_AUTH_CONNECT` 的
+  `FWP_ACTION_BLOCK` filter。正式语义是**连接级静默丢包**：应用 `send` 成功、对端收不到、
+  `recv` 超时；不追求可捕获的 socket 错误，也不新增每包路径。与包版 WinForward 的
+  block 语义对齐。
 - **D2 `protocol=any` 覆盖 TCP + UDP**：与 WinForward 产品语义一致（规则不写协议即匹配
   所有协议，TCP 包含在内）。这会改变现有“any 只在 TCP 上生效”的事实，属于正式接入
   的预期行为变化。

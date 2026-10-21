@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/10-21-host-udp-rules/prd.md","reason":"本批验收"}
+{"file":".trellis/tasks/10-21-host-udp-rules/design.md","reason":"协议扩展与临时安全闸设计"}
+{"file":".trellis/tasks/10-21-host-udp-rules/implement.md","reason":"执行清单"}
+{"file":".trellis/tasks/10-21-host-udp-production/design.md","reason":"父任务整体设计与 ABI/block 约束"}
+{"file":".trellis/tasks/10-21-host-udp-spike/research/spike-udp.md","reason":"B0 实测结论"}
+{"file":".trellis/spec/backend/cpp-conventions.md","reason":"共享头内核方言与测试约定"}
+{"file":".trellis/spec/backend/csharp-conventions.md","reason":"C# 命名、ABI 镜像与零依赖测试约定"}
