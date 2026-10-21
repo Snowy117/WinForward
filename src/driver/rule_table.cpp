@@ -202,7 +202,7 @@ namespace
 // 更早的规则若可能与 block 规则命中同一条连接，它的动作会永远先于 block 生效；而 block 是编译
 // 成独立 filter 的，只看条件、不看顺序，会把它拦掉——语义不一致。这里按“可能重叠”拒绝整块 blob：
 // 宁可让用户改配置，也不静默改变规则表写下的语义。fallback=block 与任意非 block 规则的组合
-// 由 allocate_rule_table 单独拒绝（无条件 filter 会让那些规则永远失效）。
+// 由 allocate_rule_table 单独拒绝（覆盖全部 TCP/UDP 的 6/17 block filter 会让那些规则永远失效）。
 [[nodiscard]] bool rule_order_valid(const blob_view& view, std::uint32_t& earlier, std::uint32_t& later) noexcept
 {
     for (later = 0; later < view.rule_count; ++later)
@@ -272,8 +272,8 @@ rule_table* allocate_rule_table(const std::uint8_t* data, std::uint32_t size) no
         }
     }
 
-    // fallback=block 会生成无条件 block filter；只要表里还有任何非 block 规则，它们就永远
-    // 执行不到（classify 会报 permitted，但连接在 auth 层被拒）。这种矛盾配置整块拒绝。
+    // fallback=block 会为 6/17 各生成一条只带协议条件的 block filter（不再是无条件 filter）；
+    // 只要表里还有任何非 block 规则，它们就永远执行不到（classify 会报 permitted，但连接在 auth 层被拒）。
     // <mutation id="fallback-block-conflict">
     if (table->view.fallback_action == rule_action::block)
     // </mutation>
@@ -299,24 +299,6 @@ rule_table* allocate_rule_table(const std::uint8_t* data, std::uint32_t size) no
         ExFreePoolWithTag(table, rule_pool_tag);
         return nullptr;
     }
-
-    // 临时（B2 删除）：classify 尚未匹配 UDP，block_filters 却会按 protocol=17 下发 auth filter，
-    // 结果是报文被静默丢弃但 classify 没有 blocked/事件记录（spike S3）。B2 转正后删除这段，
-    // 并补一条「UDP block 规则可加载」的 VM 用例。
-    // <mutation id="udp-block-temporary-guard">
-    for (std::uint32_t index = 0; index < table->view.rule_count; ++index)
-    {
-        const rule& selected = table->view.rules[index];
-        if (selected.action == rule_action::block && selected.protocol == rule_protocol_udp)
-        {
-            DbgPrint("wfprobe: rule %u blocks UDP, but classify does not match UDP yet; blob rejected"
-                     " (the B2 change removes this guard)\n",
-                     index);
-            ExFreePoolWithTag(table, rule_pool_tag);
-            return nullptr;
-        }
-    }
-    // </mutation>
 
     table->contains_block = table->view.fallback_action == rule_action::block;
     for (std::uint32_t index = 0; index < table->view.rule_count && !table->contains_block; ++index)

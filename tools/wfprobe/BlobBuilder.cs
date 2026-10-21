@@ -16,19 +16,24 @@ internal sealed class TestRule
     public string? Process { get; set; }
     public string? Network { get; set; }
 
-    public static TestRule Port(uint action, int port, string? process = null) => new()
+    public static TestRule Port(uint action, int port, string? process = null, byte transportProtocol = Protocol.RuleProtocolTcp) => new()
     {
         Action = action,
         PortStart = (ushort)port,
         PortEnd = (ushort)port,
         Process = process,
+        TransportProtocol = transportProtocol,
     };
 
-    public static TestRule RedirectPort(int port, string? process = null) => Port(Protocol.RuleActionRedirect, port, process);
+    public static TestRule RedirectPort(int port, string? process = null, byte transportProtocol = Protocol.RuleProtocolTcp) =>
+        Port(Protocol.RuleActionRedirect, port, process, transportProtocol);
 
-    public static TestRule BlockPort(int port, string? process = null) => Port(Protocol.RuleActionBlock, port, process);
+    public static TestRule BlockPort(int port, string? process = null, byte transportProtocol = Protocol.RuleProtocolTcp) =>
+        Port(Protocol.RuleActionBlock, port, process, transportProtocol);
 
-    public static TestRule PermitPort(int port, string? process = null) => Port(Protocol.RuleActionPermit, port, process);
+    public static TestRule PermitPort(int port, string? process = null, byte transportProtocol = Protocol.RuleProtocolTcp) =>
+        Port(Protocol.RuleActionPermit, port, process, transportProtocol);
+
 }
 
 internal static class BlobBuilder

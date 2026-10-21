@@ -63,19 +63,49 @@ struct block_conditions
     return true;
 }
 
-[[nodiscard]] bool build_block_conditions(const blob_view& view, const rule& selected, block_conditions& out) noexcept
+struct protocol_expansion
+{
+    std::uint8_t values[2];
+    std::uint32_t count;
+};
+
+[[nodiscard]] protocol_expansion expand_block_protocols(std::uint8_t protocol) noexcept
+{
+    // 策略只治理 TCP/UDP。ALE_AUTH_CONNECT 不写协议条件时还会匹配首个出站 ICMP（以及按 UDP
+    // 处理的其他 IP 协议），而 classify 对这些协议走 permitted_non_tcp 早退；因此 block filter
+    // 必须显式写 6/17，不能依赖“省略条件等价于该层所有协议”。any 展开成两条，fallback 同理。
+    // <mutation id="block-filter-protocol">
+    if (protocol == rule_protocol_any)
+    {
+        return protocol_expansion{ { rule_protocol_tcp, rule_protocol_udp }, 2 };
+    }
+    // </mutation>
+    return protocol_expansion{ { protocol, 0 }, 1 };
+}
+
+void append_protocol_condition(block_conditions& out, std::uint8_t protocol) noexcept
+{
+    FWPM_FILTER_CONDITION0& condition = out.entries[out.count++];
+    condition.fieldKey = FWPM_CONDITION_IP_PROTOCOL;
+    condition.matchType = FWP_MATCH_EQUAL;
+    condition.conditionValue.type = FWP_UINT8;
+    condition.conditionValue.uint8 = protocol;
+}
+
+void build_protocol_only_conditions(std::uint8_t protocol, block_conditions& out) noexcept
+{
+    RtlZeroMemory(&out, sizeof(out));
+    append_protocol_condition(out, protocol);
+}
+
+[[nodiscard]] bool build_block_conditions(const blob_view& view,
+                                          const rule& selected,
+                                          std::uint8_t protocol,
+                                          block_conditions& out) noexcept
 {
     RtlZeroMemory(&out, sizeof(out));
 
-    // 这个层只观察 TCP（classify 对非 TCP 直接 permitted_non_tcp）。protocol=any 在这里等价于
-    // “所有能进入匹配阶段的连接”，统一按 TCP 下发，避免 auth filter 把 UDP connect 一起拦掉。
-    {
-        FWPM_FILTER_CONDITION0& condition = out.entries[out.count++];
-        condition.fieldKey = FWPM_CONDITION_IP_PROTOCOL;
-        condition.matchType = FWP_MATCH_EQUAL;
-        condition.conditionValue.type = FWP_UINT8;
-        condition.conditionValue.uint8 = selected.protocol == rule_protocol_any ? rule_protocol_tcp : selected.protocol;
-    }
+    append_protocol_condition(out, protocol);
 
     const bool any_port =
         selected.remote_port_start == rule_port_any_begin && selected.remote_port_end == rule_port_any_end;
@@ -183,52 +213,65 @@ NTSTATUS probe_install_block_filters(const blob_view& view, UINT64* ids, std::ui
             {
                 continue;
             }
-            if (index >= max_block_filters)
+            const protocol_expansion protocols = expand_block_protocols(selected.protocol);
+            for (std::uint32_t protocol_index = 0; protocol_index < protocols.count; ++protocol_index)
             {
-                probe_delete_block_filters(ids, count);
-                return STATUS_INVALID_PARAMETER;
+                if (index >= max_block_filters)
+                {
+                    probe_delete_block_filters(ids, count);
+                    return STATUS_INVALID_PARAMETER;
+                }
+                block_conditions conditions{};
+                if (!build_block_conditions(view, selected, protocols.values[protocol_index], conditions))
+                {
+                    probe_delete_block_filters(ids, count);
+                    return STATUS_INVALID_PARAMETER;
+                }
+                NTSTATUS status =
+                    add_block_filter(ipv6_layer ? FWPM_LAYER_ALE_AUTH_CONNECT_V6 : FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                                     conditions.entries,
+                                     conditions.count,
+                                     ids[index]);
+                if (!NT_SUCCESS(status))
+                {
+                    probe_delete_block_filters(ids, count);
+                    return status;
+                }
+                ++index;
+                count = index;
             }
-            block_conditions conditions{};
-            if (!build_block_conditions(view, selected, conditions))
+        }
+    }
+    if (view.fallback_action == rule_action::block)
+    {
+        const protocol_expansion protocols = expand_block_protocols(rule_protocol_any);
+        for (std::uint32_t layer = 0; layer < 2; ++layer)
+        {
+            for (std::uint32_t protocol_index = 0; protocol_index < protocols.count; ++protocol_index)
             {
-                probe_delete_block_filters(ids, count);
-                return STATUS_INVALID_PARAMETER;
+                if (index >= max_block_filters)
+                {
+                    probe_delete_block_filters(ids, count);
+                    return STATUS_INVALID_PARAMETER;
+                }
+                block_conditions conditions{};
+                build_protocol_only_conditions(protocols.values[protocol_index], conditions);
+                NTSTATUS status =
+                    add_block_filter(layer == 1 ? FWPM_LAYER_ALE_AUTH_CONNECT_V6 : FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                                     conditions.entries,
+                                     conditions.count,
+                                     ids[index]);
+                if (!NT_SUCCESS(status))
+                {
+                    probe_delete_block_filters(ids, count);
+                    return status;
+                }
+                ++index;
+                count = index;
             }
-            NTSTATUS status =
-                add_block_filter(ipv6_layer ? FWPM_LAYER_ALE_AUTH_CONNECT_V6 : FWPM_LAYER_ALE_AUTH_CONNECT_V4,
-                                 conditions.entries,
-                                 conditions.count,
-                                 ids[index]);
-            if (!NT_SUCCESS(status))
-            {
-                probe_delete_block_filters(ids, count);
-                return status;
-            }
-            ++index;
-            count = index;
         }
     }
 
-    if (view.fallback_action == rule_action::block)
-    {
-        for (std::uint32_t layer = 0; layer < 2; ++layer)
-        {
-            if (index >= max_block_filters)
-            {
-                probe_delete_block_filters(ids, count);
-                return STATUS_INVALID_PARAMETER;
-            }
-            NTSTATUS status = add_block_filter(
-                layer == 1 ? FWPM_LAYER_ALE_AUTH_CONNECT_V6 : FWPM_LAYER_ALE_AUTH_CONNECT_V4, nullptr, 0, ids[index]);
-            if (!NT_SUCCESS(status))
-            {
-                probe_delete_block_filters(ids, count);
-                return status;
-            }
-            ++index;
-            count = index;
-        }
-    }
     return STATUS_SUCCESS;
 }
 

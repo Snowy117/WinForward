@@ -35,6 +35,11 @@ internal static class Protocol
     public const uint RuleActionBlock = 1;
     public const uint RuleActionRedirect = 2;
 
+    // 规则协议；与 IPPROTO_TCP / IPPROTO_UDP 的数值一致。
+    public const byte RuleProtocolAny = 0;
+    public const byte RuleProtocolTcp = 6;
+    public const byte RuleProtocolUdp = 17;
+
     // 驱动里 ExAllocatePoolWithTag(..., 'rPfW') 在小端内存中的字节序。
     public const string PoolTag = "WfPr";
 

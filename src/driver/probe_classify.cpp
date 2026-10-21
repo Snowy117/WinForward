@@ -13,6 +13,38 @@ static_assert(static_cast<std::uint8_t>(rule_action::redirect) == static_cast<st
 static_assert(static_cast<std::uint8_t>(address_family::ipv4) == rule_family_ipv4);
 static_assert(static_cast<std::uint8_t>(address_family::ipv6) == rule_family_ipv6);
 
+// UDP 计数点：只在协议为 UDP 时自增，让
+// udp_classify_calls == udp_permitted + udp_blocked + udp_redirected 在单次测试的增量上成立。
+// <mutation id="udp-permit-counter">
+void count_udp_permit(probe_state& state, std::uint8_t protocol) noexcept
+{
+    if (protocol == IPPROTO_UDP)
+    {
+        probe_increment(state.stats.udp_permitted);
+    }
+}
+// </mutation>
+
+// <mutation id="udp-block-counter">
+void count_udp_block(probe_state& state, std::uint8_t protocol) noexcept
+{
+    if (protocol == IPPROTO_UDP)
+    {
+        probe_increment(state.stats.udp_blocked);
+    }
+}
+// </mutation>
+
+// <mutation id="udp-redirect-counter">
+void count_udp_redirect(probe_state& state, std::uint8_t protocol) noexcept
+{
+    if (protocol == IPPROTO_UDP)
+    {
+        probe_increment(state.stats.udp_redirected);
+    }
+}
+// </mutation>
+
 struct connection_facts
 {
     SOCKADDR_STORAGE remote;
@@ -211,6 +243,7 @@ void permit_classification(probe_state& state,
 {
     set_permit(classify_out);
     probe_increment(state.stats.permitted);
+    count_udp_permit(state, facts.protocol);
     log_decision(facts, rule_index, decision, probe_action::permit, 0, redirect_branch::none);
 }
 
@@ -246,6 +279,7 @@ void redirect_classification(probe_state& state,
         // 真的阻断，只会让计数和事实不符。这里记 permit + redirect_failures。
         probe_increment(state.stats.redirect_failures);
         probe_increment(state.stats.permitted);
+        count_udp_permit(state, facts.protocol);
         log_decision(
             facts, rule_index, probe_decision::redirect_failed, probe_action::permit, 0, redirect_branch::none);
         set_permit(classify_out);
@@ -265,6 +299,7 @@ void redirect_classification(probe_state& state,
         probe_increment(state.stats.apply_failures);
         probe_increment(state.stats.redirect_failures);
         probe_increment(state.stats.permitted);
+        count_udp_permit(state, facts.protocol);
         state.stats.last_status = static_cast<std::uint32_t>(status);
         log_decision(facts, rule_index, probe_decision::redirect_failed, probe_action::permit, 0, branch);
         set_permit(classify_out);
@@ -281,6 +316,7 @@ void redirect_classification(probe_state& state,
         probe_increment(state.stats.apply_failures);
         probe_increment(state.stats.redirect_failures);
         probe_increment(state.stats.permitted);
+        count_udp_permit(state, facts.protocol);
         state.stats.last_status = static_cast<std::uint32_t>(status);
         set_permit(classify_out);
         log_decision(facts, rule_index, probe_decision::redirect_failed, probe_action::permit, 0, branch);
@@ -299,6 +335,7 @@ void redirect_classification(probe_state& state,
         probe_increment(state.stats.context_alloc_failures);
         probe_increment(state.stats.redirect_failures);
         probe_increment(state.stats.permitted);
+        count_udp_permit(state, facts.protocol);
         log_decision(facts,
                      rule_index,
                      probe_decision::context_alloc_failed,
@@ -311,7 +348,7 @@ void redirect_classification(probe_state& state,
 
     original_destination destination{};
     destination.family = facts.family == AF_INET6 ? address_family::ipv6 : address_family::ipv4;
-    destination.protocol = transport_protocol::tcp;
+    destination.protocol = facts.protocol == IPPROTO_UDP ? transport_protocol::udp : transport_protocol::tcp;
     destination.port = facts.remote_port;
     std::uint32_t address_length = 0;
     copy_address(remote, destination.address, address_length);
@@ -327,6 +364,7 @@ void redirect_classification(probe_state& state,
 
     finish_classify(classify_handle, writable_data, classify_out, false);
     probe_increment(state.stats.redirected);
+    count_udp_redirect(state, facts.protocol);
     log_decision(facts, rule_index, probe_decision::redirected, probe_action::redirect, config.listener_port, branch);
 }
 
@@ -380,6 +418,13 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
         return;
     }
 
+    // <mutation id="udp-classify-counter">
+    if (facts.protocol == IPPROTO_UDP)
+    {
+        probe_increment(state.stats.udp_classify_calls);
+    }
+    // </mutation>
+
     probe_config config{};
     const rule_table* rules = nullptr;
     probe_take_snapshot(config, rules);
@@ -388,17 +433,23 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
     if (config.enabled == 0)
     {
         probe_increment(state.stats.permitted_disabled);
+        count_udp_permit(state, facts.protocol);
         set_permit(classify_out);
         return;
     }
     if (rules == nullptr)
     {
         probe_increment(state.stats.permitted_no_rules);
+        count_udp_permit(state, facts.protocol);
         set_permit(classify_out);
         return;
     }
-    if (facts.protocol != IPPROTO_TCP)
+    // <mutation id="classify-udp-branch">
+    const bool protocol_is_tcp_or_udp = facts.protocol == IPPROTO_TCP || facts.protocol == IPPROTO_UDP;
+    // </mutation>
+    if (!protocol_is_tcp_or_udp)
     {
+        // 既非 TCP 也非 UDP：classify 不接管，保持直连语义放行。
         probe_increment(state.stats.permitted_non_tcp);
         set_permit(classify_out);
         return;
@@ -502,6 +553,7 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
         probe_increment(result.matched ? state.stats.matched_block : state.stats.fallback_block);
         probe_increment(state.stats.blocked);
         probe_increment(state.stats.deferred_blocks);
+        count_udp_block(state, facts.protocol);
         log_decision(facts,
                      rule_index,
                      result.matched ? probe_decision::blocked_rule : probe_decision::blocked_fallback,

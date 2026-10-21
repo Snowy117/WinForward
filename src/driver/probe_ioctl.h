@@ -51,7 +51,7 @@ enum class probe_decision : std::uint8_t
 {
     permitted_disabled = 0,
     permitted_no_write_right = 1,
-    permitted_non_tcp = 2,
+    permitted_non_tcp = 2, // 协议既非 TCP 也非 UDP
     permitted_listener_port = 3,
     permitted_condition_flags = 4,
     permitted_redirect_state = 5,
@@ -122,7 +122,7 @@ struct probe_stats
     std::uint64_t permitted_no_rules;
     std::uint64_t permitted_no_write_right;
     std::uint64_t permitted_unsupported;
-    std::uint64_t permitted_non_tcp;
+    std::uint64_t permitted_non_tcp; // 协议既非 TCP 也非 UDP 的早退
     std::uint64_t permitted_listener_port;
     std::uint64_t permitted_redirect_state;
     std::uint64_t permitted_condition_flags;
@@ -136,9 +136,9 @@ struct probe_stats
     std::uint64_t fallback_redirect;
     std::uint64_t deferred_blocks; // redirect 层放行、交给 AUTH_CONNECT block filter 的次数
     std::uint64_t process_path_metadata_seen; // 诊断：redirect 层是否给出 PROCESS_PATH（预期 0）
-    std::uint64_t udp_classify_calls; // UDP 进入 classify 的次数（B2b 接计数点）
+    std::uint64_t udp_classify_calls; // classify 层决策数：进入 classify 且协议为 UDP
     std::uint64_t udp_permitted; // UDP 最终放行（含 redirect 失败后的 fail-open）
-    std::uint64_t udp_blocked; // UDP block 决策（真正拒绝在 auth filter）
+    std::uint64_t udp_blocked; // classify 层 block 决策数；热替换后旧关联在 auth filter 层丢弃的 datagram 不计入
     std::uint64_t udp_redirected; // UDP 成功挂上 redirect context
     std::uint32_t last_status;
     std::uint32_t abi_version;
