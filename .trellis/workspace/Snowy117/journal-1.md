@@ -66,4 +66,4 @@
 
 ### Next Steps
 
-- 处理 10-21-flaky-pool-tag：RuleSuite 池标签断言与驱动清理存在竞态；随后按需把 CodeQL 基线 14 条逐条评审。
+- 处理 10-21-quality-followups：R1 池标签断言与驱动清理存在竞态；R2 CodeQL 基线 14 条逐条评审。
