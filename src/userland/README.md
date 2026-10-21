@@ -51,6 +51,8 @@ C# 工具链由 devShell 提供（`flake.nix` 的 `dotnet-sdk_10`，目标框架
 - `fallbackAction` 必填：`permit` / `block` / `redirect`。
 - `socks5` 可选：`{ "host": ..., "port": ... }`，**不写就是直连**。`host` 可以是 IP 或域名（由上游解析）。
 - 规则里只有 `action` 必填；`remotePorts` 支持 `"*"`、`"443"`、`"8000-8100"`。
+- `protocol` 取 `any` / `tcp` / `udp`；`any` 同时匹配 TCP 与 UDP（相对旧版“any 只匹配 TCP”的
+  有意行为变化），需要旧行为时显式写 `tcp`。
 - 未知字段直接报错（带 JSON 路径），不静默忽略。
 - 解析层只做结构校验；语义校验（端口区间颠倒、规则顺序冲突、进程路径超长、兜底动作矛盾）
   统一在 `RuleBlobCompiler` 里做，错误消息带规则序号。
@@ -82,7 +84,9 @@ SOCKS5（VM loopback）→ 跨机 target」。
   进程选择器上都可能命中同一条连接，整份规则表拒绝。驱动把 block 编译成独立的
   AUTH_CONNECT 过滤器、不参与「首个命中」顺序，这种配置的语义与作者本意相反。
 - **兜底动作矛盾**：`fallbackAction = block` 且表里存在 permit/redirect 规则 → 拒绝。
-  驱动会为兜底动作创建无条件的 block filter，让那些规则变成死规则，而计数器仍会记「放行」。
+  驱动会按 TCP(6) / UDP(17) 各创建一条 AUTH_CONNECT block filter（IPv4 / IPv6 每层一对），
+  让那些规则命中的 TCP/UDP 连接变成死规则，而 classify 计数器仍会记「放行」；
+  过滤器只写 6/17，不会误拦 ICMP。
 - **进程选择器**：按 ASCII 折叠比较（与内核匹配连接的语义一致），不折叠全 Unicode。
 - **进程路径上限**：UTF-8 ≤ 511 字节（不含 NUL），超限拒绝——超过时内核整条不匹配且不报错。
 - 端口区间颠倒、族与网段不一致、未知枚举值等。
@@ -189,4 +193,7 @@ python3 src/userland/scripts/check-effective-lines.py
   折叠 ASCII 小写、去重、NUL 结尾；网段主机位清零、20 字节定长去重；索引换算成池内字节偏移；
 - 内核侧 `try_open_blob` 只解码与校验，`match` 只按数组顺序找首个命中，不解释用户意图；
 - 兜底动作写在 blob 头部，与规则表一起原子替换；
-- 兜底 `block` 会生成无条件过滤器，因此「兜底 block + 非 block 规则」是矛盾配置，在编译期拒绝。
+- 兜底 `block` 会按 6/17 生成协议过滤器（IPv4 / IPv6 各一对），因此「兜底 block + 非 block 规则」
+  是矛盾配置，在编译期拒绝。
+- 本仓库的用户态 `Relay/` 仍是 TCP 中继；UDP 的 listener / 中继在 WinForward 侧实现，
+  UDP 重定向的接住与回包不在当前控制器范围内。

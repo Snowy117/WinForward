@@ -5,9 +5,10 @@ namespace WinForward.Userland.Policy;
 /// 如果存在更早的非 block 规则可能与它命中同一条连接，就拒绝整份规则表。
 /// </summary>
 /// <remarks>
-/// 驱动把 block 规则编译成独立的 <c>ALE_AUTH_CONNECT</c> 过滤器，这类过滤器只看自身条件、
-/// 不参与 blob 的「首个命中」顺序。若一条更早的 permit/redirect 规则本应先命中，
-/// 后面的 block 过滤器仍会拦掉这条连接 —— 语义与配置作者写的相反。
+/// 驱动把 block 规则编译成独立的 <c>ALE_AUTH_CONNECT</c> 过滤器（<c>protocol=any</c> 会按 TCP/UDP
+/// 各展开一条），这类过滤器只看自身条件、不参与 blob 的「首个命中」顺序。若一条更早的
+/// permit/redirect 规则本应先命中，后面的 block 过滤器仍会拦掉这条 TCP/UDP 连接 —— 语义与
+/// 配置作者写的相反。
 /// 驱动侧会整块拒绝（用户只看到 <c>STATUS_INVALID_PARAMETER</c>），所以这里用同样的判定
 /// 提前给出带规则序号和条件摘要的错误。
 ///
@@ -21,10 +22,11 @@ internal static class RuleOrderValidator
     private const int NetworkPrefixSize = RuleBlobLayout.NetworkPrefixSize;
 
     /// <summary>
-    /// 兜底动作与规则的组合检查：<c>fallback = block</c> 时驱动会创建一条无条件的
-    /// <c>ALE_AUTH_CONNECT</c> block filter，同表里的 permit / redirect 规则全部变成死规则
-    /// —— classify 仍会记 <c>permitted</c> / <c>matched_permit</c>，但连接已经被拒。
-    /// 这种配置属于自相矛盾，编译期拒绝，别让用户对着「计数说放行、实际被拒」猜。
+    /// 兜底动作与规则的组合检查：<c>fallback = block</c> 时驱动会按 TCP(6) 与 UDP(17) 各创建
+    /// 一条 <c>ALE_AUTH_CONNECT</c> block filter（IPv4 / IPv6 每层一对），同表里 permit / redirect
+    /// 规则命中的 TCP/UDP 连接全部变成死规则 —— classify 仍会记 <c>permitted</c> /
+    /// <c>matched_permit</c>，但连接已经被拒。过滤器只写 6/17，不会误拦 ICMP；这种配置仍然
+    /// 自相矛盾，编译期拒绝，别让用户对着「计数说放行、实际被拒」猜。
     /// </summary>
     internal static void ValidateFallback(RuleAction fallbackAction, RuleBlobRule[] rules)
     {
@@ -43,8 +45,8 @@ internal static class RuleOrderValidator
 
             throw new PolicyCompileException(
                 $"兜底动作（fallbackAction）是 block，但规则 #{index} 是 {ActionName(action)}：" +
-                "驱动会为兜底动作创建一条无条件的 AUTH_CONNECT block filter，把所有连接都拒掉，" +
-                "这条规则永远不会生效（classify 却仍会记成放行，计数与真实结果不一致）。" +
+                "驱动会按 TCP(6) / UDP(17) 各创建一条 AUTH_CONNECT block filter（IPv4 / IPv6 每层一对），" +
+                "把所有 TCP/UDP 连接都拒掉，这条规则永远不会生效（classify 却仍会记成放行，计数与真实结果不一致）。" +
                 "请把兜底动作改成 permit/redirect，或把这条规则改成 block。");
         }
     }
