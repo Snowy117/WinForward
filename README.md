@@ -115,6 +115,36 @@ MSBuild、signtool、accesschk 都按机器上的安装情况发现（C# 工具�
 仓库不负责把代码送到那台机器——同步与连接虚拟机属于 `local/` 或本机配置，
 细节见 `tools/windows/README.md`。
 
+### CodeQL 深度档
+
+`tools/windows/codeql.ps1` 是独立的深度档，不在 `gate.ps1` 的默认流程里：它追踪一次 MSBuild
+驱动构建生成 CodeQL C++ 数据库，跑 `microsoft/windows-drivers` 的 recommended 套件，结果写到
+`build/codeql/wf.sarif`。
+
+仓库不包含 CodeQL CLI（bundle 约 667 MB，不进仓库）。机器上解压好之后，用 `-CodeqlHome`、
+`CODEQL_HOME` 或 PATH 指向 `codeql.cmd` 所在目录。首次运行会按需下载
+`microsoft/windows-drivers@1.10.0` 与 `microsoft/cpp-queries@0.0.5`（后者必须显式装，
+否则套件解析失败）。
+
+```powershell
+pwsh -File tools/windows/codeql.ps1 -CodeqlHome <bundle 里的 codeql 目录>
+pwsh -File tools/windows/codeql.ps1 -CodeqlHome <...> -SkipDatabase   # 复用数据库，只重跑分析
+```
+
+一次完整流程实测（16 核 / 2.8 GB 虚拟机）：建库约 52–68 s（冷树首次带 `-restore` 约 74 s），
+分析约 114–120 s，数据库约 22 MB，SARIF 约 400 KB。数据库、SARIF 与日志在 `build/codeql/`
+（已 gitignore）；MSBuild 的中间产物照常落在 `src/driver/obj/` 与 `src/driver/x64/`（同样已 gitignore）。
+
+WDK 头里的 `__ptr32` 会让 CodeQL 2.27.3 的 C++ 前端报错退出；脚本通过 `--extractor-options-file`
+只给提取器前端加 `-D__ptr32=`，真实编译不受影响。分析后还会校验 SARIF 里的
+`cpp/extractor/summary`（`extractor-successes > 0` 且 `extractor-failures = 0`），抽取失败的数据库
+不会因为 0 条结果就 PASS。
+
+退出码：`0` 分析完成、0 条结果且抽取自检通过；`1` 有结果（`CODEQL-RESULT=FINDINGS results=N`），
+或建库/分析/抽取自检失败（`CODEQL-RESULT=FAIL`）；`2` 环境/依赖缺失（`CODEQL-RESULT=ENV-MISSING`）。
+**不要只看退出码或 0 命中**：2026-10-21 的基线上有 14 条既有结果，判断回归要看 SARIF 里的
+`ruleId` 与位置。细节见 `tools/windows/README.md`。
+
 ## 目录
 
 | 路径 | 内容 |

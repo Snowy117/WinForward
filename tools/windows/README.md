@@ -20,6 +20,7 @@ C# 工具的目标框架输出目录（如 `net10.0` / `net11.0`）仍按工程�
 | Sysinternals accesschk | 放进 PATH、设置 `WF_ACCESSCHK`，或解压到系统盘/Program Files 下一层目录 |
 | .NET SDK | 构建 `tools/wfprobe` 与 `src/userland` |
 | 管理员 PowerShell | 安装/卸载驱动、改防火墙规则需要管理员权限 |
+| CodeQL CLI（仅 `codeql.ps1`） | 解压 bundle，用 `-CodeqlHome` / `CODEQL_HOME` / PATH 指向 `codeql.cmd` 所在目录；仓库不包含 |
 
 驱动工程用 `..\..\src\common` 指向共享头，因此仓库根下必须同时有 `src\driver`、`src\common`、
 `src\userland`、`tools\wfprobe` 与 `tools\socks5`。
@@ -88,6 +89,91 @@ pwsh -File .\gate.ps1 -Root <仓库根> -Remote <测试目标地址:端口>
 `PreferredToolArchitecture=x64`（x86 宿主找不到 WDK 的 x86 Prefast 插件，报 C1250）。
 
 末行输出 `GATE-RESULT=PASS`、`GATE-RESULT=FAIL` 或 `GATE-RESULT=ENV-MISSING`。
+
+## codeql.ps1
+
+独立的深度档：追踪一次 MSBuild 驱动构建生成 CodeQL C++ 数据库，跑
+`microsoft/windows-drivers` 的 recommended 套件，输出 SARIF。**不在 `gate.ps1` 的默认流程里**，
+仓库也不附带 CodeQL CLI bundle。
+
+```powershell
+pwsh -File .\codeql.ps1 -CodeqlHome <bundle 里的 codeql 目录>
+pwsh -File .\codeql.ps1 -CodeqlHome <...> -Database D:\codeql\db -Output D:\codeql\wf.sarif
+pwsh -File .\codeql.ps1 -CodeqlHome <...> -SkipDatabase   # 复用数据库，只重跑分析
+```
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `-Root` | `$PSScriptRoot\..\..` | 仓库根 |
+| `-CodeqlHome` | 无 | `codeql.cmd` 所在目录，或它的上一层（bundle 根）；优先于环境变量与 PATH |
+| `-Database` | `<Root>\build\codeql\db` | 数据库目录；相对路径按 `-Root` 解释 |
+| `-Output` | `<Root>\build\codeql\wf.sarif` | SARIF 路径；不能放在 `-Database` 里面 |
+| `-Configuration` / `-Platform` | `Debug` / `x64` | 建库时 MSBuild 的配置 |
+| `-SkipDatabase` | 关 | 跳过建库，复用已有数据库（必须有 `codeql-database.yml`） |
+
+工具发现与依赖：
+
+- `codeql` 按 `-CodeqlHome` → `$env:CODEQL_HOME` → PATH 查找。显式给了 `-CodeqlHome` 却找不到
+  就直接报错，不会静默回退到 PATH；都没有时以 2 退出，并说明仓库不附带 CLI。
+- 查询包检查走 `codeql resolve packs`：`microsoft/windows-drivers@1.10.0` 与
+  `microsoft/cpp-queries@0.0.5` 缺哪个就 `codeql pack download` 哪个，下载后再检查一遍。
+  `microsoft/cpp-queries` 必须显式装——suite 依赖它，不装会在解析问题清单时失败。
+- 建库前先 `codeql resolve queries <suite>` 解析一次套件，路径或包版本问题会在建库之前报出来。
+- 建库时用 `--extractor-options-file` 传入 `build\codeql\extractor-options.json`，里面只有一条给
+  C++ 提取器前端的 `-D__ptr32=`：WDK 的 `wdm.h` 用了 CodeQL 2.27.3 前端解析不了的 `__ptr32`，
+  不处理会让提取器 exit 3、`cpp/extractor/summary` 记成 0 成功 1 失败。真实编译（MSBuild/cl）不受影响。
+
+流程与产物（数据库、SARIF 与日志在 `build\codeql\`，已 gitignore）：
+
+1. 建库：`codeql database create db --language=cpp --source-root <Root> --command "database-create.bat"
+   --extractor-options-file extractor-options.json`。`.bat` 里是 `MSBuild.exe
+   src\driver\wfprobe.vcxproj -restore -nologo -t:Rebuild -p:Configuration=Debug -p:Platform=x64 -v:m`，
+   退出码原样返回。MSBuild 路径带空格，直接拼进 `--command` 容易在引号上翻车，所以固定包一层。
+   `-restore` 不能省（干净同步后缺 NuGet 资产会报 MSB8036）；`-t:Rebuild` 保证编译器真的被调用。
+2. 分析：`codeql database analyze db
+   "microsoft/windows-drivers:windows-driver-suites/recommended.qls" --format=sarif-latest
+   --output wf.sarif`。
+3. 摘要：解析 SARIF 的 `runs[].results`，输出条数、按 `ruleId` 分组、前 50 条位置；SARIF
+   解析失败会报错，不会当成 0 条。
+4. 抽取自检：解析 `runs[0].invocations[*].toolExecutionNotifications` 里 descriptor id 为
+   `cpp/extractor/summary` 的那条，读 `properties.attributes` 的 `extractor-successes` 与
+   `extractor-failures`。successes 必须 > 0、failures 必须为 0；找不到 summary、0 成功或有失败
+   都判 FAIL（`数据库不完整，结果不可信`）。这样 0 条结果也不会在数据库没抽到代码时误报 PASS。
+
+产物：`db\`、`wf.sarif`、`database-create.bat`、`extractor-options.json`、`database-create.log`、
+`analyze.log`。已存在的数据库会被删除重建；为防止误删，目标目录里必须有 `codeql-database.yml`。
+MSBuild 的中间产物按常规落在 `src\driver\obj\` 与 `src\driver\x64\`（都已 gitignore），不随数据库
+一起放在 `build\codeql\`。
+
+实测（2026-10-21，CLI 2.27.3，16 核 / 2.8 GB 虚拟机）：
+
+| 步骤 | 结果 |
+|---|---|
+| 建库（含追踪构建） | 52–68 s（冷树首次带 `-restore` 约 74 s） |
+| 分析（106 条查询） | 114–120 s |
+| 数据库 / SARIF | 22 MB / 约 400 KB |
+| 当前基线 | 14 条：unprobeddereference ×7、illegal-field-access-2 ×4、wdk-deprecated-api ×2、usermodememoryoutsidetry ×1 |
+
+同一个数据库上重复跑 `-SkipDatabase`：分析步约 26 s，整进程约 38.6 s（命中 CodeQL 查询结果缓存）；
+上表是重建数据库后的完整耗时。
+
+分析完成后还会做抽取自检（见上面流程第 4 步）：2026-10-21 的基线在加上 `-D__ptr32=` 处理后，
+`cpp/extractor/summary` 记的是 successes=1、failures=0；抽取失败的数据库即使 0 条结果也会 FAIL。
+旧版本脚本建的数据库可能没带 `-D__ptr32=`，自检会失败；删掉 `build\codeql\db` 重建即可。
+
+**0 命中不能直接当门禁，当前基线本身也不是 0**：退出码 `1` 表示有结果，或建库/分析/抽取自检失败
+（看末行 `CODEQL-RESULT`：`FINDINGS results=N` / `FAIL`）；`2` 是环境/依赖缺失。判断回归要看
+`ruleId` 集合与位置有没有变化。变红能力做过注入实验：在 `src/driver/probe_classify.cpp` 里加一个
+`if (value + increment < value)`（`UINT16` 参数会提升到 `int`），重跑后 SARIF 出现
+`cpp/bad-addition-overflow-check`；恢复源码后结果与基线逐条一致。
+
+### 已知限制
+
+- **非 ASCII 路径**：CodeQL 2.27.3 在含中文的路径下建库会失败（路径被写成 `??`）。仓库请放在纯
+  ASCII 短路径下，例如 `C:\src\wfprobe`；`-Database` / `-Output` 也不要放到含中文的目录。
+- `microsoft/cpp-queries@0.0.5` 的 `cpp/bad-addition-overflow-check` 只识别“变量 + 变量”的写法；
+  `if (x + 1 < x)` 这种字面量写法实测不报（与包内文档不一致），注入实验用等价的
+  `if (value + increment < value)`。
 
 ## mutation.ps1
 
@@ -198,5 +284,7 @@ WinForward.Controller disable
 - `2`：参数/环境问题（例如缺 `-Remote`、仓库根不存在、找不到 MSBuild / signtool / accesschk）。
 
 `mutation.ps1` / `load-driver.ps1` / `firewall-check.ps1` 同样区分 `0` / `1` / `2`：`[ENV]` 环境或前置条件错误（缺工具、缺工程、缺证书）以 `2` 退出。
+
+`codeql.ps1`：`0` 分析完成、0 条结果且抽取自检通过；`1` 有结果（`CODEQL-RESULT=FINDINGS results=N`），或建库/分析/抽取自检失败（`CODEQL-RESULT=FAIL`）；`2` 环境/依赖问题（找不到 CLI、查询包下载失败、套件解析失败），末行 `CODEQL-RESULT=ENV-MISSING`。
 
 `userland-e2e.ps1` / `userland-socks5-e2e.ps1`：参数或仓库根解析失败以 `2` 退出；其余失败为 `1`。
