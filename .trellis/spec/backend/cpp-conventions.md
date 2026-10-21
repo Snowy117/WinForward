@@ -128,6 +128,44 @@ class rundown_guard;
 
 内核侧按 `/std:c++latest` 编译，但**只用 §5.2 白名单里的能力**。这条规则的执行方式是评审，不是编译器——编译器不会拦住 `std::vector`，但内核会。
 
+### 5.5 WDK 约定与静态分析
+
+**池内存用 `ExAllocatePool2`**。`ExAllocatePoolWithTag` 是 `cpp/drivers/wdk-deprecated-api` 的弃用 API，
+新代码一律写成：
+
+```cpp
+auto* block = static_cast<block_type*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, size, pool_tag));
+```
+
+`POOL_FLAG_NON_PAGED` 取代 `NonPagedPoolNx`，默认零初始化（只在需要局部清零时才保留 `RtlZeroMemory`）。
+代价是最低系统版本抬到 **Windows 10 2004（10.0.19041）**；要覆盖更旧的系统，就在运行时用
+`MmGetSystemRoutineAddress` 取 `ExAllocatePool2`、缺失时回退到 `ExAllocatePoolWithTag`。
+
+**`DriverEntry` 必须用角色类型声明**：
+
+```cpp
+extern "C" DRIVER_INITIALIZE DriverEntry;
+
+extern "C" _Function_class_(DRIVER_INITIALIZE) _IRQL_requires_same_ _IRQL_requires_(PASSIVE_LEVEL) NTSTATUS
+    DriverEntry(_In_ PDRIVER_OBJECT driver_object, _In_ PUNICODE_STRING registry_path)
+```
+
+CodeQL 的 `WdmDriverEntry` 只认声明项上的 `DRIVER_INITIALIZE` **typedef**，PREfast 的 C28175 也按它
+判定上下文：少了这行声明，`DriverEntry` 调用链里的 `DriverObject->MajorFunction` / `DriverUnload`
+赋值会被判成越权访问。定义处的 SAL 要与 typedef 一致（`_IRQL_requires_same_`、
+`_IRQL_requires_(PASSIVE_LEVEL)`），否则 PREfast 报 C28252。
+
+**IOCTL 输出不要先强转 `SystemBuffer` 再把里面的地址交给别处解引用**。`METHOD_BUFFERED` 下
+`SystemBuffer` 是内核副本，但 CodeQL 的 `nestedMemoryOrigin` 会把「从 IOCTL 缓冲区取到的指针」
+当成用户态指针，对写入点报 `unprobeddereference`。约定写法是先在局部结构里生成输出，再整体
+`RtlCopyMemory` 回缓冲区——失败路径也不会留下半成品：
+
+```cpp
+process_path_measurement measurement{};
+probe_measure_process_path(utf16, input_length, measurement.utf8, measurement.utf8_length);
+RtlCopyMemory(buffer, &measurement, sizeof(measurement));
+```
+
 ---
 
 ## 6. 编译期计算
@@ -305,3 +343,15 @@ std::vector<int> values;
 - **单侧测试**负责**规范化不变量**（小写、主机位清零、去重、编码），因为这类东西只在一侧成立才有意义。
 
 写差分测试时，别把它当成"万能门"。同时保留单侧用例钉住规范化，并在差分用例里避免"两侧都会补偿"的写法。
+
+### 9.6 系统池标签表只反映「出现过」的标签
+
+`NtQuerySystemInformation(SystemPoolTagInformation)` 的条目在**第一次分配时创建**，本次启动内即使
+计数归零也仍然保留（实测：驱动卸载后 `WfPr` 仍显示 `39/39/0`）。用池标签做分配/释放断言时：
+
+- **基线为 `null` 表示「还没有任何分配」**，按零参与差值，不是「读不到」，更不是失败；
+- 窗口结束时仍然读不到，才说明条目在测量期间被清掉（计数不可判定），要显式报错；
+- 差值断言要跨同一个条目：先减基线再加窗口内分配次数，别把「条目重建后计数从 0 起算」当成泄漏。
+
+已经按这个语义落在 `tools/wfprobe/RuleSuite.cs` 与 `PoolTags.Zero`：首次运行（刚开机/刚装驱动）
+不再偶发失败，`分配次数 / 释放次数 / outstanding = 0` 三条断言强度不变。
