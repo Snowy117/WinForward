@@ -325,7 +325,96 @@ $mutations = @(
             New = "    probe_increment(result.matched ? state.stats.matched_block : state.stats.fallback_block);"
         })
         Target = @("rules", "--iterations", "3")
+    },
+    @{
+        Name = "UDP 协议分支退化成只处理 TCP"
+        File = "probe_classify.cpp"
+        Edits = @(@{
+            Id = "classify-udp-branch"
+            New = "    const bool protocol_is_tcp_or_udp = facts.protocol == IPPROTO_TCP;"
+        })
+        Target = @("udp-rules", "--only", "U1", "--timeout-ms", "5000")
+    },
+    @{
+        Name = "UDP classify 计数只在 TCP 上自增"
+        File = "probe_classify.cpp"
+        Edits = @(@{
+            Id = "udp-classify-counter"
+            New = (@(
+                "    if (facts.protocol == IPPROTO_TCP)"
+                "    {"
+                "        probe_increment(state.stats.udp_classify_calls);"
+                "    }"
+            ) -join "`n")
+        })
+        Target = @("udp-rules", "--only", "U1", "--timeout-ms", "5000")
+    },
+    @{
+        Name = "UDP permit 计数只在 TCP 上自增"
+        File = "probe_classify.cpp"
+        Edits = @(@{
+            Id = "udp-permit-counter"
+            New = (@(
+                "void count_udp_permit(probe_state& state, std::uint8_t protocol) noexcept"
+                "{"
+                "    if (protocol == IPPROTO_TCP)"
+                "    {"
+                "        probe_increment(state.stats.udp_permitted);"
+                "    }"
+                "}"
+            ) -join "`n")
+        })
+        Target = @("udp-rules", "--only", "U5", "--timeout-ms", "5000")
+    },
+    @{
+        Name = "UDP block 计数只在 TCP 上自增"
+        File = "probe_classify.cpp"
+        Edits = @(@{
+            Id = "udp-block-counter"
+            New = (@(
+                "void count_udp_block(probe_state& state, std::uint8_t protocol) noexcept"
+                "{"
+                "    if (protocol == IPPROTO_TCP)"
+                "    {"
+                "        probe_increment(state.stats.udp_blocked);"
+                "    }"
+                "}"
+            ) -join "`n")
+        })
+        Target = @("udp-rules", "--only", "U6", "--timeout-ms", "5000")
+    },
+    @{
+        Name = "UDP redirect 计数只在 TCP 上自增"
+        File = "probe_classify.cpp"
+        Edits = @(@{
+            Id = "udp-redirect-counter"
+            New = (@(
+                "void count_udp_redirect(probe_state& state, std::uint8_t protocol) noexcept"
+                "{"
+                "    if (protocol == IPPROTO_TCP)"
+                "    {"
+                "        probe_increment(state.stats.udp_redirected);"
+                "    }"
+                "}"
+            ) -join "`n")
+        })
+        Target = @("udp-rules", "--only", "U1", "--timeout-ms", "5000")
+    },
+    @{
+        Name = "any block 只展开 TCP，漏掉 UDP"
+        File = "block_filters.cpp"
+        Edits = @(@{
+            Id = "block-filter-protocol"
+            New = (@(
+                "    if (protocol == rule_protocol_any)"
+                "    {"
+                "        return protocol_expansion{ { rule_protocol_tcp, 0 }, 1 };"
+                "    }"
+            ) -join "`n")
+        })
+        Target = @("udp-rules", "--only", "U7", "--timeout-ms", "5000", "--ping-host", ($Remote -split ':')[0])
     }
+
 )
 
 # 索引越界是参数错误：以 2 退出，不进入构建/测试。
@@ -394,7 +483,8 @@ try {
             @{ Name = "rules"; Args = @("rules", "--iterations", "3") },
             @{ Name = "selftest-v4"; Args = @("selftest", "--remote", $Remote, "--iterations", "1") },
             @{ Name = "selftest-dual"; Args = @("selftest", "--dual", "--remote", $Remote, "--iterations", "1") },
-            @{ Name = "gates"; Args = @("gates") }
+            @{ Name = "gates"; Args = @("gates") },
+            @{ Name = "udp-rules-restored"; Args = @("udp-rules", "--timeout-ms", "10000", "--ping-host", ($Remote -split ':')[0]) }
         )
         foreach ($case in $baseline) {
             $code = Invoke-WfSuite -Root $Root -ToolExe $exe -Arguments $case.Args

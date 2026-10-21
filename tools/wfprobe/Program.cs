@@ -65,6 +65,8 @@ internal static class Program
                     return UdpCommands.Client(options);
                 case "udp-relay":
                     return UdpCommands.Relay(options);
+                case "udp-rules":
+                    return await UdpSuite.RunAsync(options);
                 default:
                     PrintUsage();
                     return 1;
@@ -96,6 +98,8 @@ internal static class Program
   wfprobe udp-client --remote HOST:PORT [--mode connected|unconnected] [--payload TEXT]
                      [--count K] [--timeout-ms M]
   wfprobe udp-relay --bind A.B.C.D --port N [--count K] [--linger-ms M]
+  wfprobe udp-rules [--timeout-ms M] [--ping-host HOST] [--connected-window-ms M]
+                   [--datagrams N] [--only U1,U2,...]
 ");
     }
 
@@ -137,7 +141,7 @@ internal static class Program
                           $"self-pids=[{string.Join(",", ids)}]");
     }
 
-    private static int Control(Options options)
+    internal static int Control(Options options)
     {
         using var device = new WfpDevice();
         ProbeConfig config = device.GetConfig();
@@ -150,7 +154,14 @@ internal static class Program
         if (options.Has("listener-pid"))
             config.ListenerProcessId = options.GetUInt("listener-pid", 0);
         if (options.Has("clear-self"))
+        {
             config.SelfProcessCount = 0;
+            unsafe
+            {
+                for (int index = 0; index < Protocol.MaxSelfProcessIds; index++)
+                    config.SelfProcessIds[index] = 0;
+            }
+        }
 
         List<string?> selfPids = options.GetAll("self-pid");
         if (selfPids.Count > 0)
@@ -192,6 +203,8 @@ internal static class Program
         Console.WriteLine($"[stats] matched: permit={stats.MatchedPermit} block={stats.MatchedBlock} " +
                           $"redirect={stats.MatchedRedirect} fallback: permit={stats.FallbackPermit} " +
                           $"block={stats.FallbackBlock} redirect={stats.FallbackRedirect}");
+        Console.WriteLine($"[stats] udp_calls={stats.UdpClassifyCalls} udp_permitted={stats.UdpPermitted} " +
+                          $"udp_blocked={stats.UdpBlocked} udp_redirected={stats.UdpRedirected}");
         return 0;
     }
 
@@ -219,7 +232,8 @@ internal static class Program
         string remote = AddressText(item.RemoteAddress, item.Family);
         string local = AddressText(item.LocalAddress, item.Family);
         string rule = item.MatchedRule == Protocol.InvalidRuleIndex ? "-" : item.MatchedRule.ToString(CultureInfo.InvariantCulture);
-        Console.WriteLine($"[event] seq={item.Sequence} pid={item.ProcessId} decision={DecisionName(item.Decision)} " +
+        Console.WriteLine($"[event] seq={item.Sequence} pid={item.ProcessId} protocol={item.Protocol} " +
+                          $"decision={DecisionName(item.Decision)} " +
                           $"action={ActionName(item.Action)} branch={BranchName(item.Branch)} family={item.Family} " +
                           $"rule={rule} remote={remote}:{item.RemotePort} local={local}:{item.LocalPort} " +
                           $"redirect-port={item.RedirectPort}");

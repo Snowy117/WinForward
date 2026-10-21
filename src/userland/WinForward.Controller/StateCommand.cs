@@ -70,5 +70,9 @@ internal static class StateCommand
         yield return ("fallback_redirect", stats.FallbackRedirect);
         yield return ("deferred_blocks", stats.DeferredBlocks);
         yield return ("process_path_metadata_seen", stats.ProcessPathMetadataSeen);
+        yield return ("udp_classify_calls", stats.UdpClassifyCalls);
+        yield return ("udp_permitted", stats.UdpPermitted);
+        yield return ("udp_blocked", stats.UdpBlocked);
+        yield return ("udp_redirected", stats.UdpRedirected);
     }
 }

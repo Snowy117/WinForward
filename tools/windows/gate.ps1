@@ -31,6 +31,19 @@ function Assert([string]$name, [bool]$condition, [string]$detail) {
         "ASSERT FAIL: $name ($detail)"
     }
 }
+function Get-WfPrOutstanding([string]$ToolExe) {
+    if (-not $ToolExe -or -not (Test-Path -LiteralPath $ToolExe -PathType Leaf)) {
+        return $null
+    }
+    $text = (& $ToolExe pooltag --tag WfPr | Out-String)
+    if ($text -match 'nonpaged_outstanding=(\d+)') {
+        return [long]$Matches[1]
+    }
+    if ($text -match '未找到 tag=') {
+        return [long]0
+    }
+    return $null
+}
 
 $script:result = 1
 $serviceStarted = $false
@@ -82,6 +95,12 @@ try {
     "===== 规则表 / IOCTL / 计数器（含 A1/A2/A3/A4/A6/A8）====="
     $code = Invoke-WfSuite -Root $Root -ToolExe $toolBinary -Arguments @("rules", "--iterations", $ReplaceIterations)
     Assert "rules 套件" ($code -eq 0) "exit=$code"
+
+    "===== UDP：redirect/permit/block/any/进程选择器/IPv6/生命周期/热替换（U1–U13）====="
+    $pingHost = ($Remote -split ':')[0]
+    # 连接窗口用默认 1000ms；完整 1/10/60/180/300s 测量见 udp-rules 的 research 记录，gate 不等 300s。
+    $code = Invoke-WfSuite -Root $Root -ToolExe $toolBinary -Arguments @("udp-rules", "--timeout-ms", "10000", "--ping-host", $pingHost, "--connected-window-ms", "1000")
+    Assert "udp-rules 套件" ($code -eq 0) "exit=$code"
 
     "===== dual-mode 之前的 V4 重定向 ====="
     $code = Invoke-WfSuite -Root $Root -ToolExe $toolBinary -Arguments @("selftest", "--remote", $Remote, "--iterations", $Iterations)
@@ -144,9 +163,23 @@ catch {
 finally {
     if ($serviceStarted) {
         "===== 卸载 ====="
+        $poolBeforeUninstall = Get-WfPrOutstanding $toolBinary
+        "卸载前 WfPr outstanding：$poolBeforeUninstall"
         Uninstall-Driver -ToolExe $toolBinary
         $state = (sc.exe query $serviceName 2>$null | Select-String "STATE")
         if ($state) { "卸载后状态：$($state.Line.Trim())" }
+        $poolAfterUninstall = Get-WfPrOutstanding $toolBinary
+        if ($null -ne $poolBeforeUninstall -and $null -ne $poolAfterUninstall) {
+            if ($poolAfterUninstall -gt $poolBeforeUninstall) {
+                $script:failures++
+                $script:result = 1
+                "ASSERT FAIL: 卸载没有新增 WfPr outstanding ($poolBeforeUninstall -> $poolAfterUninstall)"
+            } else {
+                "ASSERT PASS: 卸载没有新增 WfPr outstanding ($poolBeforeUninstall -> $poolAfterUninstall)"
+            }
+        } else {
+            "卸载前后 WfPr outstanding：无法读取（按环境缺口跳过比较，tool=$toolBinary）"
+        }
     }
 }
 

@@ -68,7 +68,7 @@ pwsh -File .\gate.ps1 -Root <仓库根> -Remote <测试目标地址:端口>
 3. **PREfast 静态分析**：`-restore -t:Rebuild -p:RunCodeAnalysis=true
    -p:EnableMicrosoftCodeAnalysis=true -p:PreferredToolArchitecture=x64`，解析输出；
 4. `accesschk -q -o \Device\WfProbe`，断言含 SYSTEM / Administrators、不含 Everyone；
-5. 构建 `tools/wfprobe`，跑 `appid`、`rules`、`selftest`（V4）、`selftest --dual`、`gates`；
+5. 构建 `tools/wfprobe`，跑 `appid`、`rules`、`udp-rules`、`selftest`（V4）、`selftest --dual`、`gates`；
 6. 跑 `firewall-check.ps1`；
 7. 构建用户态，跑单测与 `vm-check`；
 8. 跑 `userland-e2e.ps1`；
@@ -272,6 +272,7 @@ target 侧的 `echo-done connections=` 在宿主上核对。末行 `E2E-RESULT=P
 
 ```powershell
 wfprobe rules --iterations 3
+wfprobe udp-rules --ping-host <测试目标地址>   # U1–U13；--only/--connected-window-ms 见 usage
 wfprobe selftest --remote <测试目标地址:端口> --iterations 3
 wfprobe selftest --dual --remote <测试目标地址:端口> --iterations 3
 wfprobe gates

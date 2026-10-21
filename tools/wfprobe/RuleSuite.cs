@@ -671,9 +671,11 @@ internal static class RuleSuite
         device.SetConfig(config);
         await Task.Delay(settleMs);
 
-        // 池标签：每次重定向分配一块 36 字节 context，所有权交给 WFP 后由 WFP 释放。
+        // 池标签：每次 TCP 重定向分配一块 36 字节 context，所有权交给 WFP 后由 WFP 释放。
         // 条目在第一次分配时创建，本次启动内计数归零后仍可读；刚开机/刚装驱动时基线为 null
         // 只表示「还没有任何分配」，按零参与差值。窗口结束时仍然读不到才是真的异常。
+        // outstanding 只能和运行前基线比：connected UDP 的 redirect context 由 WFP 持有且本 boot
+        // 不回收（udp-rules U12 实测 300s 仍 outstanding），这里不能假设全局归零。
         PoolTagUsage? poolAfter = PoolTags.Find(Protocol.PoolTag);
         Check.True(poolAfter is not null || redirectedConnections == 0,
                    "池标签在测量窗口内可读", poolAfter is null ? "PoolTags.Find 返回 null" : "ok");
@@ -683,7 +685,8 @@ internal static class RuleSuite
                     "context 池分配次数等于重定向次数");
         Check.Equal(redirectedConnections, (long)(afterPool.NonPagedFrees - beforePool.NonPagedFrees),
                     "context 池释放次数等于重定向次数（WFP 释放）");
-        Check.Equal(0, (long)afterPool.NonPagedOutstanding, "没有未释放的 context");
+        Check.Equal(beforePool.NonPagedOutstanding, afterPool.NonPagedOutstanding,
+                    "context 池 outstanding 回到运行前基线");
 
         ProbeStats final = device.GetStats();
         Check.Equal(0, (long)final.ProcessPathMetadataSeen, "redirect 层没有 PROCESS_PATH metadata（实测）");
