@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/10-21-host-udp-abi/prd.md","reason":"逐条核对"}
+{"file":".trellis/tasks/10-21-host-udp-abi/design.md","reason":"核对 ABI 布局与清理"}
+{"file":".trellis/tasks/10-21-host-udp-production/design.md","reason":"父任务约束"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"门禁"}
+{"file":".trellis/spec/backend/cpp-conventions.md","reason":"C++ 规范"}
+{"file":".trellis/spec/backend/csharp-conventions.md","reason":"C# 规范"}

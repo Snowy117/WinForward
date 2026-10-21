@@ -96,7 +96,8 @@
   - 删除 `udp_probe_candidate` 与实验分支。
   - 协议早退改为“非 TCP 且非 UDP”。
   - UDP 走现有四道闸与 matcher；`permit` / `block` / `redirect` 三个动作复用。
-  - `redirect_classification` 接受协议参数，context 写 `udp`。
+  - `redirect_classification` 接受协议参数，`destination.protocol` 从 B2a 的硬编码 TCP
+    改为按 `facts.protocol` 映射（B2a 检查指出 `probe_classify.cpp:314`）。
   - 每个最终 permit 路径增加 UDP 计数（集中 helper）；block 路径增加 `udp_blocked`；
     redirect 成功增加 `udp_redirected`；进入 classify 且协议 UDP 增加 `udp_classify_calls`。
   - `log_decision` 写 `event.protocol`。
@@ -114,6 +115,8 @@
   - 协议条件按规则协议生成：6 / 17；`any` 不写协议条件。
   - 更新注释：该层仲裁 TCP 与 UDP；`any` 等价于两者都拦；不加协议条件不是放宽。
   - `rule_applies_to_layer` 与 `max_block_filters` 不变。
+- [ ] 删除 `rule_table.cpp` 的 `udp-block-temporary-guard`（B1 临安闸），补一条
+      “UDP block 规则可加载”的 VM 用例；`protocol=any` block 同时验证 TCP/UDP 都被拦。
 - [ ] `tools/wfprobe/BlobBuilder.cs` / `TestRule`：增加协议参数与 UDP 规则 helper。
 - [ ] VM 手动验证：UDP block（send 成功、对端收不到、未 block 端口可达）、`any` block、
       TCP block 对照（仍应是 AccessDenied 一类错误）。
@@ -145,6 +148,8 @@
 - [ ] `tools/windows/gate.ps1`：在 `rules` 之后加 `udp-rules` 步骤；失败即 gate 失败。
 - [ ] 若采用“卸载后 outstanding=0”的断言，在 gate 的卸载路径里读取 `wfprobe pooltag --tag WfPr`
       并纳入断言；注意断言必须发生在结果汇总之前，不能在 `finally` 里做无效断言。
+- [ ] 可观测性：`wfprobe Program.PrintEvent` 输出 `protocol`；`PrintStats` 与
+      `WinForward.Controller/StateCommand` 输出 4 个 UDP 计数器；U1/U6 依赖这些输出做断言。
 - [ ] VM 上跑 `gate.ps1`，至少一次完整 PASS；记录命令与输出。
 
 ## 8. 文档与规范
