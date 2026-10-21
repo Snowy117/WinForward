@@ -67,3 +67,48 @@
 ### Next Steps
 
 - 处理 10-21-quality-followups：R1 池标签断言与驱动清理存在竞态；R2 CodeQL 基线 14 条逐条评审。
+
+
+## Session 3: 质量收尾：池标签断言与 CodeQL 基线清零
+<!-- trellis-session: v=2 fp=6355d0cbc96c52f6 -->
+
+**Date**: 2026-10-21
+**Task**: 质量收尾：池标签断言与 CodeQL 基线清零
+**Branch**: `main`
+
+### Summary
+
+父任务 10-21-quality-gates-modernization 留下的两件事都收掉了。池标签断言的根因不是禁用时清理的时序竞态：WfPr 条目在第一次分配时才创建、本次启动内归零后仍保留（实测驱动卸载后仍 39/39/0），失败只发生在「本次启动还没分配过该标签」的第一轮。RuleSuite 现在把 null 基线按零参与差值，分配/释放/outstanding 三条断言保留，窗口结束仍读不到才显式报错。CodeQL 基线 14 条全部按「修」处置：弃用 API 换 ExAllocatePool2（最低系统版本抬到 Win10 2004）、DriverEntry 补 DRIVER_INITIALIZE 角色类型声明、measure IOCTL 改为局部结构生成再整体拷回；重建数据库后 14 → 0。重启 VM 后 gate.ps1 连续 5 次 PASS（每轮 249 条断言），宿主 check.sh --full 8 项全过。
+
+### Main Changes
+
+- R1：PoolTags.Zero 零基线 + RuleSuite 差值断言；首次运行不再偶发 FAIL，rules 套件断言 3 条变 4 条
+- R2：ExAllocatePoolWithTag → ExAllocatePool2(POOL_FLAG_NON_PAGED) ×2；驱动 README 写明最低 Windows 10 2004
+- R2：补 extern "C" DRIVER_INITIALIZE DriverEntry 声明（定义处 SAL 对齐，避免 C28252），illegal-field-access-2 ×4 消失
+- R2：ioctl_measure_process_path 改局部 process_path_measurement 再整体拷回，unprobeddereference ×7 + usermodememoryoutsidetry ×1 消失
+- 规范：cpp-conventions §5.5（WDK 池分配 / 角色类型 / IOCTL 输出）与 §9.6（池标签语义）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3e162a7` | fix(wfprobe): 池标签断言按零基线处理本次启动首次运行 |
+| `50ea622` | fix(driver): 逐条清零 CodeQL 基线 14 条 |
+| `b25c6fe` | docs(spec): 补充 WDK 池分配、DriverEntry 角色类型与池标签语义 |
+| `af7fe77` | chore(task): 记录质量收尾遗留项的验证结果 |
+| `8e4e70b` | chore(task): 任务标题覆盖 R1 与 R2 |
+
+### Testing
+
+- [OK] 重启 VM（WfPr 条目不存在）后 gate.ps1 -Remote 1.2.3.4:19003 连续 5 次 GATE-RESULT=PASS，249 条断言/轮全过
+- [OK] codeql.ps1 重建数据库：FINDINGS results=14 → PASS（0 条），抽取自检 successes=1 / failures=0
+- [OK] tools/check.sh --full：8 PASS / 0 FAIL；提交前 tools/check.sh --staged 通过
+- [OK] 5 轮门禁后池标签无泄漏：WfPr 65/65/0、WfTr 920/920/0，驱动已卸载
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 无：父任务的遗留项已清空；后续新批次另立任务
