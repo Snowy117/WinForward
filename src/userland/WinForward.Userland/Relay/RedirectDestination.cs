@@ -10,10 +10,12 @@ namespace WinForward.Userland.Relay;
 public sealed class RedirectDestination
 {
     private readonly byte _family;
+    private readonly byte _protocol;
 
-    private RedirectDestination(byte family, IPEndPoint endPoint, int processId, int ruleIndex)
+    private RedirectDestination(byte family, byte protocol, IPEndPoint endPoint, int processId, int ruleIndex)
     {
         _family = family;
+        _protocol = protocol;
         EndPoint = endPoint;
         ProcessId = processId;
         RuleIndex = ruleIndex;
@@ -25,6 +27,9 @@ public sealed class RedirectDestination
 
     /// <summary>命中的规则序号；未命中（兜底动作）时驱动写的是 0xFFFFFFFF。</summary>
     public int RuleIndex { get; }
+
+    /// <summary>IPPROTO_TCP 或 IPPROTO_UDP，来自 redirect context 的 protocol 字段。</summary>
+    public byte Protocol => _protocol;
 
     public static bool TryParse(ReadOnlySpan<byte> raw, out RedirectDestination? destination, out string error)
     {
@@ -48,9 +53,9 @@ public sealed class RedirectDestination
             return false;
         }
 
-        if (context.Protocol != RedirectContext.ProtocolTcp)
+        if (context.Protocol != RedirectContext.ProtocolTcp && context.Protocol != RedirectContext.ProtocolUdp)
         {
-            error = $"原始目的地协议 {context.Protocol} 不是 TCP";
+            error = $"原始目的地协议 {context.Protocol} 不是 TCP/UDP";
             return false;
         }
 
@@ -85,8 +90,8 @@ public sealed class RedirectDestination
         }
 
         destination = new RedirectDestination(
-            context.Family, new IPEndPoint(new IPAddress(address), context.OriginalPort), (int)context.ProcessId,
-            (int)context.RuleIndex);
+            context.Family, context.Protocol, new IPEndPoint(new IPAddress(address), context.OriginalPort),
+            (int)context.ProcessId, (int)context.RuleIndex);
         error = string.Empty;
         return true;
     }
@@ -94,4 +99,6 @@ public sealed class RedirectDestination
     public override string ToString() => $"{EndPoint.Address}:{EndPoint.Port}";
 
     public string FamilyText => _family == RedirectContext.FamilyIpv6 ? "IPv6" : "IPv4";
+
+    public string ProtocolText => _protocol == RedirectContext.ProtocolUdp ? "UDP" : "TCP";
 }

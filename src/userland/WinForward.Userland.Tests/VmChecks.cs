@@ -88,7 +88,7 @@ internal static class VmChecks
         Assert("probe_config 64 字节被驱动接受", accepted.Length == 0, $"返回 {accepted.Length} 字节");
 
         byte[] stats = device.RawIoctl(ProbeIoctl.GetStatsCode, Array.Empty<byte>(), DeviceLayout.ProbeStatsSize);
-        Assert("probe_stats 输出 232 字节", stats.Length == DeviceLayout.ProbeStatsSize, $"实际 {stats.Length} 字节");
+        Assert("probe_stats 输出 264 字节", stats.Length == DeviceLayout.ProbeStatsSize, $"实际 {stats.Length} 字节");
 
         ExpectError("probe_stats 输出短 8 字节被驱动拒绝", 122,
                     () => device.RawIoctl(ProbeIoctl.GetStatsCode, Array.Empty<byte>(), DeviceLayout.ProbeStatsSize - 8));

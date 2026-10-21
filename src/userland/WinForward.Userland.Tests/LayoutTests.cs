@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using WinForward.Userland.Device;
 using WinForward.Userland.Policy;
 
 namespace WinForward.Userland.Tests;
@@ -15,6 +16,7 @@ internal static class LayoutTests
         TestRunner.Add("layout/网段记录 20 字节", NetworkSize);
         TestRunner.Add("layout/网段逐字段偏移", NetworkOffsets);
         TestRunner.Add("layout/托管尺寸与 Marshal 尺寸一致", ManagedSizes);
+        TestRunner.Add("layout/ABI v3 事件与统计结构", AbiVersionThree);
         TestRunner.Add("layout/头部黄金字节序列", HeaderGoldenBytes);
         TestRunner.Add("layout/blob 头部魔数在内存中是 WRB1", MagicBytes);
         TestRunner.Add("layout/部署目标是主机小端", LittleEndianHost);
@@ -153,5 +155,21 @@ internal static class LayoutTests
     private static void LittleEndianHost()
     {
         Check.True(BitConverter.IsLittleEndian, "blob 是主机字节序的 ABI，部署目标只有 Windows x64 小端");
+    }
+
+    private static void AbiVersionThree()
+    {
+        Check.Equal(3U, ProbeIoctl.AbiVersion, "控制面 ABI 版本");
+        Check.Equal(64, DeviceLayout.ProbeEventSize, "probe_event 尺寸");
+        Check.Equal(264, DeviceLayout.ProbeStatsSize, "probe_stats 尺寸");
+        Check.Equal(58L, (long)Marshal.OffsetOf<ProbeEvent>(nameof(ProbeEvent.Protocol)), "probe_event.protocol 偏移");
+        Check.Equal(59L, (long)Marshal.OffsetOf<ProbeEvent>(nameof(ProbeEvent.Reserved0)), "probe_event.reserved0 偏移");
+        Check.Equal(60L, (long)Marshal.OffsetOf<ProbeEvent>(nameof(ProbeEvent.MatchedRule)), "probe_event.matched_rule 偏移");
+        Check.Equal(224L, (long)Marshal.OffsetOf<ProbeStats>(nameof(ProbeStats.UdpClassifyCalls)), "probe_stats.udp_classify_calls 偏移");
+        Check.Equal(232L, (long)Marshal.OffsetOf<ProbeStats>(nameof(ProbeStats.UdpPermitted)), "probe_stats.udp_permitted 偏移");
+        Check.Equal(240L, (long)Marshal.OffsetOf<ProbeStats>(nameof(ProbeStats.UdpBlocked)), "probe_stats.udp_blocked 偏移");
+        Check.Equal(248L, (long)Marshal.OffsetOf<ProbeStats>(nameof(ProbeStats.UdpRedirected)), "probe_stats.udp_redirected 偏移");
+        Check.Equal(256L, (long)Marshal.OffsetOf<ProbeStats>(nameof(ProbeStats.LastStatus)), "probe_stats.last_status 偏移");
+        Check.Equal(260L, (long)Marshal.OffsetOf<ProbeStats>(nameof(ProbeStats.AbiVersion)), "probe_stats.abi_version 偏移");
     }
 }

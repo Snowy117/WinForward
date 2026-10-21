@@ -145,7 +145,7 @@ try {
     & $controllerExe state --report $stateBeforePath | Out-Null
     Assert "读取驱动基线状态" ($LASTEXITCODE -eq 0) "exit=$LASTEXITCODE"
     $before = Read-Text $stateBeforePath
-    Assert "基线 enabled=0" ($before -match "(?m)^config abi=2 enabled=0 ") $before.Trim()
+    Assert "基线 enabled=0" ($before -match "(?m)^config abi=3 enabled=0 ") $before.Trim()
 
     Assert "跨机 target 可达 ${TargetHost}:${TargetPort}" (Test-PortOpen $TargetHost $TargetPort) "host=$TargetHost port=$TargetPort"
 
@@ -230,7 +230,7 @@ try {
     $stateAfterPath = Join-Path $work "state-after.txt"
     & $controllerExe state --report $stateAfterPath | Out-Null
     $after = Read-Text $stateAfterPath
-    Assert "退出后 enabled=0" ($after -match "(?m)^config abi=2 enabled=0 ") $after.Trim()
+    Assert "退出后 enabled=0" ($after -match "(?m)^config abi=3 enabled=0 ") $after.Trim()
     $redirectedDelta = (StatValue $after "redirected") - (StatValue $before "redirected")
     Assert "A6 两轮客户端各被重定向一次（redirected +2）" ($redirectedDelta -eq 2) "delta=$redirectedDelta"
     $contextDelta = (StatValue $after "contexts_allocated") - (StatValue $before "contexts_allocated")

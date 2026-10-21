@@ -79,32 +79,6 @@ internal sealed class WfpDevice : IDisposable
         return MemoryMarshal.Read<ProbeRuleInfo>(data);
     }
 
-    public unsafe void SetUdpProbeConfig(UdpProbeConfig config)
-    {
-        ReadOnlySpan<byte> bytes = new(&config, sizeof(UdpProbeConfig));
-        Ioctl(Protocol.SetUdpProbeConfigCode, bytes, 0);
-    }
-
-    public UdpProbeStats GetUdpProbeStats()
-    {
-        byte[] data = Ioctl(Protocol.GetUdpProbeStatsCode, ReadOnlySpan<byte>.Empty, Marshal.SizeOf<UdpProbeStats>());
-        if (data.Length != Marshal.SizeOf<UdpProbeStats>())
-            throw new InvalidOperationException($"GetUdpProbeStats 返回 {data.Length} 字节");
-        return MemoryMarshal.Read<UdpProbeStats>(data);
-    }
-
-    public unsafe void SendUdpReturn(UdpProbeReturnHeader header, byte[] payload)
-    {
-        int headerSize = sizeof(UdpProbeReturnHeader);
-        byte[] buffer = new byte[headerSize + payload.Length];
-        fixed (byte* target = buffer)
-        {
-            *(UdpProbeReturnHeader*)target = header;
-        }
-        payload.CopyTo(buffer, headerSize);
-        Ioctl(Protocol.SetUdpProbeReturnCode, buffer, 0);
-    }
-
     private unsafe byte[] Ioctl(uint code, ReadOnlySpan<byte> input, int outputSize)
     {
         IntPtr inputBuffer = IntPtr.Zero;

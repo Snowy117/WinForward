@@ -14,7 +14,7 @@ namespace WinForward.Userland.Device;
 public static class DeviceLayout
 {
     public const int ProbeConfigSize = 64;
-    public const int ProbeStatsSize = 232;
+    public const int ProbeStatsSize = 264;
     public const int ProbeRuleInfoSize = 32;
     public const int ProbeEventSize = 64;
     public const int ProcessPathMeasurementSize = 520;
@@ -86,8 +86,12 @@ public static class DeviceLayout
         CheckOffset<ProbeStats>(nameof(ProbeStats.FallbackRedirect), 200);
         CheckOffset<ProbeStats>(nameof(ProbeStats.DeferredBlocks), 208);
         CheckOffset<ProbeStats>(nameof(ProbeStats.ProcessPathMetadataSeen), 216);
-        CheckOffset<ProbeStats>(nameof(ProbeStats.LastStatus), 224);
-        CheckOffset<ProbeStats>(nameof(ProbeStats.AbiVersion), 228);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.UdpClassifyCalls), 224);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.UdpPermitted), 232);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.UdpBlocked), 240);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.UdpRedirected), 248);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.LastStatus), 256);
+        CheckOffset<ProbeStats>(nameof(ProbeStats.AbiVersion), 260);
     }
 
     private static void VerifyProbeRuleInfo()
@@ -118,6 +122,8 @@ public static class DeviceLayout
         CheckOffset<ProbeEvent>(nameof(ProbeEvent.Family), 55);
         CheckOffset<ProbeEvent>(nameof(ProbeEvent.Action), 56);
         CheckOffset<ProbeEvent>(nameof(ProbeEvent.Branch), 57);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.Protocol), 58);
+        CheckOffset<ProbeEvent>(nameof(ProbeEvent.Reserved0), 59);
         CheckOffset<ProbeEvent>(nameof(ProbeEvent.MatchedRule), 60);
     }
 

@@ -1,6 +1,6 @@
 #pragma once
 
-// 驱动与测试程序之间的控制面 ABI（v2）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
+// 驱动与测试程序之间的控制面 ABI（v3）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
 // 两侧都有布局断言。任何字段调整都必须同时提升 probe_abi_version。
 //
 // 与 src/common/redirect_context.h 的分工：那个头定义的是“用途数据”（随连接走、用户态用
@@ -13,7 +13,7 @@
 namespace winforward::wfp::probe
 {
 
-inline constexpr std::uint32_t probe_abi_version = 2;
+inline constexpr std::uint32_t probe_abi_version = 3;
 
 // 单块规则 blob 的上限。METHOD_BUFFERED 会替我们复制一份输入，这个上限只用于拒绝明显
 // 异常的下发（正常策略是几百字节到几 KB）。
@@ -136,11 +136,21 @@ struct probe_stats
     std::uint64_t fallback_redirect;
     std::uint64_t deferred_blocks; // redirect 层放行、交给 AUTH_CONNECT block filter 的次数
     std::uint64_t process_path_metadata_seen; // 诊断：redirect 层是否给出 PROCESS_PATH（预期 0）
+    std::uint64_t udp_classify_calls; // UDP 进入 classify 的次数（B2b 接计数点）
+    std::uint64_t udp_permitted; // UDP 最终放行（含 redirect 失败后的 fail-open）
+    std::uint64_t udp_blocked; // UDP block 决策（真正拒绝在 auth filter）
+    std::uint64_t udp_redirected; // UDP 成功挂上 redirect context
     std::uint32_t last_status;
     std::uint32_t abi_version;
 };
 
-static_assert(sizeof(probe_stats) == 232, "probe_stats 是对外 ABI");
+static_assert(sizeof(probe_stats) == 264, "probe_stats 是对外 ABI");
+static_assert(offsetof(probe_stats, udp_classify_calls) == 224);
+static_assert(offsetof(probe_stats, udp_permitted) == 232);
+static_assert(offsetof(probe_stats, udp_blocked) == 240);
+static_assert(offsetof(probe_stats, udp_redirected) == 248);
+static_assert(offsetof(probe_stats, last_status) == 256);
+static_assert(offsetof(probe_stats, abi_version) == 260);
 
 // 规则表回读：A1 的判据（规则数、兜底动作与下发一致），以及 A2 的判据（非法 blob 之后
 // generation / 内容不变）。
@@ -184,74 +194,17 @@ struct probe_event
     std::uint8_t family; // AF_INET / AF_INET6
     std::uint8_t action; // probe_action
     std::uint8_t branch; // redirect_branch
+    std::uint8_t protocol; // IPPROTO_TCP / IPPROTO_UDP
+    std::uint8_t reserved0; // 显式占位，保持 matched_rule 在 60
     std::uint32_t matched_rule; // 未命中 / 未走到匹配时为 0xFFFFFFFF
 };
 
 static_assert(sizeof(probe_event) == 64, "probe_event 是对外 ABI");
 static_assert(offsetof(probe_event, remote_address) == 16);
 static_assert(offsetof(probe_event, remote_port) == 48);
+static_assert(offsetof(probe_event, branch) == 57);
+static_assert(offsetof(probe_event, protocol) == 58);
+static_assert(offsetof(probe_event, reserved0) == 59);
 static_assert(offsetof(probe_event, matched_rule) == 60);
-
-// 实验（Host UDP 路线 A 探针）：临时 ABI，不进 probe_abi_version。
-// 任务 10-21-host-udp-route-a-probe 归档时删除；转正则另立正式 ABI。
-inline constexpr std::uint32_t udp_probe_config_version = 1;
-inline constexpr std::uint32_t udp_probe_table_capacity = 64;
-
-struct udp_probe_config
-{
-    std::uint32_t version;
-    std::uint32_t enabled;
-    std::uint32_t listener_pid;
-    std::uint16_t listener_port;
-    std::uint8_t return_mode; // 0=off 1=observe 2=rewrite_inline 3=rewrite_inject
-    std::uint8_t return_layer; // 0=datagram_data 1=recv_accept
-    std::uint16_t remote_port_filter; // 0=all
-    std::uint8_t redirect_target; // 0=文档分支(ANY->loopback) 1=target_address
-    std::uint8_t reserved0;
-    std::uint8_t target_address[16]; // redirect_target==1 时使用；IPv4 用前 4 字节
-    std::uint32_t reserved1;
-};
-
-static_assert(sizeof(udp_probe_config) == 40, "udp_probe_config 是实验 ABI");
-static_assert(offsetof(udp_probe_config, listener_port) == 12);
-static_assert(offsetof(udp_probe_config, target_address) == 20);
-
-struct udp_probe_stats
-{
-    std::uint64_t seen;
-    std::uint64_t redirected;
-    std::uint64_t redirect_failures;
-    std::uint64_t return_seen;
-    std::uint64_t return_matched;
-    std::uint64_t return_rewritten;
-    std::uint64_t return_failures;
-    std::uint64_t ippacket_seen;
-    std::uint64_t ippacket_matched;
-    std::uint32_t table_entries;
-    std::uint32_t last_status;
-    std::uint32_t abi_version;
-    std::uint32_t reserved;
-};
-
-static_assert(sizeof(udp_probe_stats) == 88, "udp_probe_stats 是实验 ABI");
-
-struct udp_probe_return_header
-{
-    std::uint32_t version;
-    std::uint32_t app_address; // 网络序
-    std::uint32_t original_address; // 网络序
-    std::uint16_t app_port; // 主机序
-    std::uint16_t original_port; // 主机序
-    std::uint16_t payload_length;
-    std::uint16_t family; // 4
-    std::uint32_t interface_index;
-    std::uint32_t compartment_id;
-};
-
-static_assert(sizeof(udp_probe_return_header) == 28, "udp_probe_return_header 是实验 ABI");
-
-inline constexpr std::uint32_t ioctl_udp_probe_set = make_ioctl(0x880);
-inline constexpr std::uint32_t ioctl_udp_probe_get_stats = make_ioctl(0x881);
-inline constexpr std::uint32_t ioctl_udp_probe_return = make_ioctl(0x883);
 
 } // namespace winforward::wfp::probe

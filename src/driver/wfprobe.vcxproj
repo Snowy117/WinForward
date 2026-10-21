@@ -49,10 +49,6 @@
 
     <ClCompile Include="probe_driver.cpp" />
     <ClCompile Include="rule_table.cpp" />
-    <ClCompile Include="udp_probe.cpp" />
-    <ClCompile Include="udp_redirect.cpp" />
-    <ClCompile Include="udp_ippacket.cpp" />
-    <ClCompile Include="udp_inject.cpp" />
 
   </ItemGroup>
   <ItemGroup>

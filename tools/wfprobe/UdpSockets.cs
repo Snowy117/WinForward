@@ -8,7 +8,6 @@ namespace WinForward.Probe;
 internal static class UdpSockets
 {
     public const int IpWfpRedirectContext = 70;
-    public const int IpWfpRedirectRecords = 60;
 
     private const uint SioGetExtensionFunctionPointer = 0xC8000006;
     private const int SockaddrStorageSize = 128;
@@ -66,10 +65,9 @@ internal static class UdpSockets
 
                 int controlLength = (int)message.Control.len;
                 byte[]? context = FindControl((IntPtr)controlPointer, controlLength, IpWfpRedirectContext);
-                byte[]? records = FindControl((IntPtr)controlPointer, controlLength, IpWfpRedirectRecords);
                 byte[] data = new byte[received];
                 Array.Copy(payload, data, received);
-                return new ReceivedDatagram(data, ParseEndpoint((IntPtr)namePointer), context, records);
+                return new ReceivedDatagram(data, ParseEndpoint((IntPtr)namePointer), context);
             }
         }
     }
@@ -162,4 +160,4 @@ internal static class UdpSockets
                                        IntPtr completionRoutine);
 }
 
-internal sealed record ReceivedDatagram(byte[] Payload, IPEndPoint Source, byte[]? RedirectContext, byte[]? RedirectRecords);
+internal sealed record ReceivedDatagram(byte[] Payload, IPEndPoint Source, byte[]? RedirectContext);

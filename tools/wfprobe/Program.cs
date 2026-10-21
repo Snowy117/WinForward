@@ -59,16 +59,12 @@ internal static class Program
                     return await RuleSuite.RunAsync(options);
                 case "gates":
                     return await GateSuite.RunAsync(options);
-                case "udp-probe":
-                    return UdpProbeCommands.Configure(options);
-                case "udp-probe-stats":
-                    return UdpProbeCommands.PrintStats();
                 case "udp-listen":
-                    return UdpProbeCommands.Listen(options);
+                    return UdpCommands.Listen(options);
                 case "udp-client":
-                    return UdpProbeCommands.Client(options);
+                    return UdpCommands.Client(options);
                 case "udp-relay":
-                    return UdpProbeCommands.Relay(options);
+                    return UdpCommands.Relay(options);
                 default:
                     PrintUsage();
                     return 1;
@@ -96,13 +92,10 @@ internal static class Program
   wfprobe selftest --remote HOST:PORT [--bind A.B.C.D] [--dual] [--iterations K] [--settle-ms N]
   wfprobe rules [--iterations K]
   wfprobe gates
-  wfprobe udp-probe [--enable 0|1] [--port N] [--pid PID] [--return-mode off|observe|rewrite-inline|rewrite-inject]
-                    [--layer datagram|recv] [--filter-port N] [--target A.B.C.D]
-  wfprobe udp-probe-stats
   wfprobe udp-listen --bind A.B.C.D --port N [--count K] [--timeout-ms M]
   wfprobe udp-client --remote HOST:PORT [--mode connected|unconnected] [--payload TEXT]
                      [--count K] [--timeout-ms M]
-  wfprobe udp-relay --bind A.B.C.D --port N [--count K] [--linger-ms M] [--inject] [--interface N]
+  wfprobe udp-relay --bind A.B.C.D --port N [--count K] [--linger-ms M]
 ");
     }
 

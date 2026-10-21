@@ -170,7 +170,6 @@ void unregister_callout_layer(layer_state& layer, const GUID& callout_key) noexc
 void stop_wfp() noexcept
 {
     probe_state& state = g_probe_state;
-    udp_probe_stop();
 
     probe_delete_block_filters(state.block_filter_ids, state.block_filter_count);
     unregister_callout_layer(state.v6, callout_key_v6);
@@ -328,7 +327,6 @@ NTSTATUS start_wfp() noexcept
         return status;
     }
 
-    udp_probe_start(state.engine_handle);
     return STATUS_SUCCESS;
 }
 

@@ -87,3 +87,25 @@ TEST(redirect_context, rejects_an_unknown_address_family)
     wfp::original_destination recovered{};
     EXPECT_FALSE(wfp::try_read_original_destination(context, recovered));
 }
+
+TEST(redirect_context, round_trips_a_udp_destination)
+{
+    wfp::original_destination destination = make_ipv4_destination();
+    destination.protocol = wfp::transport_protocol::udp;
+
+    wfp::original_destination recovered{};
+    ASSERT_TRUE(wfp::try_read_original_destination(wfp::make_redirect_context(destination, 7, 2), recovered));
+
+    EXPECT_EQ(recovered.protocol, wfp::transport_protocol::udp);
+    EXPECT_EQ(recovered.port, 443);
+    EXPECT_EQ(recovered.address[0], 203);
+}
+
+TEST(redirect_context, rejects_an_unknown_transport_protocol)
+{
+    auto context = wfp::make_redirect_context(make_ipv4_destination(), 1, 0);
+    context.protocol = static_cast<wfp::transport_protocol>(18);
+
+    wfp::original_destination recovered{};
+    EXPECT_FALSE(wfp::try_read_original_destination(context, recovered));
+}

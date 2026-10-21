@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using WinForward.Userland.Device;
+using WinForward.Userland.Relay;
 
 namespace WinForward.Userland.Tests;
 
@@ -15,6 +16,8 @@ internal static class DeviceAbiTests
         TestRunner.Add("device/事件结构可往返字节", EventRoundTrip);
         TestRunner.Add("device/统计结构可往返字节", StatsRoundTrip);
         TestRunner.Add("device/重定向上下文可往返字节", RedirectContextRoundTrip);
+        TestRunner.Add("device/重定向目的地解析 TCP 与 UDP 上下文", RedirectDestinationProtocols);
+        TestRunner.Add("device/中继拒绝非 TCP redirect context", RelayRefusalGate);
     }
 
     private static void LayoutVerify() => DeviceLayout.Verify();
@@ -25,7 +28,7 @@ internal static class DeviceAbiTests
         byte[] bytes = new byte[DeviceLayout.ProbeConfigSize];
         MemoryMarshal.Write(bytes, in config);
 
-        Check.Equal(2U, BitConverter.ToUInt32(bytes, 0), "abi_version 在偏移 0");
+        Check.Equal(ProbeIoctl.AbiVersion, BitConverter.ToUInt32(bytes, 0), "abi_version 在偏移 0");
         Check.Equal(1U, BitConverter.ToUInt32(bytes, 4), "enabled 在偏移 4");
         Check.Equal(4242U, BitConverter.ToUInt32(bytes, 8), "listener_process_id 在偏移 8");
         Check.Equal((ushort)51000, BitConverter.ToUInt16(bytes, 12), "listener_port 在偏移 12");
@@ -78,6 +81,8 @@ internal static class DeviceAbiTests
         source.Family = 4;
         source.Action = (byte)ProbeAction.Redirect;
         source.Branch = (byte)RedirectBranch.LocalAddress;
+        source.Protocol = RedirectContext.ProtocolTcp;
+        source.Reserved0 = 0;
         source.MatchedRule = 3;
 
         byte[] bytes = new byte[DeviceLayout.ProbeEventSize];
@@ -90,6 +95,8 @@ internal static class DeviceAbiTests
         Check.Equal((ushort)443, restored.RemotePort, "remote_port");
         Check.Equal((byte)ProbeDecision.Redirected, restored.Decision, "decision");
         Check.Equal((byte)RedirectBranch.LocalAddress, restored.Branch, "branch");
+        Check.Equal((byte)RedirectContext.ProtocolTcp, restored.Protocol, "protocol");
+        Check.Equal((byte)0, restored.Reserved0, "reserved0");
         Check.Equal(3U, restored.MatchedRule, "matched_rule");
     }
 
@@ -98,6 +105,10 @@ internal static class DeviceAbiTests
         ProbeStats stats = default;
         stats.Redirected = ulong.MaxValue;
         stats.PermittedSelfProcess = 42;
+        stats.UdpClassifyCalls = 11;
+        stats.UdpPermitted = 12;
+        stats.UdpBlocked = 13;
+        stats.UdpRedirected = 14;
         stats.LastStatus = 0xC000000D;
         stats.AbiVersion = ProbeIoctl.AbiVersion;
 
@@ -107,6 +118,10 @@ internal static class DeviceAbiTests
 
         Check.Equal(ulong.MaxValue, restored.Redirected, "redirected");
         Check.Equal(42UL, restored.PermittedSelfProcess, "permitted_self_process");
+        Check.Equal(11UL, restored.UdpClassifyCalls, "udp_classify_calls");
+        Check.Equal(12UL, restored.UdpPermitted, "udp_permitted");
+        Check.Equal(13UL, restored.UdpBlocked, "udp_blocked");
+        Check.Equal(14UL, restored.UdpRedirected, "udp_redirected");
         Check.Equal(0xC000000DU, restored.LastStatus, "last_status");
         Check.Equal(ProbeIoctl.AbiVersion, restored.AbiVersion, "abi_version");
     }
@@ -135,5 +150,68 @@ internal static class DeviceAbiTests
         Check.Equal(RedirectContext.FamilyIpv6, restored.Family, "family");
         Check.Equal(0x20, (int)restored.OriginalAddress[0], "original_address[0]");
         Check.Equal(0x01, (int)restored.OriginalAddress[15], "original_address[15]");
+    }
+
+    private static void RedirectDestinationProtocols()
+    {
+        RedirectContext context = default;
+        context.Magic = RedirectContext.MagicValue;
+        context.Version = RedirectContext.VersionValue;
+        context.RuleIndex = 5;
+        context.ProcessId = 1234;
+        context.OriginalPort = 443;
+        context.Family = RedirectContext.FamilyIpv4;
+        context.OriginalAddress[0] = 203;
+        context.OriginalAddress[3] = 7;
+
+        byte[] bytes = new byte[DeviceLayout.RedirectContextSize];
+
+        context.Protocol = RedirectContext.ProtocolTcp;
+        MemoryMarshal.Write(bytes, in context);
+        Check.True(RedirectDestination.TryParse(bytes, out RedirectDestination? tcp, out string tcpError),
+                   $"TCP context 可解析：{tcpError}");
+        Check.Equal((byte)RedirectContext.ProtocolTcp, tcp!.Protocol, "TCP protocol");
+        Check.Equal("TCP", tcp.ProtocolText, "TCP 协议文本");
+        Check.Equal(443, tcp.EndPoint.Port, "TCP 原始端口");
+
+        context.Protocol = RedirectContext.ProtocolUdp;
+        MemoryMarshal.Write(bytes, in context);
+        Check.True(RedirectDestination.TryParse(bytes, out RedirectDestination? udp, out string udpError),
+                   $"UDP context 可解析：{udpError}");
+        Check.Equal((byte)RedirectContext.ProtocolUdp, udp!.Protocol, "UDP protocol");
+        Check.Equal("UDP", udp.ProtocolText, "UDP 协议文本");
+
+        context.Protocol = 18;
+        MemoryMarshal.Write(bytes, in context);
+        Check.True(!RedirectDestination.TryParse(bytes, out _, out string unknownError), "未知协议被拒绝");
+        Check.True(unknownError.Contains("TCP/UDP", StringComparison.Ordinal), $"拒绝原因提到 TCP/UDP：{unknownError}");
+    }
+
+    private static void RelayRefusalGate()
+    {
+        RedirectContext context = default;
+        context.Magic = RedirectContext.MagicValue;
+        context.Version = RedirectContext.VersionValue;
+        context.OriginalPort = 443;
+        context.Family = RedirectContext.FamilyIpv4;
+        context.OriginalAddress[0] = 127;
+        context.OriginalAddress[3] = 1;
+
+        byte[] bytes = new byte[DeviceLayout.RedirectContextSize];
+
+        context.Protocol = RedirectContext.ProtocolTcp;
+        MemoryMarshal.Write(bytes, in context);
+        Check.True(RedirectDestination.TryParse(bytes, out RedirectDestination? tcp, out string tcpError),
+                   $"TCP context 可解析：{tcpError}");
+        Check.True(RelayServer.RelayRefusalReason(tcp!) is null, "TCP redirect context 不拒绝");
+
+        context.Protocol = RedirectContext.ProtocolUdp;
+        MemoryMarshal.Write(bytes, in context);
+        Check.True(RedirectDestination.TryParse(bytes, out RedirectDestination? udp, out string udpError),
+                   $"UDP context 可解析：{udpError}");
+        Check.Equal("non-tcp-redirect-context", RelayServer.RelayRefusalReason(udp!),
+                    "UDP redirect context 的拒绝原因");
+        // 语义钉住：把 RelayRefusalReason 的 UDP 分支改成返回 null，上面这条断言会变红；
+        // 它测的是拒绝决策本身，而不是 RedirectDestination 的解析结果。
     }
 }

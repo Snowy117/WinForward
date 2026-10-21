@@ -105,7 +105,7 @@ try {
     & $controllerExe state --report $stateBeforePath | Out-Null
     Assert "读取驱动基线状态" ($LASTEXITCODE -eq 0) "exit=$LASTEXITCODE"
     $before = Read-Text $stateBeforePath
-    Assert "基线 enabled=0" ($before -match "(?m)^config abi=2 enabled=0 ") $before.Trim()
+    Assert "基线 enabled=0" ($before -match "(?m)^config abi=3 enabled=0 ") $before.Trim()
 
     # ---- 真实目标：独立进程的回显服务 ----
     $echoReport = Join-Path $work "echo.txt"
@@ -192,8 +192,8 @@ try {
     $stateAfter1Path = Join-Path $work "state-after1.txt"
     & $controllerExe state --report $stateAfter1Path | Out-Null
     $after1 = Read-Text $stateAfter1Path
-    Assert "退出后驱动仍加载且规则表仍在" ($after1 -match "rule abi=2 installed=1 .*count=1 fallback=0") $after1.Trim()
-    Assert "退出后 enabled=0" ($after1 -match "(?m)^config abi=2 enabled=0 ") $after1.Trim()
+    Assert "退出后驱动仍加载且规则表仍在" ($after1 -match "rule abi=3 installed=1 .*count=1 fallback=0") $after1.Trim()
+    Assert "退出后 enabled=0" ($after1 -match "(?m)^config abi=3 enabled=0 ") $after1.Trim()
     Assert "A5 redirected 精确 +2" ((StatValue $after1 "redirected") - (StatValue $before "redirected") -eq 2) "delta=$((StatValue $after1 'redirected') - (StatValue $before 'redirected'))"
     Assert "A5 contexts_allocated 精确 +2" ((StatValue $after1 "contexts_allocated") - (StatValue $before "contexts_allocated") -eq 2) "delta=$((StatValue $after1 'contexts_allocated') - (StatValue $before 'contexts_allocated'))"
     # 两条出站连接都带 redirect records，第一轮走驱动闸 2；第二轮用 --no-redirect-records 走闸 4。
@@ -228,7 +228,7 @@ try {
     $stateAfter2Path = Join-Path $work "state-after2.txt"
     & $controllerExe state --report $stateAfter2Path | Out-Null
     $after2 = Read-Text $stateAfter2Path
-    Assert "重启后 enabled 又回到 0" ($after2 -match "(?m)^config abi=2 enabled=0 ") $after2.Trim()
+    Assert "重启后 enabled 又回到 0" ($after2 -match "(?m)^config abi=3 enabled=0 ") $after2.Trim()
     Assert "规则表替换累计 +2" ((StatValue $after2 "rules_replaced") - (StatValue $before "rules_replaced") -eq 2) "delta=$((StatValue $after2 'rules_replaced') - (StatValue $before 'rules_replaced'))"
     $selfProcessSecond = (StatValue $after2 "permitted_self_process") - (StatValue $after1 "permitted_self_process")
     $redirectStateSecond = (StatValue $after2 "permitted_redirect_state") - (StatValue $after1 "permitted_redirect_state")

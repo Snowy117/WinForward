@@ -2,10 +2,10 @@ using System.Runtime.InteropServices;
 
 namespace WinForward.Probe;
 
-// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v2）。
+// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v3）。
 internal static class Protocol
 {
-    public const uint AbiVersion = 2;
+    public const uint AbiVersion = 3;
 
     // CTL_CODE(FILE_DEVICE_UNKNOWN, function, METHOD_BUFFERED, FILE_ANY_ACCESS)
     private static uint MakeIoctl(uint function) => (0x22u << 16) | (function << 2);
@@ -27,15 +27,6 @@ internal static class Protocol
     public static uint SetRuleBlobCode => MakeIoctl(IoctlSetRuleBlob);
     public static uint GetRuleInfoCode => MakeIoctl(IoctlGetRuleInfo);
     public static uint MeasureProcessPathCode => MakeIoctl(IoctlMeasureProcessPath);
-    // 实验（Host UDP 路线 A 探针）：临时 ABI，不进 AbiVersion。
-    public const uint UdpProbeConfigVersion = 1;
-    public const uint IoctlUdpProbeSet = 0x880;
-    public const uint IoctlUdpProbeGetStats = 0x881;
-    public static uint SetUdpProbeConfigCode => MakeIoctl(IoctlUdpProbeSet);
-    public static uint GetUdpProbeStatsCode => MakeIoctl(IoctlUdpProbeGetStats);
-    public const uint IoctlUdpProbeReturn = 0x883;
-    public static uint SetUdpProbeReturnCode => MakeIoctl(IoctlUdpProbeReturn);
-
 
     public const uint MaxSelfProcessIds = 8;
     public const uint RuleBlobMaxSize = 64 * 1024;
@@ -121,6 +112,10 @@ internal struct ProbeStats
     public ulong FallbackRedirect;
     public ulong DeferredBlocks;
     public ulong ProcessPathMetadataSeen;
+    public ulong UdpClassifyCalls;
+    public ulong UdpPermitted;
+    public ulong UdpBlocked;
+    public ulong UdpRedirected;
     public uint LastStatus;
     public uint AbiVersion;
 }
@@ -153,54 +148,9 @@ internal unsafe struct ProbeEvent
     public byte Family;
     public byte Action;
     public byte Branch;
-    public uint MatchedRule;
-}
-// 实验（Host UDP 路线 A 探针）：与 probe_ioctl.h 的 udp_probe_config 对应。
-[StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal unsafe struct UdpProbeConfig
-{
-    public uint Version;
-    public uint Enabled;
-    public uint ListenerProcessId;
-    public ushort ListenerPort;
-    public byte ReturnMode;
-    public byte ReturnLayer;
-    public ushort RemotePortFilter;
-    public byte RedirectTarget;
+    public byte Protocol;
     public byte Reserved0;
-    public fixed byte TargetAddress[16];
-    public uint Reserved1;
-}
-[StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal struct UdpProbeReturnHeader
-{
-    public uint Version;
-    public uint AppAddress;
-    public uint OriginalAddress;
-    public ushort AppPort;
-    public ushort OriginalPort;
-    public ushort PayloadLength;
-    public ushort Family;
-    public uint InterfaceIndex;
-    public uint CompartmentId;
-}
-
-[StructLayout(LayoutKind.Sequential, Pack = 8)]
-internal struct UdpProbeStats
-{
-    public ulong Seen;
-    public ulong Redirected;
-    public ulong RedirectFailures;
-    public ulong ReturnSeen;
-    public ulong ReturnMatched;
-    public ulong ReturnRewritten;
-    public ulong ReturnFailures;
-    public ulong IppacketSeen;
-    public ulong IppacketMatched;
-    public uint TableEntries;
-    public uint LastStatus;
-    public uint AbiVersion;
-    public uint Reserved;
+    public uint MatchedRule;
 }
 
 // winforward::wfp::redirect_context（src/common/redirect_context.h）的镜像。
@@ -223,13 +173,10 @@ internal static class ProtocolLayout
     public static void Verify()
     {
         Check<ProbeConfig>(64, "ProbeConfig");
-        Check<ProbeStats>(232, "ProbeStats");
+        Check<ProbeStats>(264, "ProbeStats");
         Check<ProbeRuleInfo>(32, "ProbeRuleInfo");
         Check<ProbeEvent>(64, "ProbeEvent");
         Check<RedirectContext>(36, "RedirectContext");
-        Check<UdpProbeConfig>(40, "UdpProbeConfig");
-        Check<UdpProbeStats>(88, "UdpProbeStats");
-        Check<UdpProbeReturnHeader>(28, "UdpProbeReturnHeader");
     }
 
     private static void Check<T>(int expected, string name) where T : unmanaged

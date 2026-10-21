@@ -242,8 +242,11 @@ internal static class AbiConsistencyTests
         Check.Equal(2, families.Length, "address_family 成员数");
         Check.Equal(families[0].Value, (long)RedirectContext.FamilyIpv4, "RedirectContext.FamilyIpv4");
         Check.Equal(families[1].Value, (long)RedirectContext.FamilyIpv6, "RedirectContext.FamilyIpv6");
+        Check.Equal(2, Header.Value.Enums["transport_protocol"].Count, "transport_protocol 成员数");
         Check.Equal(Header.Value.Enums["transport_protocol"][0].Value, (long)RedirectContext.ProtocolTcp,
                     "RedirectContext.ProtocolTcp");
+        Check.Equal(Header.Value.Enums["transport_protocol"][1].Value, (long)RedirectContext.ProtocolUdp,
+                    "RedirectContext.ProtocolUdp");
     }
 
     private static void AssertSameLayout(AbiStruct expected, AbiStruct actual, string what)

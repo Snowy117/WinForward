@@ -102,7 +102,7 @@ struct original_destination
     {
         return false;
     }
-    if (context.protocol != transport_protocol::tcp)
+    if (context.protocol != transport_protocol::tcp && context.protocol != transport_protocol::udp)
     {
         return false;
     }

@@ -22,6 +22,8 @@ public struct ProbeEvent
     public byte Family;
     public byte Action;
     public byte Branch;
+    public byte Protocol;
+    public byte Reserved0;
     public uint MatchedRule;
 
     [InlineArray(16)]

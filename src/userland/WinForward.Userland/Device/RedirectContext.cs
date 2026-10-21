@@ -15,6 +15,7 @@ public struct RedirectContext
     public const byte FamilyIpv4 = 4;
     public const byte FamilyIpv6 = 6;
     public const byte ProtocolTcp = 6;
+    public const byte ProtocolUdp = 17;
     public const int AddressSize = 16;
 
     public uint Magic;

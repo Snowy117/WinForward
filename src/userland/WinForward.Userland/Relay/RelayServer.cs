@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using WinForward.Userland.Configuration;
+using WinForward.Userland.Device;
 
 namespace WinForward.Userland.Relay;
 
@@ -71,6 +72,9 @@ public sealed class RelayServer : IAsyncDisposable
     public long BytesClientToServer => Interlocked.Read(ref _bytesClientToServer);
 
     public long BytesServerToClient => Interlocked.Read(ref _bytesServerToClient);
+
+    internal static string? RelayRefusalReason(RedirectDestination destination) =>
+        destination.Protocol == RedirectContext.ProtocolTcp ? null : "non-tcp-redirect-context";
 
     public async ValueTask DisposeAsync()
     {
@@ -146,10 +150,18 @@ public sealed class RelayServer : IAsyncDisposable
                 Report($"relay refused #{id} client={clientText} reason=bad-redirect-context detail={parseError}");
                 return;
             }
+            string? refusal = RelayRefusalReason(destination);
+            if (refusal is not null)
+            {
+                Interlocked.Increment(ref _refused);
+                Report($"relay refused #{id} client={clientText} reason={refusal} protocol={destination.ProtocolText}");
+                return;
+            }
 
             byte[] records = _attachRedirectRecords ? SocketIoctl.TryQueryRedirectRecords(client) : Array.Empty<byte>();
             Report($"relay accept #{id} original={destination} family={destination.FamilyText} " +
-                   $"pid={destination.ProcessId} rule={destination.RuleIndex} client={clientText} records={records.Length}");
+                   $"protocol={destination.ProtocolText} pid={destination.ProcessId} " +
+                   $"rule={destination.RuleIndex} client={clientText} records={records.Length}");
 
             try
             {

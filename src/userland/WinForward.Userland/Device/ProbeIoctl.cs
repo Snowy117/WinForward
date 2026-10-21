@@ -14,7 +14,7 @@ namespace WinForward.Userland.Device;
 public static class ProbeIoctl
 {
     /// <summary>ABI 版本。任何字段调整都必须同时提升它。</summary>
-    public const uint AbiVersion = 2;
+    public const uint AbiVersion = 3;
 
     /// <summary>self-PID 集合容量（防循环闸 4）。</summary>
     public const uint MaxSelfProcessIds = 8;
