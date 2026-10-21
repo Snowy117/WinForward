@@ -60,8 +60,15 @@ NTSTATUS create_device(PDRIVER_OBJECT driver_object) noexcept
         return status;
     }
 
+    // C28175：赋值发生在 DriverEntry 调用链上的辅助函数里（create_device），分析器不认为此时处于
+    // 允许访问 DRIVER_OBJECT 成员的上下文（DRIVER_INITIALIZE / DRIVER_UNLOAD）；WDM 允许自填 MajorFunction 表。
+#pragma warning(suppress : 28175)
     driver_object->MajorFunction[IRP_MJ_CREATE] = dispatch_create_close;
+    // C28175：同上，CLOSE 与 CREATE 共用同一例程；赋值位置同样不在分析器认可的上下文里。
+#pragma warning(suppress : 28175)
     driver_object->MajorFunction[IRP_MJ_CLOSE] = dispatch_create_close;
+    // C28175：同上，DEVICE_CONTROL 是本驱动唯一的控制码入口；赋值位置同样不在分析器认可的上下文里。
+#pragma warning(suppress : 28175)
     driver_object->MajorFunction[IRP_MJ_DEVICE_CONTROL] = dispatch_device_control;
 
     device->Flags |= DO_BUFFERED_IO;
@@ -328,7 +335,8 @@ probe_state& probe_state_ref() noexcept
     return g_probe_state;
 }
 
-bool probe_lock(KIRQL& old_irql) noexcept
+_IRQL_requires_max_(DISPATCH_LEVEL) _IRQL_saves_global_(OldIrql, old_irql)
+    _IRQL_raises_(DISPATCH_LEVEL) bool probe_lock(KIRQL& old_irql) noexcept
 {
     const bool raised = KeGetCurrentIrql() < DISPATCH_LEVEL;
     if (raised)
@@ -342,7 +350,8 @@ bool probe_lock(KIRQL& old_irql) noexcept
     return raised;
 }
 
-void probe_unlock(bool raised, KIRQL old_irql) noexcept
+_IRQL_requires_(DISPATCH_LEVEL)
+    _IRQL_restores_global_(OldIrql, old_irql) void probe_unlock(bool raised, KIRQL old_irql) noexcept
 {
     if (raised)
     {
@@ -387,13 +396,17 @@ NTSTATUS probe_driver_entry(PDRIVER_OBJECT driver_object) noexcept
         return status;
     }
 
+    // C28175：赋值在 probe_driver_entry 辅助函数里，分析器不认为处于 DRIVER_UNLOAD 的允许上下文；WDM 通过 DriverUnload
+    // 挂卸载回调是文档化写法。
+#pragma warning(suppress : 28175)
     driver_object->DriverUnload = probe_driver_unload;
     return STATUS_SUCCESS;
 }
 
 } // namespace winforward::wfp::probe
 
-extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT driver_object, _In_ PUNICODE_STRING registry_path)
+extern "C" _Function_class_(DRIVER_INITIALIZE) NTSTATUS
+    DriverEntry(_In_ PDRIVER_OBJECT driver_object, _In_ PUNICODE_STRING registry_path)
 {
     UNREFERENCED_PARAMETER(registry_path);
     return winforward::wfp::probe::probe_driver_entry(driver_object);

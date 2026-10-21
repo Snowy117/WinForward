@@ -106,8 +106,15 @@ struct probe_state
 
 // 自旋锁：classify 在 DISPATCH_LEVEL，IOCTL 在 PASSIVE_LEVEL，两边都要能用。
 // 返回值表示是否在调用点抬升了 IRQL（决定释放时用哪个变体）。
-[[nodiscard]] bool probe_lock(KIRQL& old_irql) noexcept;
-void probe_unlock(bool raised, KIRQL old_irql) noexcept;
+// SAL：IRQL < DISPATCH_LEVEL 时用 KeAcquireSpinLock 抬升并写入 old_irql；已在 DISPATCH_LEVEL
+// 时保持不变、不写。两条路径退出时都在 DISPATCH_LEVEL，由 probe_unlock 按 raised 选择恢复方式；
+// _IRQL_saves_global_ 表达的是入口 IRQL 可恢复，不要求保存位置精确。
+_IRQL_requires_max_(DISPATCH_LEVEL) _IRQL_saves_global_(OldIrql, old_irql) _IRQL_raises_(DISPATCH_LEVEL)
+    [[nodiscard]] bool probe_lock(KIRQL& old_irql) noexcept;
+
+// SAL：调用点必在 DISPATCH_LEVEL（probe_lock 之后）；old_irql 在 raised == true 时由 probe_lock 写入。
+_IRQL_requires_(DISPATCH_LEVEL)
+    _IRQL_restores_global_(OldIrql, old_irql) void probe_unlock(bool raised, KIRQL old_irql) noexcept;
 
 // classify 侧接口。
 void probe_take_snapshot(probe_config& config, const rule_table*& rules) noexcept;
@@ -120,8 +127,13 @@ NTSTATUS probe_read_events(void* buffer, std::uint32_t buffer_size, std::uint32_
 void probe_reset_stats() noexcept;
 
 // IOCTL 分派（实现在 probe_control.cpp）：create_device 把它们装进 MajorFunction 表。
-NTSTATUS dispatch_create_close(PDEVICE_OBJECT device_object, PIRP irp) noexcept;
-NTSTATUS dispatch_device_control(PDEVICE_OBJECT device_object, PIRP irp) noexcept;
+// Prefast：C28169 要求写进 MajorFunction 表的函数带 _Dispatch_type_；create/close 共用同一例程。
+_Dispatch_type_(IRP_MJ_CREATE) _Dispatch_type_(IRP_MJ_CLOSE) NTSTATUS
+    dispatch_create_close(PDEVICE_OBJECT device_object, PIRP irp) noexcept;
+
+// Prefast：同上，DEVICE_CONTROL 表项的 dispatch 类型注解。
+_Dispatch_type_(IRP_MJ_DEVICE_CONTROL) NTSTATUS
+    dispatch_device_control(PDEVICE_OBJECT device_object, PIRP irp) noexcept;
 
 // 由 redirect 分支调用：把 remoteAddressAndPort 改成 127.0.0.1/::1 或连接原本的 local 地址。
 void probe_build_redirect_target(const SOCKADDR* remote,

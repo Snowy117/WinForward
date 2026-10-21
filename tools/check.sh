@@ -345,9 +345,25 @@ run_cppcheck_check() {
     fi
 
     # --inline-suppr 让定义处的 // cppcheck-suppress 生效。
+    #
+    # SAL 注解宏由 WDK 头在 MSVC 下定义，cppcheck 不加载 WDK 头，看到的是未知宏；逐条给空定义，
+    # 让它能把驱动翻译单元解析完——否则 unknownMacro 会中断解析，把真正被引用的符号误报成
+    # unusedFunction。这里只声明「宏存在且展开为空」，不关闭 unknownMacro 检查：以后再遇到新的
+    # SAL 注解宏，往这个数组里追加一行。
+    local -a cppcheck_defines=(
+        -D'_IRQL_raises_(irql)='
+        -D'_IRQL_requires_(irql)='
+        -D'_IRQL_requires_max_(irql)='
+        -D'_IRQL_saves_='
+        -D'_IRQL_saves_global_(kind,param)='
+        -D'_IRQL_restores_='
+        -D'_IRQL_restores_global_(kind,param)='
+        -D'_Dispatch_type_(t)='
+        -D'_Function_class_(x)='
+    )
     local output status
     output="$(cppcheck --enable=unusedFunction --std=c++20 --language=c++ --inline-suppr --error-exitcode=1 --quiet \
-        -I src/common -I src/driver "${files[@]}" 2>&1)"
+        -I src/common -I src/driver "${cppcheck_defines[@]}" "${files[@]}" 2>&1)"
     status=$?
 
     if (( status == 0 )); then

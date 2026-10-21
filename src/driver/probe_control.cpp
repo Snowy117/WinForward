@@ -202,7 +202,8 @@ NTSTATUS apply_rule_blob(const void* buffer, ULONG input_length) noexcept
 
 } // namespace
 
-NTSTATUS dispatch_create_close(PDEVICE_OBJECT device_object, PIRP irp) noexcept
+_Dispatch_type_(IRP_MJ_CREATE) _Dispatch_type_(IRP_MJ_CLOSE) NTSTATUS
+    dispatch_create_close(PDEVICE_OBJECT device_object, PIRP irp) noexcept
 {
     UNREFERENCED_PARAMETER(device_object);
     irp->IoStatus.Status = STATUS_SUCCESS;
@@ -211,7 +212,7 @@ NTSTATUS dispatch_create_close(PDEVICE_OBJECT device_object, PIRP irp) noexcept
     return STATUS_SUCCESS;
 }
 
-NTSTATUS dispatch_device_control(PDEVICE_OBJECT device_object, PIRP irp) noexcept
+_Dispatch_type_(IRP_MJ_DEVICE_CONTROL) NTSTATUS dispatch_device_control(PDEVICE_OBJECT device_object, PIRP irp) noexcept
 {
     UNREFERENCED_PARAMETER(device_object);
 
