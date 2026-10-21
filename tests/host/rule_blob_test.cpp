@@ -117,6 +117,28 @@ TEST(rule_blob, opens_a_valid_blob)
     EXPECT_EQ(view.network_pool[0].family, winforward::wfp::rule_family_ipv4);
 }
 
+TEST(rule_blob, opens_a_udp_rule)
+{
+    wfp_test::rule_blob_builder builder;
+    rule entry = make_any_rule();
+    entry.protocol = winforward::wfp::rule_protocol_udp;
+    entry.action = rule_action::block;
+    entry.remote_port_start = 5353;
+    entry.remote_port_end = 5353;
+    builder.add_rule(entry);
+
+    const std::vector<std::uint8_t> blob = builder.build();
+    blob_view view{};
+    ASSERT_TRUE(open_blob(blob, view));
+    ASSERT_EQ(view.rule_count, 1U);
+    EXPECT_EQ(view.rules[0].protocol, winforward::wfp::rule_protocol_udp);
+    EXPECT_EQ(view.rules[0].action, rule_action::block);
+    EXPECT_EQ(view.rules[0].remote_port_start, 5353U);
+    EXPECT_EQ(view.rules[0].remote_port_end, 5353U);
+    EXPECT_EQ(view.rules[0].process_index, winforward::wfp::rule_pool_index_any);
+    EXPECT_EQ(view.rules[0].network_index, winforward::wfp::rule_pool_index_any);
+}
+
 TEST(rule_blob, opens_an_empty_rule_table)
 {
     const wfp_test::rule_blob_builder builder;
@@ -472,7 +494,8 @@ TEST(rule_blob, rejects_unknown_rule_fields)
 
     blob = make_simple_blob();
     entry = read_rule(blob, 0);
-    entry.protocol = 17;
+    // 18 是未知协议；17 从 B1 起是合法 UDP，不能再拿它当负向夹具。
+    entry.protocol = 18;
     write_rule(blob, 0, entry);
     EXPECT_FALSE(open_blob(blob, view));
 

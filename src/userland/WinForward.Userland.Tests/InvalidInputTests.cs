@@ -45,8 +45,8 @@ internal static class InvalidInputTests
 
     private static void UnknownProtocol() =>
         Check.Throws<PolicyCompileException>(
-            () => TestAppId.Compile(new PolicyTable(new[] { new PolicyRule { Protocol = (RuleProtocol)17 } }, RuleAction.Permit)),
-            "协议 17");
+            () => TestAppId.Compile(new PolicyTable(new[] { new PolicyRule { Protocol = (RuleProtocol)18 } }, RuleAction.Permit)),
+            "协议 18");
 
     private static void UnknownFamily() =>
         Check.Throws<PolicyCompileException>(

@@ -144,6 +144,18 @@ internal static class TransportCases
                 (12, RuleAction.Block, 0))),  // 12 ipv4 udp svchost
 
         Differential.Case(
+            "protocol-udp-excludes-tcp",
+            "进程规则限定 UDP：同一进程的 tcp 连接不命中，只有 udp 那条命中",
+            RuleAction.Permit,
+            new[]
+            {
+                Differential.Rule(RuleAction.Block, process: Differential.Svchost, protocol: RuleProtocol.Udp),
+            },
+            Differential.Expectations(
+                RuleAction.Permit,
+                (12, RuleAction.Block, 0))),  // 12 ipv4 udp svchost
+
+        Differential.Case(
             "port-zero-single-not-any",
             "端口 0..0 是「只有 0 号端口」，不是「任意端口」：没有连接命中",
             RuleAction.Permit,

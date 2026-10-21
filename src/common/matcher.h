@@ -39,6 +39,8 @@ static_assert(static_cast<std::uint8_t>(address_family::ipv6) == rule_family_ipv
               "connection_view 与 rule 的地址族编码必须一致");
 static_assert(static_cast<std::uint8_t>(transport_protocol::tcp) == rule_protocol_tcp,
               "connection_view 与 rule 的协议编码必须一致");
+static_assert(static_cast<std::uint8_t>(transport_protocol::udp) == rule_protocol_udp,
+              "connection_view 与 rule 的协议编码必须一致");
 
 namespace detail
 {

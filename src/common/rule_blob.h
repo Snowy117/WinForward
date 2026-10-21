@@ -36,6 +36,9 @@ inline constexpr std::uint16_t rule_port_any_begin = 0;
 inline constexpr std::uint16_t rule_port_any_end = 0xFFFFU;
 inline constexpr std::uint8_t rule_protocol_any = 0;
 inline constexpr std::uint8_t rule_protocol_tcp = 6;
+// 17 是 IPPROTO_UDP 的原始数值。新增协议值属于枚举扩展，规则布局不变，因此
+// rule_blob_version 保持 1；旧驱动遇到 17 会按未知协议整块拒绝（fail-closed），不会静默放行。
+inline constexpr std::uint8_t rule_protocol_udp = 17;
 inline constexpr std::uint8_t rule_family_any = 0;
 inline constexpr std::uint8_t rule_family_ipv4 = 4;
 inline constexpr std::uint8_t rule_family_ipv6 = 6;
@@ -150,7 +153,7 @@ namespace detail
 
 [[nodiscard]] constexpr bool is_known_protocol(std::uint8_t protocol) noexcept
 {
-    return protocol == rule_protocol_any || protocol == rule_protocol_tcp;
+    return protocol == rule_protocol_any || protocol == rule_protocol_tcp || protocol == rule_protocol_udp;
 }
 
 [[nodiscard]] constexpr bool is_known_action(rule_action action) noexcept

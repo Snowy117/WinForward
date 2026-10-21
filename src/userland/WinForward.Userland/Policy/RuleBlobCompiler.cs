@@ -176,9 +176,9 @@ public static class RuleBlobCompiler
 
     private static void ValidateProtocol(RuleProtocol protocol, int ruleIndex)
     {
-        if (protocol is not (RuleProtocol.Any or RuleProtocol.Tcp))
+        if (protocol is not (RuleProtocol.Any or RuleProtocol.Tcp or RuleProtocol.Udp))
         {
-            throw Error(ruleIndex, $"协议 {(byte)protocol} 不是已知取值（0 任意 / 6 TCP）");
+            throw Error(ruleIndex, $"协议 {(byte)protocol} 不是已知取值（0 任意 / 6 TCP / 17 UDP）");
         }
     }
 

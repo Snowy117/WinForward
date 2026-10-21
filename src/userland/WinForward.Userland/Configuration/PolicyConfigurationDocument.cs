@@ -22,7 +22,7 @@ namespace WinForward.Userland.Configuration;
 ///     {
 ///       "name": "可选的诊断名",
 ///       "action": "permit" | "block" | "redirect",
-///       "protocol": "any" | "tcp",
+///       "protocol": "any" | "tcp" | "udp",
 ///       "family": "any" | "ipv4" | "ipv6",
 ///       "remotePorts": "*" | "443" | "8000-8100",
 ///       "remoteNetwork": "10.0.0.0/8",
@@ -186,7 +186,8 @@ public static class PolicyConfigurationDocument
         {
             null or "any" => RuleProtocol.Any,
             "tcp" => RuleProtocol.Tcp,
-            _ => throw new ConfigurationException($"{path} 只能是 any / tcp，实际是「{text}」"),
+            "udp" => RuleProtocol.Udp,
+            _ => throw new ConfigurationException($"{path} 只能是 any / tcp / udp，实际是「{text}」"),
         };
     }
 

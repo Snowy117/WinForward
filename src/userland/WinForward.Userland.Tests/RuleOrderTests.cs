@@ -28,6 +28,8 @@ internal static class RuleOrderTests
         TestRunner.Add("rule-order/IPv6 网段推出地址族", Ipv6FamilyFromNetwork);
         TestRunner.Add("rule-order/报错消息带两条规则的条件摘要", MessageMentionsBothRules);
         TestRunner.Add("rule-order/协议谓词对非 TCP 也生效", ProtocolPredicate);
+        TestRunner.Add("rule-order/TCP 与 UDP 规则不重叠", TcpAndUdpDoNotOverlap);
+        TestRunner.Add("rule-order/协议文案会显示 udp", UdpProtocolIsDescribed);
         TestRunner.Add("rule-order/绕过检查可以产出驱动会拒绝的 blob", UncheckedCompileProducesBlob);
         TestRunner.Add("rule-order/兜底 block 与 permit 规则共存被拒", FallbackBlockWithPermit);
         TestRunner.Add("rule-order/兜底 block 与全部 block 规则被接受", FallbackBlockWithOnlyBlocks);
@@ -194,8 +196,8 @@ internal static class RuleOrderTests
 
     private static void ProtocolPredicate()
     {
-        // v1 的规则只有 Any(0) 与 Tcp(6)，两者永远相容；这里直接用编译后的 blob 条目喂谓词，
-        // 钉住「协议任一侧为任意或相等」的语义，避免以后加协议时这条判定悄悄退化。
+        // 协议判定是数值比较：任一侧为 Any(0) 即相容，具体协议必须相等。这里直接用
+        // 编译后的 blob 条目喂谓词，钉住 UDP(17) 加入后这条判定没有退化。
         RuleBlobRule permitUdp = new()
         {
             Action = (byte)RuleAction.Permit,
@@ -217,6 +219,32 @@ internal static class RuleOrderTests
         Check.True(RuleOrderValidator.ProtocolsOverlap(permitUdp, blockUdp), "同为 UDP 相容");
         permitUdp.Protocol = (byte)RuleProtocol.Any;
         Check.True(RuleOrderValidator.ProtocolsOverlap(permitUdp, blockTcp), "任意协议与 TCP 相容");
+    }
+
+    private static void TcpAndUdpDoNotOverlap() =>
+        ExpectAccepted(new PolicyTable(
+            new[]
+            {
+                Rule(RuleAction.Permit, protocol: RuleProtocol.Tcp, ports: PortRange.Single(80)),
+                Rule(RuleAction.Block, protocol: RuleProtocol.Udp, ports: PortRange.Single(80)),
+            },
+            RuleAction.Permit));
+
+    private static void UdpProtocolIsDescribed()
+    {
+        PolicyTable table = new(
+            new[]
+            {
+                Rule(RuleAction.Permit, ports: PortRange.Single(80)),
+                Rule(RuleAction.Block, protocol: RuleProtocol.Udp, ports: PortRange.Single(80)),
+            },
+            RuleAction.Permit);
+
+        PolicyCompileException? error = Capture(table);
+        Check.True(error is not null, "任意协议 permit 会遮蔽 UDP block 规则");
+        Check.True(
+            error!.Message.Contains(" udp ", StringComparison.Ordinal),
+            "消息里的 block 规则条件要显示 udp");
     }
 
     private static void UncheckedCompileProducesBlob()

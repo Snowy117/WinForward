@@ -13,6 +13,7 @@ internal static class CompilerTests
         TestRunner.Add("compiler/空规则表只产出 40 字节头部", EmptyTable);
         TestRunner.Add("compiler/各段起点 4 字节对齐且不重叠", Segments);
         TestRunner.Add("compiler/规则顺序与字段原样写入", RuleFields);
+        TestRunner.Add("compiler/UDP 协议写成 17", UdpProtocol);
         TestRunner.Add("compiler/进程串小写、去重、NUL 结尾", ProcessPool);
         TestRunner.Add("compiler/进程索引是池内字节偏移", ProcessIndexes);
         TestRunner.Add("compiler/网段主机位清零并去重", NetworkPool);
@@ -112,6 +113,17 @@ internal static class CompilerTests
         Check.Equal(2000, (int)second.RemotePortEnd, "规则 1 端口终点");
         Check.Equal((byte)0, second.Protocol, "规则 1 协议默认任意");
         Check.Equal((byte)1, second.Action, "规则 1 动作");
+    }
+
+    private static void UdpProtocol()
+    {
+        byte[] blob = TestAppId.Compile(new PolicyTable(
+            new[] { new PolicyRule { Protocol = RuleProtocol.Udp, Action = RuleAction.Block } },
+            RuleAction.Permit));
+        RuleBlobRule rule = BlobReader.Rule(blob, 0);
+
+        Check.Equal(17, (int)RuleProtocol.Udp, "UDP 枚举值");
+        Check.Equal((byte)17, rule.Protocol, "UDP 规则协议字节");
     }
 
     private static void ProcessPool()

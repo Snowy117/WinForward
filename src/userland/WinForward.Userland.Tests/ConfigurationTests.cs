@@ -8,6 +8,7 @@ internal static class ConfigurationTests
     internal static void Register()
     {
         TestRunner.Add("config/完整规则逐字段解析", FullRule);
+        TestRunner.Add("config/protocol 接受 udp", UdpProtocol);
         TestRunner.Add("config/省略字段走默认值", Defaults);
         TestRunner.Add("config/端口写法 *、单端口、区间", PortForms);
         TestRunner.Add("config/未知字段带 JSON 路径报错", UnknownField);
@@ -53,6 +54,16 @@ internal static class ConfigurationTests
         Check.Equal((ushort)8100, rule.RemotePorts.End, "端口终点");
         Check.Equal("10.1.0.0/16", rule.RemoteNetwork?.ToString() ?? "null", "网段主机位清零");
         Check.Equal(@"C:\Tools\app.exe", rule.Process?.Path ?? "null", "进程路径");
+    }
+
+    private static void UdpProtocol()
+    {
+        PolicyTable table = PolicyConfigurationDocument.Parse("""
+            { "fallbackAction": "permit", "rules": [ { "action": "block", "protocol": "udp" } ] }
+            """);
+
+        Check.Equal(RuleProtocol.Udp, table.Rules[0].Protocol, "protocol 解析为 udp");
+        Check.Equal((byte)17, (byte)table.Rules[0].Protocol, "UDP 枚举值 17");
     }
 
     private static void Defaults()

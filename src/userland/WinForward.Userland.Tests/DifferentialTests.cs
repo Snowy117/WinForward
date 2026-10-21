@@ -4,12 +4,12 @@ namespace WinForward.Userland.Tests;
 
 internal static class DifferentialTests
 {
-    internal const int ExpectedCaseCount = 32;
+    internal const int ExpectedCaseCount = 33;
     internal const int ExpectedConnectionCount = 15;
 
     internal static void Register()
     {
-        TestRunner.Add("differential/用例表精确覆盖 32 组 × 15 条连接", VerifyCoverage);
+        TestRunner.Add("differential/用例表精确覆盖 33 组 × 15 条连接", VerifyCoverage);
         TestRunner.Add("differential/夹具落盘且与模型自洽", WriteFixtures);
     }
 

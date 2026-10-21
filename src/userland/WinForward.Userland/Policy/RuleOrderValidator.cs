@@ -219,7 +219,13 @@ internal static class RuleOrderValidator
             (byte)RuleAction.Redirect => "redirect",
             _ => $"动作 {rule.Action}",
         };
-        string protocol = rule.Protocol == (byte)RuleProtocol.Tcp ? "tcp" : "任意协议";
+        string protocol = rule.Protocol switch
+        {
+            (byte)RuleProtocol.Tcp => "tcp",
+            (byte)RuleProtocol.Udp => "udp",
+            (byte)RuleProtocol.Any => "任意协议",
+            _ => $"协议 {rule.Protocol}",
+        };
         string family = rule.Family switch
         {
             (byte)RuleAddressFamily.Ipv4 => "IPv4",

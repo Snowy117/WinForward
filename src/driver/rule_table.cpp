@@ -300,6 +300,24 @@ rule_table* allocate_rule_table(const std::uint8_t* data, std::uint32_t size) no
         return nullptr;
     }
 
+    // 临时（B2 删除）：classify 尚未匹配 UDP，block_filters 却会按 protocol=17 下发 auth filter，
+    // 结果是报文被静默丢弃但 classify 没有 blocked/事件记录（spike S3）。B2 转正后删除这段，
+    // 并补一条「UDP block 规则可加载」的 VM 用例。
+    // <mutation id="udp-block-temporary-guard">
+    for (std::uint32_t index = 0; index < table->view.rule_count; ++index)
+    {
+        const rule& selected = table->view.rules[index];
+        if (selected.action == rule_action::block && selected.protocol == rule_protocol_udp)
+        {
+            DbgPrint("wfprobe: rule %u blocks UDP, but classify does not match UDP yet; blob rejected"
+                     " (the B2 change removes this guard)\n",
+                     index);
+            ExFreePoolWithTag(table, rule_pool_tag);
+            return nullptr;
+        }
+    }
+    // </mutation>
+
     table->contains_block = table->view.fallback_action == rule_action::block;
     for (std::uint32_t index = 0; index < table->view.rule_count && !table->contains_block; ++index)
     {

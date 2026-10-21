@@ -475,6 +475,27 @@ TEST(matcher, rejects_a_different_transport_protocol)
                     .matched);
 }
 
+TEST(matcher, matches_only_udp_with_a_udp_rule)
+{
+    const std::string process_path = "app.exe";
+    wfp_test::rule_blob_builder builder;
+    rule entry = make_rule(rule_pool_index_any, rule_pool_index_any);
+    entry.protocol = winforward::wfp::rule_protocol_udp;
+    entry.action = rule_action::block;
+    builder.add_rule(entry);
+    const std::vector<std::uint8_t> blob = builder.build();
+
+    const match_result udp = match_connection(
+        blob, make_connection(process_path, make_ipv4(1, 2, 3, 4), 80, udp_protocol, address_family::ipv4));
+    EXPECT_TRUE(udp.matched);
+    EXPECT_EQ(udp.action, rule_action::block);
+    EXPECT_EQ(udp.rule_index, 0U);
+
+    EXPECT_FALSE(match_connection(
+                     blob, make_connection(process_path, make_ipv4(1, 2, 3, 4), 80, tcp_protocol, address_family::ipv4))
+                     .matched);
+}
+
 TEST(matcher, matches_any_protocol_when_there_is_no_selector)
 {
     const std::string process_path = "app.exe";
