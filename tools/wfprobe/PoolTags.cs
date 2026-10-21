@@ -11,7 +11,12 @@ internal readonly record struct PoolTagUsage(string Tag,
                                              uint NonPagedFrees,
                                              ulong NonPagedUsed)
 {
-    public long NonPagedOutstanding => (long)NonPagedAllocs - NonPagedFrees;
+    public long NonPagedOutstanding => (long)NonPagedAllocs - (long)NonPagedFrees;
+
+    // 系统池标签表只列出「出现过」的条目：条目在第一次分配时创建，本次启动内即使计数归零
+    // 也仍然可读（实测：驱动卸载后 WfPr 仍显示 39/39/0）。因此 Find 返回 null 只说明「本次
+    // 启动还没有任何分配」，等价于计数从 0 起算，不是读取失败。
+    public static PoolTagUsage Zero(string tag) => new(tag, 0, 0, 0, 0, 0, 0);
 }
 
 // SystemPoolTagInformation 的条目布局（x64）：Tag[4]、PagedAllocs、PagedFrees、对齐、PagedUsed、
