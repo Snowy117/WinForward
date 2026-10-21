@@ -36,3 +36,34 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: 质量门禁与工具链现代化（B1–B6）
+<!-- trellis-session: v=2 fp=dfc28958f6ef5bb4 -->
+
+**Date**: 2026-10-21
+**Task**: 质量门禁与工具链现代化（B1–B6）
+**Branch**: `main`
+
+### Summary
+
+建立宿主侧单一门禁入口（格式/有效行/cppcheck/禁止模式/clang-tidy），删除死符号 block_classification；驱动显式 /W4 + /WX 并接入 PREfast；Windows 脚本去机器耦合（tools/windows + WfBuild.psm1，删除 sync.sh，NuGet 改用 nuget.org）；变异锚点改为区域标记并修掉 -OnlyIndex 假绿；禁止模式检查与只动 local 的提交前钩子；CodeQL 深度档接入并加抽取自检。宿主机禁 --full 8 PASS；Windows 门禁 248 条断言、三次跑中两次 PASS，偶发失败已定位为既有池标签断言竞态并另立任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0b34495` | feat(quality): 宿主质量门禁入口与 cppcheck 死符号检查 |
+| `0943c98` | feat(driver): 警告即错误与 PREfast 基线清零 |
+| `89fa2dc` | refactor(tools): Windows 侧脚本去机器耦合 |
+| `765363c` | refactor(mutation): 变异锚点改为区域标记 |
+| `980472f` | feat(quality): 禁止模式检查与提交前钩子 |
+| `e488a8d` | feat(tools): CodeQL 深度档接入 |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 处理 10-21-flaky-pool-tag：RuleSuite 池标签断言与驱动清理存在竞态；随后按需把 CodeQL 基线 14 条逐条评审。
