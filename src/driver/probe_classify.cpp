@@ -213,17 +213,6 @@ void permit_classification(probe_state& state,
     log_decision(facts, rule_index, decision, probe_action::permit, 0, redirect_branch::none);
 }
 
-void block_classification(probe_state& state,
-                          const connection_facts& facts,
-                          std::uint32_t rule_index,
-                          probe_decision decision,
-                          FWPS_CLASSIFY_OUT0* classify_out) noexcept
-{
-    set_block(classify_out);
-    probe_increment(state.stats.blocked);
-    log_decision(facts, rule_index, decision, probe_action::block, 0, redirect_branch::none);
-}
-
 // 依据 FwpsAcquireWritableLayerDataPointer0 的 Remarks：该函数会把 classifyOut->actionType 置为
 // FWP_ACTION_BLOCK、清掉 FWPS_RIGHT_ACTION_WRITE，并且每次调用都必须配对一次
 // FwpsApplyModifiedLayerData0。我们的 filter 是 FWP_ACTION_CALLOUT_TERMINATING，不存在

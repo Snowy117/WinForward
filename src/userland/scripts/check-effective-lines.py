@@ -7,10 +7,12 @@
 只识别行注释（C# 与 C++ 的 //、PowerShell 的 #）。本仓库不使用块注释写文件头，
 真要用的时候请在本脚本里补上 /* */ 的处理，否则块注释会被算成有效行。
 
+注意：`.inl` 目前作为独立文件单独计数，没有聚合到对应主头；规范 §4 的“`.inl` 计入其主头”尚未实现。
+
 用法：
     python3 src/userland/scripts/check-effective-lines.py [路径 ...]
 
-不传路径时检查本批新增的全部源文件。有超限文件时退出码为 1。
+不传路径时扫描 src/ 与 tests/ 下的全部源文件。有超限文件时退出码为 1。
 """
 
 import pathlib
@@ -21,14 +23,15 @@ MAX_EFFECTIVE_LINES = 500
 COMMENT_PREFIXES = {
     ".cs": ("//",),
     ".h": ("//",),
+    ".hpp": ("//",),
     ".cpp": ("//",),
+    ".inl": ("//",),
     ".ps1": ("#",),
 }
 
 DEFAULT_TARGETS = (
-    "src/userland",
-    "tests/host/differential_fixture.h",
-    "tests/host/differential_test.cpp",
+    "src",
+    "tests",
 )
 
 SKIPPED_DIRECTORIES = {"bin", "obj", ".git"}

@@ -1,0 +1,8 @@
+{
+  "vm": {
+    "session": "<本机虚拟机会话名>",
+    "root": "<Windows 上的仓库根目录>"
+  },
+  "remote": "<测试目标地址:端口>",
+  "codeql_home": "<CodeQL CLI 安装目录>"
+}

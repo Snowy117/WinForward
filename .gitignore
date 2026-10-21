@@ -18,3 +18,10 @@ compile_commands.json
 *.exp
 *.lib
 x64/
+
+# 本机配置与专用编排（字段契约见 wf.local.example.json）
+wf.local.json
+local/
+
+# IDE
+.idea/

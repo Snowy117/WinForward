@@ -39,6 +39,8 @@
               llvmPkgs.clang-tools
 
               python3
+              # 死符号检查用 cppcheck 的 unusedFunction，不写自研检查器。
+              cppcheck
               git
               ccache
               # C# 侧（src/userland）的 blob 编译器与差分测试。目标框架固定 net10.0；

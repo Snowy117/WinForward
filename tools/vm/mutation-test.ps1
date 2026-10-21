@@ -94,7 +94,7 @@ $mutations = @(
         File = "probe_classify.cpp"
         Edits = @(@{
             Old = "    probe_increment(result.matched ? state.stats.matched_permit : state.stats.fallback_permit);`n    permit_classification(state,`n                          facts,`n                          rule_index,`n                          result.matched ? probe_decision::permitted_rule : probe_decision::permitted_fallback,`n                          classify_out);"
-            New = "    probe_increment(result.matched ? state.stats.matched_block : state.stats.fallback_block);`n    block_classification(state,`n                         facts,`n                         rule_index,`n                         result.matched ? probe_decision::blocked_rule : probe_decision::blocked_fallback,`n                         classify_out);"
+            New = "    probe_increment(result.matched ? state.stats.matched_block : state.stats.fallback_block);`n    set_block(classify_out);`n    probe_increment(state.stats.blocked);`n    log_decision(facts,`n                 rule_index,`n                 result.matched ? probe_decision::blocked_rule : probe_decision::blocked_fallback,`n                 probe_action::block,`n                 0,`n                 redirect_branch::none);"
         })
         Target = @("rules", "--iterations", "3")
     },

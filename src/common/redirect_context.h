@@ -87,6 +87,9 @@ struct original_destination
     return context;
 }
 
+// 只被宿主机测试（tests/host/redirect_context_test.cpp）使用；测试 TU 含 gtest 宏，
+// cppcheck 解析不了那个翻译单元，所以把抑制写在定义处，而不是维护一张集中白名单。
+// cppcheck-suppress unusedFunction
 [[nodiscard]] constexpr bool try_read_original_destination(const redirect_context& context,
                                                            original_destination& destination) noexcept
 {
