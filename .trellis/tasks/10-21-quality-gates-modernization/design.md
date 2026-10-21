@@ -90,12 +90,16 @@ cppcheck --enable=unusedFunction --std=c++20 --language=c++ \
 
 | 规则 | 模式 | 依据 |
 |---|---|---|
-| `stl` | `std::(vector\|string\|map\|unordered_map\|unordered_set\|deque\|list\|set\|shared_ptr\|function)` | §5.1 |
+| `stl` | `\bstd::(…)` 的容器/字符串/智能指针 blocklist（39 项，完整清单在 `forbidden-rules.txt`） | §5.1 |
 | `exceptions` | `\b(throw\|try\|catch)\b` | §5.1 |
 | `rtti` | `\b(dynamic_cast\|typeid)\b` | §5.1 |
-| `heap` | `\bnew\b` | §5.1（`src/common` 的 placement new 用豁免） |
+| `heap` | 命名组写法：`allowed` 分支吞掉 `#include <new>`、placement new（`new (…)`，但排除 `std::nothrow` / `align_val_t` 这两种真分配）、`operator new/delete` 的声明与定义、`= delete`，只有 `hit` 分支命中才算违规 | §5.1、§5.2 |
 
-豁免与 cppcheck 保持一致：命中行或上一行写 `// WF-LINT-ALLOW(规则ID): 理由`。
+`heap` 的两个模式（`new` / `delete`）在规则文件里各占一行，用 `(?P<allowed>…)|(?P<hit>…)` 命名组区分合法写法与真实违规；新增规则若需要同样的“合法前兆”语义，照此写法。
+
+豁免与 cppcheck 保持一致：命中行或上一行写 `// WF-LINT-ALLOW(规则ID): 理由`；理由为空视为无效豁免并计为发现。
+
+§5.1 共 8 条，其中 4 条可自动检查（在 §8.4 里按规则拆成 5 行）、4 条只能评审（全局/静态对象动态初始化、函数内静态局部变量、`__try` 与析构对象同作用域、DISPATCH_LEVEL 浮点）。对应关系固定在 `cpp-conventions.md` §8.4；规则文件新增条目时必须同步那张表。
 
 ### 4.6 驱动静态分析（Windows 侧）
 
@@ -173,7 +177,7 @@ tools/windows/WfBuild.psm1         # 5
 tools/windows/gate.ps1
 tools/windows/mutation.ps1
 tools/windows/codeql.ps1           # 6
-.githooks/pre-commit               # check.sh --fast --staged
+.githooks/pre-commit               # check.sh --fast --staged（格式/禁止模式看索引，有效行/cppcheck 看工作区，约 2.3 s）
 .githooks/install.sh
 wf.local.example.json              # 2.2 契约
 ```
