@@ -63,14 +63,7 @@ Phase 0 的判据是「480 Mbps THRU 代理路径的进程 CPU 不能降到 110%
 
 # 附加：经真实 sing-box 的复测（与基线同形）
 
-日期：2026-10-21（同一天，初测之后）
-
-初测是直连中继，与基线的「WinForward → sing-box」不同形。这一轮把上游补齐，路径与 2026-10-18 那轮一致：
-
-```
-WinForward.E2E client (VM) → WFP 重定向 → WinForward.Controller (VM) → 127.0.0.1:1080
-  sing-box 1.14.2-singfix (direct outbound) → 192.168.100.4:40000 target (宿主)
-```
+---
 
 ## 上游的来历
 
@@ -118,3 +111,92 @@ Phase 0 的判据是「480 Mbps THRU 代理路径的进程 CPU 不能降到 110%
 2. **单次运行**，与基线同样只有一轮样本。
 3. 目标在宿主机、客户端与控制器在 VM，跨 vNIC——这一点与基线一致。
 4. 上游在 `127.0.0.1:1080`（loopback），与基线一致。
+
+---
+
+# 附加二：内核态 CPU、内存与延迟
+
+日期：2026-10-21
+
+## 1. 内核态 CPU 是否被计入
+
+**是，而且占多数。**
+
+harness 的 `Client/ProcessCounterSource.cs:153` 读的是 `process.TotalProcessorTime`，Windows 上它等于
+`UserProcessorTime + PrivilegedProcessorTime`，即用户态与内核态之和。
+
+为了不靠推断，本轮用独立采样器（250 ms 一次，231 个样本，59.77 s）把两者分开读：
+
+```
+total      26.84 s  (44.9 %)
+  user      6.89 s  (11.5 %)
+  privileged 19.95 s (33.4 %)
+校验 total - (user + privileged) = 0.0000 s
+```
+
+**控制器的 CPU 有 74.3 % 落在内核态**。这是中继的必然结果：一次 `recv`/`send` 的协议栈处理在同一线程上下文里执行，成本记在该进程的 privileged 时间里。
+
+### 但有一个盲区必须说明
+
+`TotalProcessorTime` 只覆盖「本进程线程上下文里」的内核时间。有两类成本不计入：
+
+1. **驱动替别的进程干活**。WFP callout 的 classify 发生在发起 `connect()` 的那个客户端线程上，成本记在**客户端**进程，不是 `WinForward.Controller`。
+2. **DPC / 中断**。网络栈的延迟过程调用记在系统账上，不属于任何进程。
+
+本轮的 THRU 臂只建立 4 条连接、LAT 臂 31 次 connect，逐连接的内核成本在构造上就接近 0，所以这个盲区对吞吐数字没有影响。**若要验证「每连接成本确实被新架构压低了」，需要跑 REL 臂（20 conn/s）并配合全机测量（ETW 或 `\Processor(_Total)`），只看产品进程会漏掉驱动那一份。** 这一项本轮没有做。
+
+## 2. 内存
+
+LAT + THRU 两臂，231 个样本：
+
+| 指标 | p50 | min | max |
+|---|---:|---:|---:|
+| privateBytes | **13.31 MB** | 7.75 MB | 16.35 MB |
+| workingSet | 35.42 MB | — | 37.95 MB |
+| handles | 334 | — | 353 |
+
+## 3. 延迟（LAT 臂，30 s，20 req/s，120 B）
+
+| 指标 | 值 |
+|---|---:|
+| `tcp-rtt` p50 | **4056 µs** |
+| `tcp-rtt` p90 | 9589 µs |
+| `tcp-rtt` p99 | 10973 µs |
+| `tcp-connect` p50 | 2664 µs |
+| 平均建连 | 1.527 ms |
+
+## 4. 与 Proxifier 的对比
+
+Proxifier **没有装在 VM 上**（当初就要求用户通过 RDP 手动安装），因此无法用同一把尺子现场测。只能引用
+`benchmarks/results/2026-10-19-release/README.md` 已发布的、相对参考行 `wf-aot-nativeudp`（旧产品 AOT 构建）的比值。
+由 `Metrics/MetricCatalogue.cs` 的定义反推绝对值：
+
+| 指标 | 旧产品（参考行） | Proxifier（比值 × 参考） | 本轮新架构 |
+|---|---:|---:|---:|
+| `mem.privateBytes.p50` | 37.307 MB | **166.5 MB**（×4.4630） | **13.31 MB** |
+| `lat.tcp_rtt.p50` | 3919 µs | **3641 µs**（×0.929） | **4056 µs** |
+| `cpu.proxy.vcpuPct` | 23.582 % | **61.95 %**（×2.627） | 见下 |
+
+读法：
+
+- **内存我们小一个数量级**。相对 Proxifier 约 1/12.5，相对旧产品约 1/2.8。这是 .NET 托管进程与
+  大型商业代理在常驻集上的差距，不是这一轮的优化成果，但值得记一笔。
+- **延迟我们比 Proxifier 慢 11.4 %**（4056 µs 对 3641 µs），比旧产品慢 3.5 %。这一点如实记下：
+  新架构在延迟上没有优势，WFP 重定向 + 用户态中继多了一次地址改写与一次进程边界穿越。
+- **CPU 不可比**。`cpu.proxy.vcpuPct` 的定义是「整轮负载臂（排除 IDLE）的平均」，覆盖 LAT/LATLOAD/DNS/
+  LOSS/REL/THRU/MIX/PERSIST 全部臂；而本轮 81.3 % 只覆盖 THRU 单臂，44.9 % 只覆盖 LAT+THRU。
+  窗口不同，直接摆在一起会误导。**要真比，得在同一份完整计划上跑，而我们 v1 只承载 TCP，DNS/UDP 臂跑不了。**
+
+## 5. 这一轮遗留的测量缺口
+
+1. 逐连接的内核成本没有单独测量（需要 REL 臂 + 全机计数）。
+2. 与 Proxifier 的 CPU 对比缺同一窗口的数据；Proxifier 未安装，本轮无法补。
+3. 延迟与内存均为单轮。
+日期：2026-10-21（同一天，初测之后）
+
+初测是直连中继，与基线的「WinForward → sing-box」不同形。这一轮把上游补齐，路径与 2026-10-18 那轮一致：
+
+```
+WinForward.E2E client (VM) → WFP 重定向 → WinForward.Controller (VM) → 127.0.0.1:1080
+  sing-box 1.14.2-singfix (direct outbound) → 192.168.100.4:40000 target (宿主)
+```
