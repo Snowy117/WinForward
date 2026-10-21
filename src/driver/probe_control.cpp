@@ -183,6 +183,57 @@ NTSTATUS apply_rule_blob(const void* buffer, ULONG input_length) noexcept
     return STATUS_SUCCESS;
 }
 
+NTSTATUS apply_udp_probe_config(const void* buffer, ULONG input_length) noexcept
+{
+    if (buffer == nullptr || input_length < sizeof(udp_probe_config))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    udp_probe_config candidate{};
+    RtlCopyMemory(&candidate, buffer, sizeof(candidate));
+    if (candidate.version != udp_probe_config_version || candidate.return_mode > 3 || candidate.return_layer > 1 ||
+        candidate.redirect_target > 1 || candidate.reserved0 != 0 || candidate.reserved1 != 0 ||
+        (candidate.enabled != 0 && (candidate.listener_port == 0 || candidate.listener_pid == 0)))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    udp_probe_apply_config(candidate);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS apply_udp_probe_return(const void* buffer, ULONG input_length) noexcept
+{
+    if (buffer == nullptr || input_length < sizeof(udp_probe_return_header))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    udp_probe_return_header header{};
+    RtlCopyMemory(&header, buffer, sizeof(header));
+    if (header.version != 1 || header.family != 4 || input_length < sizeof(header) + header.payload_length)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    const auto* payload = static_cast<const std::uint8_t*>(buffer) + sizeof(header);
+    return udp_probe_return_packet(header, payload) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
+}
+
+NTSTATUS get_udp_probe_stats(void* buffer, ULONG output_length) noexcept
+{
+    if (buffer == nullptr || output_length < sizeof(udp_probe_stats))
+    {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    udp_probe_stats snapshot{};
+    udp_probe_snapshot(snapshot);
+    RtlCopyMemory(buffer, &snapshot, sizeof(snapshot));
+    return STATUS_SUCCESS;
+}
+
 // 设备 DACL 已经把非管理员挡在 open 之外，这里再做一次调用者校验：即便以后 DACL 被改松，
 // 也仍然只有 SYSTEM / Administrators 能下发配置与规则。
 [[nodiscard]] bool caller_is_admin() noexcept
@@ -312,7 +363,24 @@ _Dispatch_type_(IRP_MJ_DEVICE_CONTROL) NTSTATUS dispatch_device_control(PDEVICE_
         break;
     }
 
+    case ioctl_udp_probe_set:
+        status = apply_udp_probe_config(buffer, input_length);
+        break;
+
+    case ioctl_udp_probe_get_stats:
+        status = get_udp_probe_stats(buffer, output_length);
+        if (NT_SUCCESS(status))
+        {
+            information = sizeof(udp_probe_stats);
+        }
+        break;
+
+    case ioctl_udp_probe_return:
+        status = apply_udp_probe_return(buffer, input_length);
+        break;
+
     default:
+
         break;
     }
 

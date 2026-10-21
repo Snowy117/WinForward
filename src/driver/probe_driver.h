@@ -36,6 +36,7 @@
 #include "matcher.h"
 #include "rule_blob.h"
 #include "rule_table.h"
+#include "udp_probe.h"
 // clang-format on
 
 namespace winforward::wfp::probe

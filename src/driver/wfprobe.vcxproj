@@ -31,7 +31,7 @@
       <AdditionalIncludeDirectories>$(VC_IncludePath);..\..\src\common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>Wdmsec.lib;fwpkclnt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Wdmsec.lib;fwpkclnt.lib;ndis.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
@@ -49,6 +49,10 @@
 
     <ClCompile Include="probe_driver.cpp" />
     <ClCompile Include="rule_table.cpp" />
+    <ClCompile Include="udp_probe.cpp" />
+    <ClCompile Include="udp_redirect.cpp" />
+    <ClCompile Include="udp_ippacket.cpp" />
+    <ClCompile Include="udp_inject.cpp" />
 
   </ItemGroup>
   <ItemGroup>

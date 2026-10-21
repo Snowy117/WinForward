@@ -192,4 +192,66 @@ static_assert(offsetof(probe_event, remote_address) == 16);
 static_assert(offsetof(probe_event, remote_port) == 48);
 static_assert(offsetof(probe_event, matched_rule) == 60);
 
+// 实验（Host UDP 路线 A 探针）：临时 ABI，不进 probe_abi_version。
+// 任务 10-21-host-udp-route-a-probe 归档时删除；转正则另立正式 ABI。
+inline constexpr std::uint32_t udp_probe_config_version = 1;
+inline constexpr std::uint32_t udp_probe_table_capacity = 64;
+
+struct udp_probe_config
+{
+    std::uint32_t version;
+    std::uint32_t enabled;
+    std::uint32_t listener_pid;
+    std::uint16_t listener_port;
+    std::uint8_t return_mode; // 0=off 1=observe 2=rewrite_inline 3=rewrite_inject
+    std::uint8_t return_layer; // 0=datagram_data 1=recv_accept
+    std::uint16_t remote_port_filter; // 0=all
+    std::uint8_t redirect_target; // 0=文档分支(ANY->loopback) 1=target_address
+    std::uint8_t reserved0;
+    std::uint8_t target_address[16]; // redirect_target==1 时使用；IPv4 用前 4 字节
+    std::uint32_t reserved1;
+};
+
+static_assert(sizeof(udp_probe_config) == 40, "udp_probe_config 是实验 ABI");
+static_assert(offsetof(udp_probe_config, listener_port) == 12);
+static_assert(offsetof(udp_probe_config, target_address) == 20);
+
+struct udp_probe_stats
+{
+    std::uint64_t seen;
+    std::uint64_t redirected;
+    std::uint64_t redirect_failures;
+    std::uint64_t return_seen;
+    std::uint64_t return_matched;
+    std::uint64_t return_rewritten;
+    std::uint64_t return_failures;
+    std::uint64_t ippacket_seen;
+    std::uint64_t ippacket_matched;
+    std::uint32_t table_entries;
+    std::uint32_t last_status;
+    std::uint32_t abi_version;
+    std::uint32_t reserved;
+};
+
+static_assert(sizeof(udp_probe_stats) == 88, "udp_probe_stats 是实验 ABI");
+
+struct udp_probe_return_header
+{
+    std::uint32_t version;
+    std::uint32_t app_address; // 网络序
+    std::uint32_t original_address; // 网络序
+    std::uint16_t app_port; // 主机序
+    std::uint16_t original_port; // 主机序
+    std::uint16_t payload_length;
+    std::uint16_t family; // 4
+    std::uint32_t interface_index;
+    std::uint32_t compartment_id;
+};
+
+static_assert(sizeof(udp_probe_return_header) == 28, "udp_probe_return_header 是实验 ABI");
+
+inline constexpr std::uint32_t ioctl_udp_probe_set = make_ioctl(0x880);
+inline constexpr std::uint32_t ioctl_udp_probe_get_stats = make_ioctl(0x881);
+inline constexpr std::uint32_t ioctl_udp_probe_return = make_ioctl(0x883);
+
 } // namespace winforward::wfp::probe

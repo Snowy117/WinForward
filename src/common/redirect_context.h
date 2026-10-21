@@ -30,6 +30,7 @@ enum class address_family : std::uint8_t
 enum class transport_protocol : std::uint8_t
 {
     tcp = 6,
+    udp = 17,
 };
 
 struct redirect_context

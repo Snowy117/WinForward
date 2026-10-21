@@ -390,13 +390,14 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
         set_permit(classify_out);
         return;
     }
-    if (rules == nullptr)
+    const bool udp_probe_candidate = facts.protocol == IPPROTO_UDP && udp_probe_enabled();
+    if (rules == nullptr && !udp_probe_candidate)
     {
         probe_increment(state.stats.permitted_no_rules);
         set_permit(classify_out);
         return;
     }
-    if (facts.protocol != IPPROTO_TCP)
+    if (facts.protocol != IPPROTO_TCP && !udp_probe_candidate)
     {
         probe_increment(state.stats.permitted_non_tcp);
         set_permit(classify_out);
@@ -468,6 +469,19 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
     {
         probe_increment(state.stats.permitted_self_process);
         permit_classification(state, facts, invalid_rule_index, probe_decision::permitted_self_process, classify_out);
+        return;
+    }
+
+    // 实验分支：UDP 在四道闸之后按实验开关 redirect；规则表暂不参与。
+    if (udp_probe_candidate)
+    {
+        if (udp_probe_try_redirect(
+                facts.local, facts.remote, facts.family, facts.process_id, classify_context, filter, classify_out))
+        {
+            return;
+        }
+        probe_increment(state.stats.permitted_non_tcp);
+        permit_classification(state, facts, invalid_rule_index, probe_decision::permitted_non_tcp, classify_out);
         return;
     }
 
