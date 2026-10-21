@@ -70,7 +70,7 @@ IPv4（`atyp=1`）、IPv6（`atyp=4`）、域名（`atyp=3`，ASCII，最长 255
 
 `tools/socks5/` 是一个独立的、最小 SOCKS5 服务端（no-auth + CONNECT，带 `connections=` /
 `connects=` / 字节计数）和裸 TCP 回显目标，只做端到端测试替身，不进产品工程。
-端到端脚本见 `tools/vm/userland-socks5-e2e.ps1`，形态是「客户端 → 驱动重定向 → 控制器 →
+端到端脚本见 `tools/windows/userland-socks5-e2e.ps1`，形态是「客户端 → 驱动重定向 → 控制器 →
 SOCKS5（VM loopback）→ 跨机 target」。
 
 ## 编译期语义检查
@@ -138,7 +138,7 @@ SOCKS5（VM loopback）→ 跨机 target」。
 已知限制：MVP 不限制并发会话数（`_sessions` 无界），也没有空闲超时；生产部署需要加连接上限。
 
 上游 SOCKS5 的验证分两层：`Socks5Tests` 用 loopback 假上游逐字节核对 IPv4 / IPv6 / 域名三种
-CONNECT 请求与每条失败路径（含「上游失败不回退直连」）；`tools/vm/userland-socks5-e2e.ps1`
+CONNECT 请求与每条失败路径（含「上游失败不回退直连」）；`tools/windows/userland-socks5-e2e.ps1`
 在 VM 上跑真实链路，客户端 1 MiB 数据自带 SHA-256 对照，替身报 `connections=` / `connects=`。
 
 

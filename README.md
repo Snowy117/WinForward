@@ -63,7 +63,22 @@ cp wf.local.example.json wf.local.json   # 然后按本机实际情况填写
 `wf.local.json` 不存在不是错误：依赖它的脚本按约定输出 `SKIP` 并说明缺哪个键；
 `tools/check.sh` 的所有检查项都不依赖它。宿主侧检查脚本（`tools/check.sh`、
 `src/userland/scripts/check-effective-lines.py`）不写死盘符、IP、工具安装路径或固定版本号路径；
-Windows 侧脚本与机器的解耦在后续批次完成。
+Windows 侧脚本在 `tools/windows/` 里：机器事实靠发现/参数；C# 工具的目标框架输出路径仍按工程写死，属于后续批次。
+
+## Windows 侧门禁
+
+在装有 Visual Studio Build Tools + WDK 的 Windows 机器上，以管理员 PowerShell 运行：
+
+```powershell
+pwsh -File tools/windows/gate.ps1 -Remote <测试目标地址:端口>
+pwsh -File tools/windows/mutation.ps1 -Remote <测试目标地址:端口> -OnlyIndex 0,3
+```
+
+`-Root` 默认由脚本位置推到仓库根；`-Remote` 没有默认值，先取参数再取 `WF_REMOTE`。
+MSBuild、signtool、accesschk 都按机器上的安装情况发现（C# 工具的 `net10.0` 类输出路径仍按工程写死，不在本批范围内）。PREfast 分析接在 gate 里，
+判定看输出里的 `warning C28xxx` 与 Summary 的 `Warning(s)`，不只看 MSBuild 退出码。
+仓库不负责把代码送到那台机器——同步与连接虚拟机属于 `local/` 或本机配置，
+细节见 `tools/windows/README.md`。
 
 ## 目录
 

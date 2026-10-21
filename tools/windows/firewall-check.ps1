@@ -1,11 +1,35 @@
 param(
-    [string]$Root = "C:\wfbench\wfprobe",
-    [string]$Remote = "1.2.3.4:19003",
+    [string]$Root = (Join-Path $PSScriptRoot "..\.."),
+    [string]$Remote,
     [int]$DummyRulePort = 65000
 )
+
 $ErrorActionPreference = "Stop"
-$exe = Join-Path $Root "tools\wfprobe\bin\Release\net11.0\wfprobe.exe"
-if (-not (Test-Path $exe)) { throw "测试程序不存在：$exe" }
+
+Import-Module (Join-Path $PSScriptRoot "WfBuild.psm1") -Force
+
+try {
+    $Root = Resolve-WfRoot -Path $Root
+    $Remote = Resolve-Remote -Value $Remote
+}
+catch {
+    "环境错误：$($_.Exception.Message -replace '^\[ENV\] ', '')"
+    "firewall-check verdict: ENV-MISSING"
+    exit 2
+}
+
+try {
+    $exe = Resolve-WfTool -Root $Root -Name "wfprobe"
+}
+catch {
+    $message = $_.Exception.Message
+    if ($message.StartsWith('[ENV] ')) {
+        "环境错误：$($message.Substring(6))"
+        "firewall-check verdict: ENV-MISSING"
+        exit 2
+    }
+    throw
+}
 
 $ruleName = "wfprobe-firewall-check"
 Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue

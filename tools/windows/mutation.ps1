@@ -1,64 +1,32 @@
 param(
-    [string]$Root = "C:\wfbench\wfprobe",
-    [string]$Remote = "1.2.3.4:19003",
+    [string]$Root = (Join-Path $PSScriptRoot "..\.."),
+    [string]$Remote,
     [int[]]$OnlyIndex = @()
 )
 
 # 变异测试：把被守的代码改成恒假/改错，确认对应的验证套件变红。
 # 每条变异只改一处（或一组必须同时拆掉的闸），跑对应套件，期望退出码非 0。
 # 全部跑完后恢复源码、重新构建，并跑一遍正向基线确认测试本身是全绿的。
+# 变异锚点的匹配逻辑本期不动（区域标记是后续批次）；构建/签名/安装/卸载走 WfBuild.psm1。
 
 $ErrorActionPreference = "Stop"
-$msb = "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
-$signtool = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
-$driverProject = Join-Path $Root "src\driver\wfprobe.vcxproj"
-$driverBinary = Join-Path $Root "src\driver\x64\Debug\wfprobe.sys"
-$exe = Join-Path $Root "tools\wfprobe\bin\Release\net11.0\wfprobe.exe"
-$thumbprint = (Get-ChildItem Cert:\LocalMachine\My |
-               Where-Object { $_.Subject -like '*WinForward Test Driver*' }).Thumbprint
+
+Import-Module (Join-Path $PSScriptRoot "WfBuild.psm1") -Force
+
+try {
+    $Root = Resolve-WfRoot -Path $Root
+    $Remote = Resolve-Remote -Value $Remote
+}
+catch {
+    "环境错误：$($_.Exception.Message -replace '^\[ENV\] ', '')"
+    "mutation verdict: ENV-MISSING"
+    exit 2
+}
+$exe = $null
 
 $script:failures = 0
 function Report([string]$name, [bool]$ok, [string]$detail) {
     if ($ok) { "MUTATION PASS: $name ($detail)" } else { $script:failures++; "MUTATION FAIL: $name ($detail)" }
-}
-
-function Build-Driver {
-    $output = & $msb $driverProject -restore -p:Configuration=Debug -p:Platform=x64 -v:q 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) { throw "变异后驱动构建失败：$output" }
-    return $output
-}
-
-function Install-Driver {
-    & $signtool sign /fd SHA256 /sha1 $thumbprint $driverBinary | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "签名失败" }
-    sc.exe stop wfprobe 2>$null | Out-Null
-    sc.exe delete wfprobe 2>$null | Out-Null
-    Copy-Item $driverBinary "C:\Windows\System32\drivers\wfprobe.sys" -Force
-    sc.exe create wfprobe type= kernel start= demand binPath= C:\Windows\System32\drivers\wfprobe.sys | Out-Null
-    sc.exe start wfprobe | Out-Null
-    for ($i = 0; $i -lt 40; $i++) {
-        $state = (sc.exe query wfprobe 2>$null | Out-String)
-        if ($state -match "RUNNING") { return }
-        Start-Sleep -Milliseconds 250
-    }
-    throw "变异后驱动没有进入 RUNNING"
-}
-
-function Uninstall-Driver {
-    & $exe control --enabled 0 2>$null | Out-Null
-    sc.exe stop wfprobe 2>$null | Out-Null
-    for ($i = 0; $i -lt 40; $i++) {
-        $state = sc.exe query wfprobe 2>$null | Out-String
-        if ($state -match "STOPPED" -or $state -match "1060") { break }
-        Start-Sleep -Milliseconds 250
-    }
-    sc.exe delete wfprobe 2>$null | Out-Null
-    Remove-Item "C:\Windows\System32\drivers\wfprobe.sys" -Force -ErrorAction SilentlyContinue
-}
-
-function Invoke-Target([string[]]$arguments) {
-    & $exe @arguments | Out-Null
-    return $LASTEXITCODE
 }
 
 $mutations = @(
@@ -215,58 +183,76 @@ $mutations = @(
 )
 
 "===== 先构建一次测试程序 ====="
-& dotnet build (Join-Path $Root "tools\wfprobe\wfprobe.csproj") -c Release -v:q | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "测试程序构建失败" }
+try {
+    & dotnet build (Join-Path $Root "tools\wfprobe\wfprobe.csproj") -c Release -v:q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "测试程序构建失败" }
+    $exe = Resolve-WfTool -Root $Root -Name "wfprobe"
 
-for ($mutationIndex = 0; $mutationIndex -lt $mutations.Count; $mutationIndex++) {
-    if ($OnlyIndex.Count -gt 0 -and $OnlyIndex -notcontains $mutationIndex) { continue }
-    $mutation = $mutations[$mutationIndex]
-    $file = Join-Path $Root "src\driver\$($mutation.File)"
-    $original = Get-Content $file -Raw
-    $patched = $original
-    foreach ($edit in $mutation.Edits) {
-        $hits = ([regex]::Matches($patched, [regex]::Escape($edit.Old))).Count
-        if ($hits -ne 1) { throw "锚点命中 $hits 次（应为 1）：$($mutation.Name)" }
-        $patched = $patched.Replace($edit.Old, $edit.New)
+    for ($mutationIndex = 0; $mutationIndex -lt $mutations.Count; $mutationIndex++) {
+        if ($OnlyIndex.Count -gt 0 -and $OnlyIndex -notcontains $mutationIndex) { continue }
+        $mutation = $mutations[$mutationIndex]
+        $file = Join-Path $Root "src\driver\$($mutation.File)"
+        $original = Get-Content $file -Raw
+        $patched = $original
+        foreach ($edit in $mutation.Edits) {
+            $hits = ([regex]::Matches($patched, [regex]::Escape($edit.Old))).Count
+            if ($hits -ne 1) { throw "锚点命中 $hits 次（应为 1）：$($mutation.Name)" }
+            $patched = $patched.Replace($edit.Old, $edit.New)
+        }
+
+        Set-Content -Path $file -Value $patched -NoNewline -Encoding utf8NoBOM
+        try {
+            $build = Build-Driver -Root $Root
+            if ($build.ExitCode -ne 0) { throw "变异后驱动构建失败：$($build.Output)" }
+            Install-Driver -Root $Root | Out-Null
+            $code = Invoke-WfSuite -Root $Root -ToolExe $exe -Arguments $mutation.Target
+            Report $mutation.Name ($code -ne 0) "target-exit=$code"
+        }
+        catch {
+            $message = $_.Exception.Message
+            if ($message.StartsWith('[ENV] ')) { throw }
+            Report $mutation.Name $false $message
+        }
+        finally {
+            Uninstall-Driver -ToolExe $exe
+            Set-Content -Path $file -Value $original -NoNewline -Encoding utf8NoBOM
+        }
     }
 
-    Set-Content -Path $file -Value $patched -NoNewline -Encoding utf8NoBOM
+    "===== 恢复源码后的正向基线（必须全绿）====="
     try {
-        Build-Driver | Out-Null
-        Install-Driver
-        $code = Invoke-Target $mutation.Target
-        Report $mutation.Name ($code -ne 0) "target-exit=$code"
-    }
-    catch {
-        Report $mutation.Name $false $_.Exception.Message
+        $build = Build-Driver -Root $Root
+        if ($build.ExitCode -ne 0) { throw "恢复源码后的驱动构建失败：$($build.Output)" }
+        Install-Driver -Root $Root | Out-Null
+        $baseline = @(
+            @{ Name = "rules"; Args = @("rules", "--iterations", "3") },
+            @{ Name = "selftest-v4"; Args = @("selftest", "--remote", $Remote, "--iterations", "1") },
+            @{ Name = "selftest-dual"; Args = @("selftest", "--dual", "--remote", $Remote, "--iterations", "1") },
+            @{ Name = "gates"; Args = @("gates") }
+        )
+        foreach ($case in $baseline) {
+            $code = Invoke-WfSuite -Root $Root -ToolExe $exe -Arguments $case.Args
+            Report "baseline-$($case.Name)" ($code -eq 0) "target-exit=$code"
+        }
     }
     finally {
-        Uninstall-Driver
-        Set-Content -Path $file -Value $original -NoNewline -Encoding utf8NoBOM
+        Uninstall-Driver -ToolExe $exe
     }
 }
-
-"===== 恢复源码后的正向基线（必须全绿）====="
-try {
-    Build-Driver | Out-Null
-    Install-Driver
-    $baseline = @(
-        @{ Name = "rules"; Args = @("rules", "--iterations", "3") },
-        @{ Name = "selftest-v4"; Args = @("selftest", "--remote", $Remote, "--iterations", "1") },
-        @{ Name = "selftest-dual"; Args = @("selftest", "--dual", "--remote", $Remote, "--iterations", "1") },
-        @{ Name = "gates"; Args = @("gates") }
-    )
-    foreach ($case in $baseline) {
-        $code = Invoke-Target $case.Args
-        Report "baseline-$($case.Name)" ($code -eq 0) "target-exit=$code"
+catch {
+    $message = $_.Exception.Message
+    if ($message.StartsWith('[ENV] ')) {
+        "环境错误：$($message.Substring(6))"
+        "mutation verdict: ENV-MISSING"
+        exit 2
     }
-}
-finally {
-    Uninstall-Driver
+    "失败：$message"
+    "mutation verdict: ERROR"
+    exit 1
 }
 
 if ($script:failures -gt 0) {
-    "mutation verdict: FAIL ($script:failures)"
+    "mutation verdict: FAIL ($($script:failures))"
     exit 1
 }
 "mutation verdict: PASS"

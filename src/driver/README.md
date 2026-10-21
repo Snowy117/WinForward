@@ -16,7 +16,7 @@ filter 执行。Phase 0 的硬编码探针行为已被规则表取代。
 | `probe_control.cpp` | IOCTL 处理：配置（含 0↔1 切换时 block filter 的挂/摘）、规则下发、计数、事件、调用者校验 |
 | `probe_classify.cpp` | classify：facts、四道防循环闸、matcher、三个动作、重定向 |
 | `process_path.cpp` | `ALE_APP_ID` 的 UTF-16 → UTF-8 转换（511 字节边界、代理对）与 0x807 诊断 |
-| `wfprobe.vcxproj` | WDK 工程，`SignMode=Off`，签名在构建后用 signtool 手工完成 |
+| `wfprobe.vcxproj` | WDK 工程，`SignMode=Off`；签名由 `WfBuild.psm1` 调 signtool 完成 |
 
 ## 控制面
 
@@ -48,28 +48,25 @@ classify 依次检查：
 `block` 决策在 redirect 层只记账并放行；真正的拒绝由 auth 层的 block filter 完成
 （详见 `.trellis/tasks/10-20-wfp-driver-rules/research/findings.md` §2）。
 
-## 构建与签名
+## 构建、签名与安装
 
-在 `WinLTSC` 上（工程用 `..\..\src\common` 指向共享头，目录结构要保持）：
+在任意一台装有 Visual Studio Build Tools（MSVC + WDK）的 Windows 机器上，以管理员 PowerShell 运行仓库门禁：
 
 ```powershell
-$msb = "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
-& $msb C:\wfbench\wfprobe\src\driver\wfprobe.vcxproj -restore -p:Configuration=Debug -p:Platform=x64
+pwsh -File tools/windows/gate.ps1 -Remote <测试目标地址:端口>
 ```
 
-产物：`src\driver\x64\Debug\wfprobe.sys`。签名用证书库里的 `CN=WinForward Test Driver` +
-`/sha1 <thumbprint>`（模板的 `/f <pfx>` 在本机不可用）。
+`-Root` 默认由脚本位置推到仓库根，也可以用 `-Root <仓库根>` 显式指定。工具发现、构建、签名、
+安装、卸载与 PREfast 都在 `tools/windows/WfBuild.psm1`；只做构建/安装/启动时用
+`tools/windows/load-driver.ps1`。工程用 `..\..\src\common` 指向共享头，仓库目录结构要保持。
+产物是 `src\driver\x64\Debug\wfprobe.sys`；签名使用证书库中的 `WinForward Test Driver` 证书。
+`NuGet.config` 只配置 nuget.org；`-restore` 会按需下载 WDK / SDK 包，不依赖任何本机包目录。
 
 ## 安装与卸载
 
-```powershell
-sc.exe stop wfprobe
-sc.exe delete wfprobe
-Copy-Item wfprobe.sys C:\Windows\System32\drivers\wfprobe.sys -Force
-sc.exe create wfprobe type= kernel start= demand binPath= C:\Windows\System32\drivers\wfprobe.sys
-sc.exe start wfprobe
-sc.exe query wfprobe
-```
+`tools/windows/WfBuild.psm1` 的 `Install-Driver` / `Uninstall-Driver` 负责签名、复制到
+`System32\drivers`、创建/启动/停止/删除服务。不要手工复制 `.sys` 或直接改服务，避免门禁与
+手工操作的状态不一致；完整流程用 `gate.ps1`，临时调试用 `load-driver.ps1`。
 
 - block 规则编译成独立的 auth 层 filter；凡是“更早的非 block 规则可能与它重叠”的配置会在
   换表时整块拒绝（`rule_order_valid`），绝不让 filter 抢掉 blob 里本应首个命中的 permit/redirect。

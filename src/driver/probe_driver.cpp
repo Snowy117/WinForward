@@ -245,7 +245,7 @@ NTSTATUS add_layer_filter(layer_state& layer,
     {
         // 同子层内的显式次序。跨子层由 FWPM_SUBLAYER_UNIVERSAL 的权重决定：Windows 防火墙与
         // 第三方安全产品都在更高权重的子层里，先于本 filter 仲裁，因此这里的终止型 PERMIT
-        // 不会截胡它们的拒绝（tools/vm/firewall-check.ps1 有实证）。FWP_EMPTY 会把权重交给
+        // 不会截胡它们的拒绝（tools/windows/firewall-check.ps1 有实证）。FWP_EMPTY 会把权重交给
         // 引擎按行动作推导，明确取值是为了让这条次序不随引擎默认行为漂移。
         filter.weight.type = FWP_UINT64;
         filter.weight.uint64 = const_cast<UINT64*>(&auth_filter_weight);

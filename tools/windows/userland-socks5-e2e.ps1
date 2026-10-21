@@ -1,6 +1,7 @@
 param(
-    [string]$Root = "C:\wfbench\wfprobe-socks5",
-    [string]$TargetHost = "192.168.100.4",
+    [string]$Root = (Join-Path $PSScriptRoot "..\.."),
+    [string]$Remote,
+    [string]$TargetHost,
     [int]$TargetPort = 40001,
     [int]$ProxyPort = 18080,
     [int]$DeadProxyPort = 18081,
@@ -22,6 +23,30 @@ param(
 # 每条断言失败都会让退出码非 0；末行是 E2E-RESULT=PASS/FAIL（ASCII，便于跨控制台代码页解析）。
 
 $ErrorActionPreference = "Stop"
+
+Import-Module (Join-Path $PSScriptRoot "WfBuild.psm1") -Force
+
+$serviceName = Get-WfServiceName
+
+# 跨机 target 没有默认值：显式给出的 -TargetHost / -TargetPort 优先，
+# 缺的字段从 -Remote <主机:端口> 取；-Remote 也可以由 $env:WF_REMOTE 提供。
+try {
+    $Root = Resolve-WfRoot -Path $Root
+    $remoteParts = $null
+    if ($Remote -or -not $TargetHost) {
+        $resolvedTarget = Resolve-Remote -Value $Remote
+        $remoteParts = $resolvedTarget.Split(':')
+    }
+    if (-not $TargetHost) { $TargetHost = $remoteParts[0] }
+    if (-not $PSBoundParameters.ContainsKey('TargetPort') -and $remoteParts) {
+        $TargetPort = [int]$remoteParts[1]
+    }
+}
+catch {
+    "环境错误：$($_.Exception.Message -replace '^\[ENV\] ', '')"
+    "E2E-RESULT=ENV-MISSING"
+    exit 2
+}
 $script:failures = 0
 $script:checks = 0
 
@@ -110,7 +135,7 @@ try {
     if (-not (Test-Path -LiteralPath $controllerExe)) { throw "缺少 $controllerExe" }
     if (-not (Test-Path -LiteralPath $toolExe)) { throw "缺少 $toolExe" }
 
-    $service = (sc.exe query wfprobe 2>&1 | Out-String)
+    $service = (sc.exe query $serviceName 2>&1 | Out-String)
     Assert "驱动已加载并 RUNNING" ($service -match "RUNNING") $service.Trim()
 
     & $controllerExe disable | Out-Null

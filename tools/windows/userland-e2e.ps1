@@ -1,5 +1,5 @@
 param(
-    [string]$Root = "C:\wfbench\wfprobe",
+    [string]$Root = (Join-Path $PSScriptRoot "..\.."),
     [int]$Bytes = 1048576,
     [int]$StartTimeoutMs = 20000,
     [int]$ExitTimeoutMs = 60000,
@@ -8,8 +8,19 @@ param(
 
 # 端到端实证：真实进程 → 驱动重定向 → 控制器监听 → 读回原始目的地 → 双向中继 → 回显校验。
 # 每条断言都失败即红；报告文件由控制器自己写，脚本只读，不参与生成。
+# 由 gate.ps1 调用，也可以单独执行；-Root 默认从脚本位置推到仓库根。
 
 $ErrorActionPreference = "Stop"
+
+Import-Module (Join-Path $PSScriptRoot "WfBuild.psm1") -Force
+try {
+    $Root = Resolve-WfRoot -Path $Root
+}
+catch {
+    "环境错误：$($_.Exception.Message -replace '^\[ENV\] ', '')"
+    "E2E-RESULT=ENV-MISSING"
+    exit 2
+}
 $script:failures = 0
 $script:checks = 0
 
