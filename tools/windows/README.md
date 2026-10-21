@@ -152,7 +152,7 @@ MSBuild 的中间产物按常规落在 `src\driver\obj\` 与 `src\driver\x64\`�
 | 建库（含追踪构建） | 52–68 s（冷树首次带 `-restore` 约 74 s） |
 | 分析（106 条查询） | 114–120 s |
 | 数据库 / SARIF | 22 MB / 约 400 KB |
-| 当前基线 | 0 条（2026-10-21 逐条处理完；14 条的原始定位与结论见 `.trellis/tasks/10-21-quality-followups/codeql-baseline.md`） |
+| 当前基线 | 0 条（2026-10-21 逐条处理完；14 条的逐条评审记录见 `.trellis/tasks/archive/2026-10/10-21-quality-followups/codeql-baseline.md`） |
 
 同一个数据库上重复跑 `-SkipDatabase`：分析步约 26 s，整进程约 38.6 s（命中 CodeQL 查询结果缓存）；
 上表是重建数据库后的完整耗时。
