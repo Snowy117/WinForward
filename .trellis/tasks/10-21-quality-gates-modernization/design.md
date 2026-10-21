@@ -104,7 +104,7 @@ cppcheck --enable=unusedFunction --std=c++20 --language=c++ \
 **PREfast**：
 
 ```
-msbuild wfprobe.vcxproj -t:Rebuild -p:Configuration=Debug -p:Platform=x64 \
+msbuild wfprobe.vcxproj -restore -t:Rebuild -p:Configuration=Debug -p:Platform=x64 \
   -p:RunCodeAnalysis=true -p:EnableMicrosoftCodeAnalysis=true -p:PreferredToolArchitecture=x64
 ```
 
@@ -112,11 +112,13 @@ msbuild wfprobe.vcxproj -t:Rebuild -p:Configuration=Debug -p:Platform=x64 \
 
 基线 10 条：C28101×1 加 `DRIVER_INITIALIZE`；C28169×3 补 `_Dispatch_type_`；C28167×2 补 `_IRQL_requires_*`；C28175×4 是 WDM 正常写法，`#pragma warning(suppress: 28175)` 加理由。
 
+**门禁判定不能只看退出码**：`/WX` 不会把 PREfast 告警提升为错误——实测摘掉 `_Dispatch_type_` 后 MSBuild 仍报 `Build succeeded / 0 Error(s)`、退出码 0。Windows 门禁必须解析 `warning C28xxx` 行或 `-clp:Summary` 的 `Warning(s)` 计数，任一非零即失败。
+
 ## 5. Windows 侧脚本
 
 目录 `tools/windows/`（原 `tools/vm/`，删掉 `sync.sh`）。所有脚本只回答一个问题：**在这台 Windows 机器上跑什么**。
 
-- `WfBuild.psm1`：`Resolve-MSBuild`（`vswhere -latest -find MSBuild\**\Bin\MSBuild.exe`）、`Resolve-SignTool`（`Windows Kits\10\bin\*\x64\signtool.exe` 取最高版本）、`Build-Driver`、`Install-Driver`、`Uninstall-Driver`、`Invoke-Prefast`、`Invoke-WfSuite`。
+- `WfBuild.psm1`：`Resolve-MSBuild`（`vswhere -latest -products * -find MSBuild\**\Bin\MSBuild.exe`；不带 `-products *` 找不到 VS 18 BuildTools）、`Resolve-SignTool`（`Windows Kits\10\bin\*\x64\signtool.exe` 取最高版本）、`Build-Driver`、`Install-Driver`、`Uninstall-Driver`、`Invoke-Prefast`、`Invoke-WfSuite`。
 - `gate.ps1`（原 `build-and-test.ps1`）：构建 → 签名 → 安装 → 各套件 → 卸载。
 - `mutation.ps1`（原 `mutation-test.ps1`）：变异用例。
 - 参数：`-Root` 默认 `$PSScriptRoot\..\..`；`-Remote` 无默认值，取 `-Remote` → `$env:WF_REMOTE` → 报错并说明这是测试目标地址。

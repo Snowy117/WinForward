@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "10-21-b1-host-gate"
+    "10-21-b1-host-gate",
+    "10-21-b2-driver-analysis"
   ],
   "parent": null,
   "relatedFiles": [],

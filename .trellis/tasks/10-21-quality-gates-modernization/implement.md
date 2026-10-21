@@ -50,6 +50,7 @@
 3. `build-and-test.ps1` → `gate.ps1`，`mutation-test.ps1` → `mutation.ps1`，`load-driver.ps1` 保留；三者改为薄壳。
 4. 参数：`-Root` 默认 `$PSScriptRoot\..\..`；`-Remote` 取 `-Remote` → `$env:WF_REMOTE` → 报错说明。
 5. 全部变异用例改用区域标记。
+6. 分析构建的 PASS 判定解析 `warning C28xxx` 或 `Warning(s)` 计数，不依赖 MSBuild 退出码（design §4.6）。
 
 验证：
 
