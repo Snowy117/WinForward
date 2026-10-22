@@ -1,4 +1,5 @@
 using WinForward.Userland.Configuration;
+using WinForward.Userland.Forwarded;
 using WinForward.Userland.Control;
 using WinForward.Userland.Policy;
 
@@ -19,10 +20,14 @@ internal static class RunCommand
 
         ControllerConfiguration configuration;
         byte[] blob;
+        byte[]? forwardedBlob;
         try
         {
             configuration = PolicyConfigurationDocument.LoadConfiguration(configPath);
             blob = RuleBlobCompiler.Compile(configuration.Policy, FwpmAppIdNormalizer.ForWindows());
+            forwardedBlob = configuration.Forwarded is null
+                                ? null
+                                : ForwardedBlobCompiler.Compile(configuration.Forwarded);
         }
         catch (Exception exception) when (exception is ConfigurationException or PolicyCompileException)
         {
@@ -54,6 +59,10 @@ internal static class RunCommand
                 Report = report,
                 AttachRedirectRecords = attachRedirectRecords,
                 Socks5 = configuration.Socks5,
+                Forwarded = configuration.Forwarded,
+                ForwardedBlob = forwardedBlob,
+                Upstreams = configuration.Upstreams,
+                ForwardedUpstreams = configuration.ForwardedUpstreams,
             });
 
             await WaitForShutdownAsync(shutdown.Token, durationMs, stopFile, report);

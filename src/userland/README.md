@@ -11,7 +11,7 @@ blob 格式一旦对不上，症状是规则静默不生效而不是报错，所
 | 路径 | 内容 |
 |---|---|
 | `WinForward.Userland/Policy/` | 规则模型、编译期校验、blob 编译器、ABI 镜像结构 |
-| `WinForward.Userland/Configuration/` | 暂定 JSON 配置 → `PolicyTable`（**唯一**的格式感知层） |
+| `WinForward.Userland/Configuration/` | 暂定 JSON 配置 → `ControllerConfiguration` / `PolicyTable`（**唯一**的格式感知层） |
 | `WinForward.Userland/Device/` | 控制面 IOCTL：ABI 结构镜像、布局断言、设备客户端 |
 | `WinForward.Userland/Control/` | 产品生命周期：下发规则 → 起监听 → 告诉驱动端口与 self-PID → 退出 |
 | `WinForward.Userland/Relay/` | accept → 读回原始目的地 → 建出站（直连或经 SOCKS5）→ 双向转发 |
@@ -27,8 +27,8 @@ C# 工具链由 devShell 提供（`flake.nix` 的 `dotnet-sdk_10`，目标框架
 
 ## 配置（暂定 JSON）
 
-格式是暂定的，**只有 `Configuration/PolicyConfigurationDocument.cs` 认识它**；换格式时只动那一个文件，
-`Control/` 以上只见 `PolicyTable`。
+格式是暂定的，**只有 `Configuration/` 下的 `PolicyConfigurationDocument`（主文件与 `.Forwarded.cs` 分部）认识它**；
+换格式时只动这个类型，`Relay/` 只见 `PolicyTable`，`Control/` 还接收 forwarded 表与上游表。
 
 ```json
 {
@@ -54,8 +54,46 @@ C# 工具链由 devShell 提供（`flake.nix` 的 `dotnet-sdk_10`，目标框架
 - `protocol` 取 `any` / `tcp` / `udp`；`any` 同时匹配 TCP 与 UDP（相对旧版“any 只匹配 TCP”的
   有意行为变化），需要旧行为时显式写 `tcp`。
 - 未知字段直接报错（带 JSON 路径），不静默忽略。
-- 解析层只做结构校验；语义校验（端口区间颠倒、规则顺序冲突、进程路径超长、兜底动作矛盾）
-  统一在 `RuleBlobCompiler` 里做，错误消息带规则序号。
+- host 规则的解析层只做结构校验；语义校验（端口区间颠倒、规则顺序冲突、进程路径超长、
+  兜底动作矛盾）统一在 `RuleBlobCompiler` 里做，错误消息带规则序号。forwarded 规则在配置层
+  提前校验 target / adapter / CIDR / 端口，最后由 `ForwardedBlobCompiler` 复核。
+
+## Forwarded 规则与多上游（B2）
+
+`socks5Servers[]` 定义命名上游，`forwarded` 段把入口适配器 / 客户端网段 / 目的网段映射到这些上游：
+
+```json
+{
+  "fallbackAction": "permit",
+  "socks5Servers": [ { "name": "main", "host": "127.0.0.1", "port": 1080 } ],
+  "forwarded": {
+    "fallbackAction": "block",
+    "rules": [
+      {
+        "name": "vm-tcp",
+        "adapterName": "vEthernet (MyVM)",
+        "clientCidr": "10.0.0.0/24",
+        "remotePorts": "443",
+        "action": "redirect",
+        "target": "main"
+      }
+    ]
+  }
+}
+```
+
+- `socks5Servers` 的 `name` 必须非空且唯一（大小写不敏感）；上游 id 按数组顺序取 0..n-1。解析结果保存在
+  `ControllerConfiguration.ForwardedUpstreams` 这张 `Id` → endpoint 有序表里；`Upstreams` 名字字典只用于 `target`
+  查找，B4 按 id 从有序表取 endpoint，不依赖字典枚举顺序。
+- 旧 `socks5`（若有）以 `default` 追加为最后一个上游；`socks5Servers` 里再定义 `default` 会与它冲突。
+- `socks5Servers` 只供 forwarded 规则的 `target` 使用；host 中继仍由 `socks5` 段决定直连或单上游。
+- `target` 引用的上游名大小写不敏感；`redirect` 必填，`permit` / `block` 禁止出现。
+- `adapterId` / `adapterName` 可单独给，也可同时给（必须解析到同一个 id）；带 adapter 的选择器需要
+  配置解析时传入 `IAdapterIdResolver`（B4 提供 Windows 实现），没有 resolver 时直接报错。
+  注意 B2 的 `check` / `run` 命令行还没有传入 resolver 的入口，带 adapter 的配置在 B4 接入前无法通过 CLI 启动。
+- forwarded 规则没有宿主进程，`process` 字段直接报错；诊断路径是 `forwarded.rules[i].<field>`。
+- B2 只编译并报告 forwarded blob（`controller-forwarded count=... upstreams=... blob=...`），
+  下发与驱动匹配在 B4。
 
 ## 上游 SOCKS5
 

@@ -229,3 +229,50 @@ total_size          = network_pool_offset + network_entry_count * 20
   时把 `upstream_id` 写进 redirect 表，交给用户态选 SOCKS5 上游。
 - 适配器重建后旧 id 的规则不命中，按 fallback 处理（block 时失败关闭）；本层的 `0xFFFFFFFF` 哨兵语义
   不随入口解析方式变化。
+
+## 8. 配置映射（B2）
+
+暂定 JSON 的 forwarded 配置由 `Configuration/PolicyConfigurationDocument.cs` 解析（forwarded 与多上游
+在 `PolicyConfigurationDocument.Forwarded.cs`）。链路是：
+
+```text
+JSON → ControllerConfiguration.Forwarded (ForwardedPolicyTable) → ForwardedBlobCompiler.Compile → wf_forwarded_blob
+```
+
+B2 只做到“解析 + 编译 + 报告”；把 blob 下发进驱动、建立 redirect 表是 B4。
+
+| JSON | 模型 | blob |
+|---|---|---|
+| `socks5Servers[].name` | `ControllerConfiguration.ForwardedUpstreams`（有序 id→endpoint）的 `Name` | 上游 id 的来源 |
+| `socks5Servers[].host/port` | `Socks5Endpoint` | 不在 blob 里；B4 用它建 SOCKS5 连接 |
+| 旧 `socks5` | `ForwardedUpstreams` 的 `default` 项（`Upstreams["default"]` 供 target 查找） | 同上 |
+| `forwarded.fallbackAction` | `ForwardedPolicyTable.FallbackAction` | header `fallback_action` |
+| `rules[i].action` | `ForwardedPolicyRule.Action` | rule `action`（`redirect` 即包版 `proxy`） |
+| `rules[i].target` | `ForwardedPolicyRule.UpstreamId` | rule `upstream_id` |
+| `rules[i].adapterId/adapterName` | `IAdapterIdResolver` 的输入 → `ForwardedPolicyRule.IngressAdapterId` | rule `ingress_adapter_id` |
+| `rules[i].clientCidr` | `ForwardedPolicyRule.ClientNetwork` | rule `client_network_index` → network_pool |
+| `rules[i].remoteCidr` | `ForwardedPolicyRule.RemoteNetwork` | rule `remote_network_index` → network_pool |
+| `rules[i].remotePorts` | `ForwardedPolicyRule.RemotePorts` | rule `remote_port_start/end` |
+| `rules[i].protocol/family` | 同名枚举 | rule `protocol` / `family` |
+
+约定：
+
+- **上游 id**：`socks5Servers` 按数组顺序取 0..n-1；旧 `socks5`（如果有）以 `default` 追加在最后。
+  `target` 先查命名上游，再查旧 `socks5`；名字比较大小写不敏感，`socks5Servers` 里再写 `default`
+  与旧 `socks5` 同时存在视为冲突。这个编号是本次配置内的顺序，不跨配置稳定。
+- **上游表**：解析结果同时维护 `ControllerConfiguration.ForwardedUpstreams`（`Id` → `Socks5Endpoint` 的有序表，
+  `Id` 就是 blob 的 `upstream_id`）和 `Upstreams`（大小写不敏感的名字字典）。`Upstreams` 只用于 `target`
+  查找；B4 按 `upstream_id` 从 `ForwardedUpstreams` 取 endpoint，不依赖字典枚举顺序。
+- **适配器**：`adapterId` / `adapterName` 可单独给，也可同时给；同时给时配置层分别调用
+  `IAdapterIdResolver.TryResolve` 再比对，结果不一致即报错。没有 resolver 时带 adapter 选择器的
+  forwarded 规则直接报错；解析结果 `0xFFFFFFFF` 是“任意入口”哨兵，不能当具体 id。
+- **target**：`redirect` 必填且必须指向已存在的上游；`permit` / `block` 出现 `target` 直接报错，
+  避免“看起来配了代理、实际不生效”。
+- **process**：forwarded 规则没有宿主进程，出现 `process` 直接报错。
+- **诊断**：配置层消息统一带 `forwarded.rules[i].<field>`，target / adapter 错误附带规则名；
+  CIDR 族冲突、端口区间颠倒、`fallbackAction = redirect` 都在配置层提前拒绝。
+- **控制器**：`WfpController.Start` 在 `ForwardedBlob` 非空时只输出
+  `controller-forwarded count=<rules> upstreams=<n> blob=<bytes>`，B2 不新增任何设备调用；
+  `CheckCommand` 会编译 forwarded blob 并报告规则数/上游数，编译失败仍走退出码 2。
+- **上限**：配置层不做规则数/网段池上限的重复判断，最终仍由 `ForwardedBlobCompiler`
+  按 `ForwardedPolicyLimits` 拒绝。

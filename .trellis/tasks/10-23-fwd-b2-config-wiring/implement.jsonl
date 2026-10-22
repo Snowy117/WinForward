@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/10-23-fwd-b2-config-wiring/prd.md", "reason": "本批需求与验收标准"}
+{"file": ".trellis/tasks/10-23-fwd-b2-config-wiring/design.md", "reason": "JSON schema、adapter 解析、校验与测试的唯一来源"}
+{"file": ".trellis/tasks/10-23-fwd-b2-config-wiring/implement.md", "reason": "执行步骤与验证命令"}
+{"file": ".trellis/spec/backend/forwarded-rule-blob.md", "reason": "B1 的 ABI 与配置映射边界"}
+{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "C# 代码规范"}

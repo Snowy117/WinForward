@@ -1,4 +1,5 @@
 using WinForward.Userland.Configuration;
+using WinForward.Userland.Forwarded;
 using WinForward.Userland.Policy;
 
 namespace WinForward.Controller;
@@ -12,9 +13,25 @@ internal static class CheckCommand
 
         try
         {
-            PolicyTable policy = PolicyConfigurationDocument.Load(path);
-            byte[] blob = RuleBlobCompiler.Compile(policy, FwpmAppIdNormalizer.ForWindows());
+            ControllerConfiguration configuration = PolicyConfigurationDocument.LoadConfiguration(path);
+            PolicyTable policy = configuration.Policy;
+            // 没有 process 规则时编译器不会调用 normalizer；用无副作用实现，
+            // 非 Windows 也能离线跑 check（有 process 规则时仍需要 Windows 解析器）。
+            IProcessPathNormalizer normalizer = policy.Rules.Any(rule => rule.Process is not null)
+                                                    ? FwpmAppIdNormalizer.ForWindows()
+                                                    : AsciiLowercaseNormalizer.Instance;
+            byte[] blob = RuleBlobCompiler.Compile(policy, normalizer);
             Console.WriteLine($"policy rules={policy.Rules.Count} fallback={policy.FallbackAction} blob={blob.Length} bytes");
+
+            if (configuration.Forwarded is not null)
+            {
+                byte[] forwardedBlob = ForwardedBlobCompiler.Compile(configuration.Forwarded);
+                Console.WriteLine(
+                    $"forwarded rules={configuration.Forwarded.Rules.Count} " +
+                    $"fallback={configuration.Forwarded.FallbackAction} " +
+                    $"upstreams={configuration.ForwardedUpstreams.Count} blob={forwardedBlob.Length} bytes");
+            }
+
             Console.WriteLine($"check OK {path}");
             return 0;
         }

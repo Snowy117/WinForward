@@ -56,6 +56,14 @@ public sealed class WfpController : IAsyncDisposable
             device.SetRuleBlob(settings.RuleBlob);
             VerifyRules(device, settings);
             ReportRules(device, settings);
+            if (settings.ForwardedBlob is not null)
+            {
+                Report(settings.Report,
+                       ControllerReport.Forwarded(
+                           settings.Forwarded?.Rules.Count ?? 0,
+                           settings.ForwardedUpstreams.Count,
+                           settings.ForwardedBlob.Length));
+            }
 
             uint processId = (uint)Environment.ProcessId;
             device.SetConfig(ProbeConfig.EnabledFor(processId, (ushort)relay.Port, new[] { processId }));

@@ -34,6 +34,7 @@ static void RegisterAll()
 {
     ForwardedLayoutTests.Register();
     ForwardedCompilerTests.Register();
+    ForwardedConfigurationTests.Register();
     LayoutTests.Register();
     CompilerTests.Register();
     InvalidInputTests.Register();
