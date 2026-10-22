@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/10-23-fwd-b1-forwarded-blob/prd.md", "reason": "对照需求与验收标准"}
+{"file": ".trellis/tasks/10-23-fwd-b1-forwarded-blob/design.md", "reason": "对照 ABI/校验/测试要求"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门禁与审查标准"}
+{"file": "src/common/rule_blob.h", "reason": "host ABI 不得被破坏"}
+{"file": "src/common/matcher.h", "reason": "host 匹配语义不得变化"}
