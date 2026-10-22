@@ -127,6 +127,11 @@ unconnected UDP 的 redirect context 随客户端 socket 关闭释放（B0 实�
 仍 outstanding、`sc stop` 后仍然存在。池断言只对 unconnected 做严格判定，connected 按实测记录
 限制，不能写成“立即释放”。
 
+**已知 WFP 缺陷（26100）**：connected UDP 每发一条 datagram，`tcpip` 会给 redirect record
+加一次引用且不归还，36B `WfPr` 与 `Arcl` record 直到重启才释放；实测 1/3/100 条 datagram →
+record refcount 1/3/100。详见
+[`wfp-connected-udp-record-refcount-leak.md`](../../.trellis/spec/backend/wfp-connected-udp-record-refcount-leak.md)。
+
 ### 验证
 
 `wfprobe udp-rules` 是正式验证入口，覆盖 redirect / permit / fallback / block / any / ICMP /

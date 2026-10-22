@@ -215,7 +215,7 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 - **block 在 auth 层静默丢包。** classify 只记 block 决策并放行，真实丢弃由 `ALE_AUTH_CONNECT_V4/V6` 的 `FWP_ACTION_BLOCK` filter 完成。UDP 的 `connect` / `send` / `sendto` 返回成功、对端收不到、`recv` 超时；TCP 对照仍是 `AccessDenied(10013)`。`udp_blocked` 是 classify 层的决策数，不是实际丢弃数；热替换后旧关联在 auth 层被丢，但不重新 classify，因此计数与事件都不增加。
 - **any / fallback 按 6 和 17 各一条 filter。** 每条 filter 都显式写 `FWPM_CONDITION_IP_PROTOCOL`；不写协议条件的 filter 会误拦首个出站 ICMP（以及按 UDP 处理的其他 IP 协议），而 classify 对这些协议走 `permitted_non_tcp` 早退。`max_block_filters` 为 128。
 - **IPv6 / dual-mode 的 family 取决于实际层。** v4-mapped unconnected 走 V4（family=4、纯 v4 地址），v4-mapped connected 与 native v6 走 V6（family=6、v4-mapped/16 字节地址）。cmsg 解析要同时接受 level 0 与 41、type 70，并支持 `sockaddr_in6`；不能笼统断言「dual-mode 一定 family=6」。
-- **context 生命周期。** unconnected 在客户端 socket 关闭后 1s 内释放；connected 的释放窗口由 WFP 决定，B2b 观察到客户端退出 180s 后仍 outstanding、`sc stop` 后仍然存在，因此不能把「关闭即释放」当成保证，池断言只对 unconnected 严格。
+- **context 生命周期。** unconnected 在客户端 socket 关闭后 1s 内释放；connected 的释放窗口由 WFP 决定，B2b 观察到客户端退出 180s 后仍 outstanding、`sc stop` 后仍然存在，因此不能把「关闭即释放」当成保证，池断言只对 unconnected 严格。**已知 WFP 缺陷（26100）**：connected UDP 每包会给 `AleRedirectRecord` 加一次引用且不归还，refcount 随 datagram 增长，36B `WfPr` 直到重启才释放；实测 1/3/100 条 → 1/3/100，详见 [wfp-connected-udp-record-refcount-leak.md](./wfp-connected-udp-record-refcount-leak.md)。
 - **规则语义。** `protocol=udp` 是 17；`protocol=any` 同时覆盖 TCP 与 UDP（相对旧版的行为变化）；`permitted_non_tcp` 只表示既非 TCP 也非 UDP。
 - **配置约束。** 无进程选择器的 block 规则会连中继自己的上游 UDP 流量一起拦（与 TCP 相同），需要用进程选择器收窄。
 - **验证入口。** `wfprobe udp-rules` 是正式套件；`udp-listen` / `udp-relay` / `udp-client` 只用于手工排查。
