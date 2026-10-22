@@ -256,16 +256,15 @@ TEST(forwarded_blob, rejects_an_unaligned_buffer)
 
     std::memcpy(unaligned, blob.data(), blob.size());
     forwarded_blob_view view{};
-    EXPECT_FALSE(
-        winforward::wfp::try_open_forwarded_blob(unaligned, static_cast<std::uint32_t>(blob.size()), view));
+    EXPECT_FALSE(winforward::wfp::try_open_forwarded_blob(unaligned, static_cast<std::uint32_t>(blob.size()), view));
 }
 
 TEST(forwarded_blob, rejects_a_truncated_blob)
 {
     const std::vector<std::uint8_t> blob = make_simple_blob();
     forwarded_blob_view view{};
-    EXPECT_FALSE(winforward::wfp::try_open_forwarded_blob(
-        blob.data(), static_cast<std::uint32_t>(blob.size() - 1), view));
+    EXPECT_FALSE(
+        winforward::wfp::try_open_forwarded_blob(blob.data(), static_cast<std::uint32_t>(blob.size() - 1), view));
 }
 
 TEST(forwarded_blob, rejects_a_buffer_larger_than_the_blob)
@@ -307,13 +306,7 @@ TEST(forwarded_blob, rejects_header_field_violations)
     // 兜底只允许 permit(0) / block(1) 这两个原始 u32 取值；redirect、未知值与高字节非零
     // 都必须整块拒绝 —— 先把 u32 截成 uint8 再比较会让 0x100 之类伪装成 permit。
     const std::uint32_t invalid_fallbacks[] = {
-        static_cast<std::uint32_t>(rule_action::redirect),
-        3U,
-        0x100U,
-        0x101U,
-        0x10000U,
-        0xFFFFFF00U,
-        0xFFFFFFFFU,
+        static_cast<std::uint32_t>(rule_action::redirect), 3U, 0x100U, 0x101U, 0x10000U, 0xFFFFFF00U, 0xFFFFFFFFU,
     };
     for (const std::uint32_t fallback : invalid_fallbacks)
     {

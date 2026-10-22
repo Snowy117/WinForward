@@ -69,9 +69,8 @@ inline void write_forwarded_header(std::vector<std::uint8_t>& blob, const forwar
     return entry;
 }
 
-inline void write_forwarded_rule(std::vector<std::uint8_t>& blob,
-                                 std::size_t index,
-                                 const forwarded_blob_rule& entry) noexcept
+inline void
+write_forwarded_rule(std::vector<std::uint8_t>& blob, std::size_t index, const forwarded_blob_rule& entry) noexcept
 {
     const std::size_t offset = sizeof(forwarded_blob_header) + index * sizeof(entry);
     std::memcpy(blob.data() + offset, &entry, sizeof(entry));

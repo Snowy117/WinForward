@@ -48,8 +48,7 @@ namespace detail
 {
 
 // 比较前先确认地址族一致，再逐位比较前缀；client/remote 两个地址共用这份实现。
-[[nodiscard]] inline bool forwarded_network_matches(const network_prefix& prefix,
-                                                    const std::uint8_t* address) noexcept
+[[nodiscard]] inline bool forwarded_network_matches(const network_prefix& prefix, const std::uint8_t* address) noexcept
 {
     const std::uint32_t full_bytes = prefix.prefix_length / 8U;
     const std::uint32_t remaining_bits = prefix.prefix_length % 8U;
@@ -131,8 +130,11 @@ namespace detail
 // 按数组顺序返回首个命中的动作、序号与上游。未命中时 matched 为 false，action 取
 // view.fallback_action，rule_index 为 rule_pool_index_any，upstream_id 为
 // forwarded_upstream_none；调用方一律以 matched 为准，不要把 action 当成命中的证据。
-[[nodiscard]] inline forwarded_match_result
-match_forwarded(const forwarded_blob_view& view, const forwarded_connection_view& connection) noexcept
+// header-only 公共 API：src/common 当前没有引用它的翻译单元，cppcheck 的 unusedFunction
+// 是误报；消费方是测试与后续驱动。
+// cppcheck-suppress unusedFunction
+[[nodiscard]] inline forwarded_match_result match_forwarded(const forwarded_blob_view& view,
+                                                            const forwarded_connection_view& connection) noexcept
 {
     for (std::uint32_t index = 0; index < view.rule_count; ++index)
     {

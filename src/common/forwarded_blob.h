@@ -52,8 +52,7 @@ struct forwarded_blob_header
     std::uint32_t reserved2; // 必须为 0
 };
 
-static_assert(sizeof(forwarded_blob_header) == 40,
-              "forwarded_blob_header 是对外 ABI，尺寸变更必须提升版本");
+static_assert(sizeof(forwarded_blob_header) == 40, "forwarded_blob_header 是对外 ABI，尺寸变更必须提升版本");
 static_assert(alignof(forwarded_blob_header) == 4);
 static_assert(offsetof(forwarded_blob_header, magic) == 0);
 static_assert(offsetof(forwarded_blob_header, version) == 4);
@@ -172,9 +171,11 @@ namespace detail
 // 头部保留位、两段的起点/长度是否越界或未对齐、规则数组越界、段重叠、网段池的 20 字节
 // 整除性与逐条合法性、每条规则的字段（保留位/动作/协议/族/端口区间/upstream 与动作的
 // 组合/两个网段索引）、以及规则族与网段族的一致性。
-[[nodiscard]] inline bool try_open_forwarded_blob(const std::uint8_t* data,
-                                                  std::uint32_t size,
-                                                  forwarded_blob_view& out) noexcept
+// header-only 公共 API：src/common 当前没有引用它的翻译单元，cppcheck 的 unusedFunction
+// 是误报；消费方是测试与后续驱动。
+[[nodiscard]] inline bool
+// cppcheck-suppress unusedFunction
+try_open_forwarded_blob(const std::uint8_t* data, std::uint32_t size, forwarded_blob_view& out) noexcept
 {
     if (data == nullptr)
     {
