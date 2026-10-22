@@ -11,25 +11,36 @@ namespace WinForward.Userland.Relay;
 /// </remarks>
 public sealed class OutboundConnector
 {
-    private readonly Socks5Endpoint? _socks5;
+    private readonly Socks5Endpoint? _defaultSocks5;
 
-    public OutboundConnector(Socks5Endpoint? socks5) => _socks5 = socks5;
+    public OutboundConnector(Socks5Endpoint? socks5) => _defaultSocks5 = socks5;
 
-    /// <summary>报告用：这条出站走的是哪条路（<c>direct</c> 或 <c>socks5:host:port</c>）。</summary>
-    public string Route => _socks5 is null ? "direct" : $"socks5:{_socks5}";
+    /// <summary>报告用：默认路由（<c>direct</c> 或 <c>socks5:host:port</c>）。</summary>
+    public string Route => _defaultSocks5 is null ? "direct" : $"socks5:{_defaultSocks5}";
 
+    public Task<Socket> ConnectAsync(EndPoint destination,
+                                     byte[] records,
+                                     TimeSpan timeout,
+                                     CancellationToken token) =>
+        ConnectAsync(destination, records, _defaultSocks5, timeout, token);
+
+    /// <summary>
+    /// 按本次会话解析出的上游连接；<paramref name="socks5"/> 为 null 时直连。
+    /// forwarded 的 upstream_id 由调用方先映射成 endpoint，缺失时调用方在进入这里之前就拒绝。
+    /// </summary>
     public async Task<Socket> ConnectAsync(EndPoint destination,
                                            byte[] records,
+                                           Socks5Endpoint? socks5,
                                            TimeSpan timeout,
                                            CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(destination);
         ArgumentNullException.ThrowIfNull(records);
 
-        if (_socks5 is not null)
+        if (socks5 is not null)
         {
             return await Socks5Client.ConnectAsync(
-                _socks5, destination, socket => SocketIoctl.SetRedirectRecords(socket, records), timeout, token);
+                socks5, destination, socket => SocketIoctl.SetRedirectRecords(socket, records), timeout, token);
         }
 
         if (destination is not IPEndPoint direct)

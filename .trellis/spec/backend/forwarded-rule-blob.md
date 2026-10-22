@@ -239,14 +239,15 @@ total_size          = network_pool_offset + network_entry_count * 20
 JSON → ControllerConfiguration.Forwarded (ForwardedPolicyTable) → ForwardedBlobCompiler.Compile → wf_forwarded_blob
 ```
 
-B2 只做到“解析 + 编译 + 报告”；把 blob 下发进驱动是 **B4a**（`ioctl_set_forwarded_blob`，ABI v4），
-建立 redirect 表 / DNAT / 回程是 B4b。B4a 只执行 permit / block：含 `redirect` 规则的 blob 会被驱动以
-`STATUS_NOT_SUPPORTED` 整块拒绝，`CheckCommand` / `RunCommand` 在打开设备前也会提前拒绝并指出 B4b。
+B2 只做到“解析 + 编译 + 报告”；把 blob 下发进驱动是 **B4a**（`ioctl_set_forwarded_blob`，ABI v4）。
+B4b 起驱动执行 permit / block / **redirect** 三种动作：含 redirect 规则的 blob 正常安装，由 MAC 帧层
+classify 建 redirect 表并做 DNAT；B4a 的 `STATUS_NOT_SUPPORTED` 整块拒绝已移除。
+`ForwardedRuntimeSupport.EnsureExecutable` 保留为执行前校验缝，但当前不再按动作拒绝。
 
 | JSON | 模型 | blob |
 |---|---|---|
 | `socks5Servers[].name` | `ControllerConfiguration.ForwardedUpstreams`（有序 id→endpoint）的 `Name` | 上游 id 的来源 |
-| `socks5Servers[].host/port` | `Socks5Endpoint` | 不在 blob 里；B4b 用它建 SOCKS5 连接 |
+| `socks5Servers[].host/port` | `Socks5Endpoint` | 不在 blob 里；B4b 用它建 SOCKS5 连接（按 `upstream_id` 选） |
 | 旧 `socks5` | `ForwardedUpstreams` 的 `default` 项（`Upstreams["default"]` 供 target 查找） | 同上 |
 | `forwarded.fallbackAction` | `ForwardedPolicyTable.FallbackAction` | header `fallback_action` |
 | `rules[i].action` | `ForwardedPolicyRule.Action` | rule `action`（`redirect` 即包版 `proxy`） |
@@ -275,8 +276,25 @@ B2 只做到“解析 + 编译 + 报告”；把 blob 下发进驱动是 **B4a**
   CIDR 族冲突、端口区间颠倒、`fallbackAction = redirect` 都在配置层提前拒绝。
 - **控制器**：`WfpController.Start` 在 `ForwardedBlob` 非空时下发并回读校验（installed / 规则数 /
   fallback / total_size / generation），再输出 `controller-forwarded count=<rules> upstreams=<n> blob=<bytes>`
-  与 `controller-forwarded-installed ...`；没有 forwarded 段时下发空 permit 表并同样回读（清掉上次
-  异常退出留下的规则）。退出/回滚时恢复空 permit 表并回读，异常退出不保证恢复。
-  `CheckCommand` 会编译 forwarded blob、报告规则数/上游数并提前拒绝 redirect，编译失败仍走退出码 2。
+  与 `controller-forwarded-installed ...`；随后按「bind listener → forwarded config(disabled) →
+  blob → 回读 → config(enabled)」启用数据面。没有 forwarded 段时下发空 permit 表并同样回读。
+  退出/回滚时 disabled config（清 redirect 表）+ 空 permit 表并回读，异常退出不保证恢复。
+  `CheckCommand` 只编译与报告，不再因 redirect 提前拒绝。
 - **上限**：配置层不做规则数/网段池上限的重复判断，最终仍由 `ForwardedBlobCompiler`
   按 `ForwardedPolicyLimits` 拒绝。
+
+## 9. B4b 数据面接缝
+
+redirect 规则的 `upstream_id` 是用户态选 SOCKS5 的唯一依据；驱动不解释 upstream 的名字或端点。
+
+- 驱动按 `upstream_id` 原样写进 redirect 表，`ioctl_query_forwarded_redirect` 回读；
+- 用户态 `ForwardedRedirectContextSource` 用 accepted socket 的 (listener_port, client) 查询；
+- `RelayServer` 按 `ForwardedUpstreams[upstream_id]` 取 endpoint，再走 SOCKS5 CONNECT；
+  表项缺失时拒绝连接，不直连；
+- ABI v5 的 `probe_forwarded_stats` 为 296 字节，尾部追加 redirect 计数（`matched_redirect`、
+  `redirected`、`redirect_created/ingress/return/blocked` 等）与 `redirect_multi_nb`、
+  `inject_complete_calls`、`inject_complete_failed` 诊断计数；v4 的 0–143 字段偏移不变，
+  `last_status`/`abi_version` 后移；
+- `forwarded-rules` 的 F6 不再把 redirect 当作非法 blob；数据面验证入口是
+  `wfprobe forwarded-tcp --phase core|upstreams|fail`；套件默认用 verify 端口（listener+1000）
+  断言外部客户端实收字节/SHA-256/ACK，缺回报或内容不一致即 FAIL。

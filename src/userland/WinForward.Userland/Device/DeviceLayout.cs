@@ -17,7 +17,10 @@ public static class DeviceLayout
     public const int ProbeStatsSize = 264;
     public const int ProbeRuleInfoSize = 32;
     public const int ProbeForwardedInfoSize = 32;
-    public const int ProbeForwardedStatsSize = 152;
+    public const int ProbeForwardedConfigSize = 28;
+    public const int ProbeForwardedRedirectQuerySize = 24;
+    public const int ProbeForwardedRedirectSize = 64;
+    public const int ProbeForwardedStatsSize = 296;
     public const int ProbeEventSize = 64;
     public const int ProcessPathMeasurementSize = 520;
     public const int RedirectContextSize = 36;
@@ -38,6 +41,7 @@ public static class DeviceLayout
             VerifyProbeStats();
             VerifyProbeRuleInfo();
             VerifyProbeForwarded();
+            VerifyProbeForwardedRedirect();
             VerifyProbeEvent();
             VerifyProcessPathMeasurement();
             VerifyRedirectContext();
@@ -141,8 +145,62 @@ public static class DeviceLayout
         CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.NoWriteRight), 120);
         CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RejectedBlobs), 128);
         CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.TablesReplaced), 136);
-        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.LastStatus), 144);
-        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.AbiVersion), 148);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.MatchedRedirect), 144);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.Redirected), 152);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectCreated), 160);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectIngress), 168);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectReturn), 176);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectBlocked), 184);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectReturnFailed), 192);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectNoConfig), 200);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectNoState), 208);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectCapacity), 216);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectNonTcp), 224);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectInjectFailed), 232);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectExpired), 240);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectReturnMiss), 248);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectMultiNb), 256);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.InjectCompleteCalls), 264);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.InjectCompleteFailed), 272);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectActive), 280);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectHighWater), 284);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.LastStatus), 288);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.AbiVersion), 292);
+    }
+
+    private static void VerifyProbeForwardedRedirect()
+    {
+        CheckSize<ProbeForwardedConfig>(ProbeForwardedConfigSize);
+        CheckOffset<ProbeForwardedConfig>(nameof(ProbeForwardedConfig.Enabled), 0);
+        CheckOffset<ProbeForwardedConfig>(nameof(ProbeForwardedConfig.ListenerPort), 4);
+        CheckOffset<ProbeForwardedConfig>(nameof(ProbeForwardedConfig.Family), 6);
+        CheckOffset<ProbeForwardedConfig>(nameof(ProbeForwardedConfig.Reserved0), 7);
+        CheckOffset<ProbeForwardedConfig>(nameof(ProbeForwardedConfig.ListenerAddress), 8);
+        CheckOffset<ProbeForwardedConfig>(nameof(ProbeForwardedConfig.Reserved1), 24);
+
+        CheckSize<ProbeForwardedRedirectQuery>(ProbeForwardedRedirectQuerySize);
+        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.ListenerPort), 0);
+        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Family), 2);
+        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Reserved0), 3);
+        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.ClientAddress), 4);
+        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.ClientPort), 20);
+        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Reserved1), 22);
+
+        CheckSize<ProbeForwardedRedirect>(ProbeForwardedRedirectSize);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.Magic), 0);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.Version), 4);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.Family), 6);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.Protocol), 7);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.ClientAddress), 8);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.ClientPort), 24);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.ServerAddress), 26);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.ServerPort), 42);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.ListenerPort), 44);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.Reserved0), 46);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.IngressIfIndex), 48);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.UpstreamId), 52);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.RuleIndex), 56);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.State), 60);
     }
 
     private static void VerifyProbeEvent()

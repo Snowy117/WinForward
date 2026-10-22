@@ -69,6 +69,8 @@ internal static class Program
                     return await UdpSuite.RunAsync(options);
                 case "forwarded-rules":
                     return await ForwardedSuite.RunAsync(options);
+                case "forwarded-tcp":
+                    return await ForwardedTcpSuite.RunAsync(options);
                 default:
                     PrintUsage();
                     return 1;
@@ -104,10 +106,16 @@ internal static class Program
                    [--datagrams N] [--only U1,U2,...]
   wfprobe forwarded-rules [--ifindex N] [--local-ip A.B.C.D] [--peer HOST:PORT]
                         [--inbound-port N] [--inbound-wait-ms M] [--timeout-ms M]
-                        [--only F1,F2,...]
-
-  forwarded-rules 的两段式用法：不带 --inbound-wait-ms 时只跑不依赖外部客户端的用例；
-  需要 Linux 客户端入向验证时，用 --inbound-wait-ms 让进程停在监听/等待状态。
+                         [--only F1,F2,...]
+  wfprobe forwarded-tcp --phase core|upstreams|fail [--local-ip A.B.C.D] [--ifindex N]
+                        [--listener-port N] [--remote-address A.B.C.D] [--remote-port N]
+                        [--backend HOST:PORT] [--client-cidr CIDR] [--wait-ms M]
+                        [--expect-accepts K] [--bytes N] [--verify-port N]
+                        [--verify-timeout-ms M] [--no-verify] [--restore-only]
+  forwarded-tcp 先在 VM 内下发 redirect 规则与 forwarded config，再打印 [forwarded-tcp] READY 等待外部客户端；
+  Linux 客户端连 10.99.0.1:40250（临时路由）即可验证 DNAT/回程/半关闭/upstream 选择。
+  默认要求外部客户端在数据面结束后连 verify 端口（listener+1000）回报实际收到字节数、SHA-256 与
+  TCP ACK 字节数；没有回报或内容不一致即 FAIL。--no-verify 仅供手工调试。
 ");
     }
 

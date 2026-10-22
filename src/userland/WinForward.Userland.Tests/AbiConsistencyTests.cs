@@ -23,6 +23,9 @@ internal static class AbiConsistencyTests
         "probe_event",
         "probe_forwarded_info",
         "probe_forwarded_stats",
+        "probe_forwarded_config",
+        "probe_forwarded_redirect_query",
+        "probe_forwarded_redirect",
         "process_path_measurement",
         "redirect_context",
     };
@@ -35,6 +38,9 @@ internal static class AbiConsistencyTests
         "probe_event",
         "probe_forwarded_info",
         "probe_forwarded_stats",
+        "probe_forwarded_config",
+        "probe_forwarded_redirect_query",
+        "probe_forwarded_redirect",
         "redirect_context",
     };
 
@@ -153,6 +159,9 @@ internal static class AbiConsistencyTests
             ("redirect_context", "RedirectContextSize"),
             ("probe_forwarded_info", "ProbeForwardedInfoSize"),
             ("probe_forwarded_stats", "ProbeForwardedStatsSize"),
+            ("probe_forwarded_config", "ProbeForwardedConfigSize"),
+            ("probe_forwarded_redirect_query", "ProbeForwardedRedirectQuerySize"),
+            ("probe_forwarded_redirect", "ProbeForwardedRedirectSize"),
         };
 
         foreach ((string header, string field) in expected)

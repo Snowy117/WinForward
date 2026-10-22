@@ -4,9 +4,9 @@
 // 生命周期。与 host 路径（rule_table / probe_classify / probe_config）完全独立：这里只有
 // forwarded_blob 的副本、自己的 generation、自己的自旋锁与自己的 callout id。
 //
-// B4a 的边界：只做「看见 + 匹配 + pass/block」。不修改 NBL、不注入帧、不维护 redirect 表、
-// 不实现 DNAT / 回程 SNAT —— 那些属于 B4b。injection handle 在这里创建，唯一用途是
-// FwpsQueryPacketInjectionState0 的防环查询（以及 B4b 复用）。
+// B4b 起这里同时承载 TCP redirect 数据面：DNAT、redirect 表、回程 SNAT 与帧注入都由本模块
+// 的实现执行；injection handle 在 `probe_forwarded_start` 创建，既用于注入，也用于
+// `FwpsQueryPacketInjectionState0` 的防环查询。
 //
 // include 约束：本头使用 WDK 的 NTSTATUS/HANDLE/ULONG/LONG 与 src/common 的 forwarded_blob.h，
 // 只允许在 probe_driver.h 的 WDK 头之后包含。
@@ -52,10 +52,13 @@ void probe_forwarded_release_all() noexcept;
 
 // ioctl_set_forwarded_blob。非法整块拒绝、旧表与 generation 不变。
 [[nodiscard]] NTSTATUS probe_forwarded_apply_blob(const void* buffer, ULONG input_length) noexcept;
+[[nodiscard]] NTSTATUS probe_forwarded_apply_config(const void* buffer, ULONG input_length) noexcept;
+[[nodiscard]] NTSTATUS probe_forwarded_get_config(void* buffer, ULONG output_length) noexcept;
+[[nodiscard]] NTSTATUS
+probe_forwarded_query_redirect(const void* buffer, ULONG input_length, void* output, ULONG output_length) noexcept;
 void probe_forwarded_info_snapshot(probe_forwarded_info& info) noexcept;
 void probe_forwarded_stats_snapshot(probe_forwarded_stats& stats) noexcept;
 void probe_forwarded_reset_stats() noexcept;
-
 // 两层的 classify 共用同一份实现（方向由 layerId 判定）。
 void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
                                        const FWPS_INCOMING_METADATA_VALUES0* in_meta_values,

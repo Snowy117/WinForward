@@ -72,7 +72,7 @@ internal static class ForwardedConfigurationTests
         TestRunner.Add("forwarded-config/socks5Servers 名字不能为空", ServerEmptyName);
         TestRunner.Add("forwarded-config/remotePorts 越界", RemotePortOutOfRange);
         TestRunner.Add("forwarded-config/编译结果符合 B1 布局", CompilesToBlob);
-        TestRunner.Add("forwarded-config/redirect 规则在打开设备前被拒绝", RedirectRejectedEarly);
+        TestRunner.Add("forwarded-config/redirect 规则在 B4b 允许下发", RedirectAllowed);
     }
 
     private static ControllerConfiguration Parse(string json, IAdapterIdResolver? resolver = null) =>
@@ -443,15 +443,14 @@ internal static class ForwardedConfigurationTests
                     "回读报告");
     }
 
-    private static void RedirectRejectedEarly()
+    private static void RedirectAllowed()
     {
         ControllerConfiguration configuration = Parse(
             """{ "fallbackAction": "permit", "socks5Servers": [ { "name": "main", "host": "127.0.0.1", "port": 1080 } ], "forwarded": { "rules": [ { "name": "web", "action": "redirect", "target": "main" } ] } }""");
-        Check.ThrowsContaining<ConfigurationException>(
-            () => ForwardedRuntimeSupport.EnsureExecutable(configuration.Forwarded),
-            "B4b",
-            "redirect 在打开设备前被拒绝并指出 B4b");
+        ForwardedRuntimeSupport.EnsureExecutable(configuration.Forwarded);
+        Check.True(configuration.Forwarded is not null, "redirect 规则保留在 forwarded 表里");
     }
+
     private static string ForwardedReport(ControllerConfiguration configuration)
     {
         ForwardedPolicyTable table = configuration.Forwarded ?? throw new TestFailure("forwarded 表不能为 null");

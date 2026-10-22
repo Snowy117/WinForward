@@ -213,7 +213,7 @@ try {
     Assert "成功轮控制器退出码 0" ($controller.ExitCode -eq 0) "exit=$($controller.ExitCode)"
 
     $okText = Read-Text $okReport
-    Assert "A1 中继读回原始目的地" ($okText -match "relay accept #1 original=${TargetHost}:${TargetPort} family=IPv4") $okText.Trim()
+    Assert "A1 中继读回原始目的地" ($okText -match "relay accept #1 original=${TargetHost}:${TargetPort} source=host family=IPv4") $okText.Trim()
     Assert "A1 出站经 SOCKS5（via=socks5:）" ($okText -match "relay connected #1 to=${TargetHost}:${TargetPort} via=socks5:127\.0\.0\.1:$ProxyPort") $okText.Trim()
     Assert "A6 中继双向各搬运 $Bytes 字节" (([regex]::Matches($okText, "relay close #\d+ in=$Bytes out=$Bytes")).Count -eq 1) $okText.Trim()
     Assert "退出摘要 accepted=1 refused=0" ($okText -match "controller-stop accepted=1 refused=0 bytes_in=$Bytes bytes_out=$Bytes") $okText.Trim()

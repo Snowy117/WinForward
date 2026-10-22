@@ -88,7 +88,7 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 
 两侧都有布局断言：C++ 侧 `static_assert`（尺寸、对齐、`offsetof`），C# 侧以布局一致性测试锁定。版本号变更即视为破坏性变更。
 
-控制面 ABI（`probe_ioctl.h`）当前是 v4：v3 的 `probe_event` / `probe_stats` 字段不变；v4 新增 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL（`0x808`–`0x80B`）。驱动与用户态必须同批升级。
+控制面 ABI（`probe_ioctl.h`）当前是 **v5**：v3 的 `probe_event` / `probe_stats` 字段不变；v4 新增 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL（`0x808`–`0x80B`）；v5 新增 `probe_forwarded_config` / `probe_forwarded_redirect_query` / `probe_forwarded_redirect` 与 `0x80C`–`0x80E`，并在 `probe_forwarded_stats` 尾部追加 redirect 计数：v4 的 0–143 字段偏移不变，`last_status` / `abi_version` 后移。驱动与用户态必须同批升级。
 
 ---
 
@@ -251,3 +251,42 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
   会让整个驱动加载失败（不是 host fail-open）。B4b/B6 需要决定是否把 host 路径改成“L2 失败不影响
   host”，本批不改结构。控制器退出时会把 forwarded 表恢复成空 permit 表并回读校验，但异常退出 /
   进程被杀不保证恢复——那是套件级看门狗与运维脚本的职责。
+
+### 7.13 Forwarded TCP 数据面（B4b 实测）
+
+- **ABI v5 与两套配置。** forwarded 数据面有自己的 probe_forwarded_config（enabled / listener_port /
+  family / listener_address=L）与三个 IOCTL（0x80C–0x80E），与 host 的 probe_config 完全独立。
+  关闭 config 会清空 redirect 表；换规则 blob 不清表，旧表项保持旧 generation / upstream。
+  probe_forwarded_stats 为 296 字节；尾部除 redirect 计数外还有 redirect_multi_nb、
+  inject_complete_calls、inject_complete_failed 三个诊断字段，v4 的 0–143 偏移不变。
+- **原帧消费。** 入口 DNAT 与回程 SNAT 都返回 FWP_ACTION_BLOCK，只注入改写副本。B3 的加法注入
+  （原帧 permit + 注入副本）没有进入正式驱动。实测：客户端连接成功、监听端只接住一次、注入帧全部
+  被 FwpsQueryPacketInjectionState0 识别为 self_injected。
+- **redirect 表。** 入口 key 是 (ingress, family, client, server)，回程 key 是
+  (family, listener_port, client)；两条哈希索引指向同一批表项。容量 4096，SYN 建表，FIN/RST 标记
+  closing，超时惰性回收，客户端端口复用会先删回程 key 冲突的旧表项。
+- **一个 NBL 可以有多个 NET_BUFFER。** MAC 层每个 NET_BUFFER 是一帧；B4b 返工的丢包根因就是只处理
+  NET_BUFFER_LIST_FIRST_NB。回程必须逐 NET_BUFFER 查表/改写/注入，入口 DNAT 也逐帧注入；原 NBL 整体
+  block，计数按 NBL 记（redirected == ingress + return 不被多 NB 撑破），另用 redirect_multi_nb 观察。
+  实测一个回程 NBL 可带 7 个 NET_BUFFER（1448B + 376B 等），只处理首帧会让接收端停在 63712B。
+- **校验和按实际偏移重算。** IPv4 头校验和 + TCP 校验和（IPv6 用伪头）；VLAN、IPv4 option、IPv6
+  扩展头都用解析出的 network_offset / transport_offset，不假设 14 字节以太网头。
+- **注入 MDL 必须用 NdisAllocateMdl。** NdisHandle 传 NBL 池句柄（不传 nullptr，PREfast C6387）；
+  实测 IoAllocateMdl 创建的 MDL 经 FwpsInjectMacReceiveAsync0 后会被本机栈丢弃（SYN 有去无回）。
+- **回程 MAC 还原。** 表项记录入口帧的源 MAC（client）与目的 MAC（local）。回程注入的目的 MAC =
+  client_mac、源 MAC = local_mac；未命中回程表的 listener 端口包按普通本机流量继续走规则匹配。
+- **失败关闭。** 无 config/L → redirect_no_config，非 SYN 且无表项 → redirect_no_state，
+  表满 → redirect_capacity，非 TCP → redirect_non_tcp，注入失败 → redirect_inject_failed；
+  回程注入失败 → redirect_return_failed。以上都 block 原帧并计数，没有 fail-open。
+- **用户态接缝。** IRedirectContextSource 让 RelayServer 先查 forwarded redirect 表、再查 host
+  SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT；forwarded 命中时按 upstream_id 从
+  ForwardedUpstreams 选 SOCKS5，缺表项直接拒绝，不回退直连。WfpController 的顺序是
+  bind listener → forwarded config(disabled) → blob → 回读 → config(enabled)；退出时 disabled + 空 blob。
+- **验证入口。** wfprobe forwarded-tcp --phase core|upstreams|fail（--restore-only 兜底），
+  外部 Linux 客户端发起连接；默认要求客户端结束后连 verify 端口（listener+1000）回报实收字节、
+  SHA-256 与 TCP ACK 字节数，套件按 client_port 配对断言，缺回报/内容不符即 FAIL（--no-verify 仅手工）。
+  产品 E2E 由 WinForward.Controller run 驱动。实测计数与恒等式见 src/driver/README.md 的 B4b 段。
+  forwarded-rules 的 F6 不再把 redirect 当作非法 blob。
+- **边界。** 单入口 / 单 listener 端口 / 单 L；UDP redirect 仍 block（B5）；只处理首片；
+  表满没有用 4096 条真实连接压测；LWF 对注入帧的可见性仍未测。一个 NBL 内的 NET_BUFFER 按同一
+  listener 回程流处理，混合流不在本版支持范围。

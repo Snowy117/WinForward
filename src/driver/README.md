@@ -199,30 +199,26 @@ B4a 在现有 ALE 路径之外再注册一组 callout，挂在 `FWPM_LAYER_INBOU
   ALE 层（§7.9 的实测只适用于 ALE），所以这里的终止型 PERMIT 不会碰到防火墙；它只对同层里权重
   更低的第三方 L2 filter 有优先权，多驱动共存（WinpkFilter 等）需要 B4b 实测。
 - 没有 forwarded 表时全部放行并计入 `no_table`；表存在但规则为空时走 fallback。
-- `redirect` 规则不被接受（`STATUS_NOT_SUPPORTED`）：B4a 不执行改道，接受它会让用户误以为流量
-  被重定向，实际是直连。
+- redirect 规则由 B4b 的数据面执行（见下一节）；B4a 的 permit/block 路径本身不修改帧。
 
 ### 防环
 
 classify 一开始就用 `FwpsQueryPacketInjectionState0(injection_handle, nbl, nullptr)` 查询注入状态：
 `FWPS_PACKET_INJECTED_BY_SELF` / `FWPS_PACKET_PREVIOUSLY_INJECTED_BY_SELF` 的帧直接 permit 并计入
-`self_injected`，不再参与规则匹配。注入句柄在 `probe_forwarded_start` 里用
-`FwpsInjectionHandleCreate0(AF_UNSPEC, FWPS_INJECTION_TYPE_L2, ...)` 创建；B4a 不注入，句柄只为
-这道闸（以及 B4b 复用）存在。
+self_injected，不再参与规则匹配。注入句柄在 probe_forwarded_start 里用
+FwpsInjectionHandleCreate0(AF_UNSPEC, FWPS_INJECTION_TYPE_L2, ...) 创建；B4b 的 DNAT/回程注入共用它。
 
 ### 计数
 
 `probe_forwarded_stats` 的字段与恒等式：
 
-```
-classify_calls == no_write_right + inbound_frames + outbound_frames
-inbound_frames + outbound_frames ==
-    self_injected + no_table + malformed + non_ip + permitted + blocked
-permitted == matched_permit + fallback_permit
-blocked   == matched_block + fallback_block
-matched   == matched_permit + matched_block
-fallback  == fallback_permit + fallback_block
-```
+    classify_calls == no_write_right + inbound_frames + outbound_frames
+    inbound_frames + outbound_frames ==
+        self_injected + no_table + malformed + non_ip + permitted + blocked + redirected
+    permitted == matched_permit + fallback_permit
+    blocked   == matched_block + fallback_block + redirect_blocked + redirect_return_failed
+    matched   == matched_permit + matched_block + matched_redirect
+    fallback  == fallback_permit + fallback_block
 
 `inbound_frames` / `outbound_frames` 是经过该层的全部帧（含 WinRM 等背景流量），不是测试帧数。
 按 adapter / 规则序号的细分计数留给 B4b/B6。
@@ -262,7 +258,7 @@ F2/F4 的 block 规则用固定源端口 + 端口收窄（出向 `remote_port` =
   看门狗（套件级，超时恢复空 permit 表），用 ping 网关触发未命中帧。
 - F4：同一组规则换顺序，验证 first-match。
 - F5：client/remote CIDR 命中与不命中、端口不命中。
-- F6：非法 blob（magic / 截断 / redirect）整块拒绝、generation 不变、`rejected_blobs` 增加。
+- F6：非法 blob（magic / 截断 / 非 redirect 带 upstream）整块拒绝、generation 不变、`rejected_blobs` 增加。
 - F7：IPv6 happy path（`--peer6`，需要两端有可达的 v6 地址；本环境 Internal 的 IPv6 绑定默认关闭）。
 - F1i/F2i：外部客户端 → 本机监听端口（入向）的 permit / block；用 `--inbound-wait-ms` 让套件
   停在监听状态，外部客户端在窗口内发起连接。
@@ -271,12 +267,149 @@ block 用例只断言「连接失败/超时」与计数，不承诺 RST —— �
 
 ### 未覆盖 / B4b 边界
 
-- 不消费/改写原帧、不做 DNAT、不维护 redirect 表、不做回程 SNAT、不注入任何帧（B4b）。
-- 不做用户态 listener / SOCKS5 中继 / upstream 选择（B4c）。
-- UDP forwarded 规则不在本批验证（解析已覆盖 UDP 头，验证在 B5）。
+- B4b 的数据面见下一节；本节的 permit/block 语义在 B4b 下保持不变。
+- UDP forwarded 规则的入向验证在 B5；B4b 对 UDP redirect 规则仍 block。
 - 合成 NIC（netvsc）与 Internal vSwitch 入口已验证；物理 NIC / External switch / VMQ-SR-IOV、
-  嵌套 guest、VLAN 标签帧、LWF 对注入帧的可见性均未验证（后者 B4b 才相关）。
-- 每帧解析的成本未测，B6 做 benchmark。
+  嵌套 guest、VLAN 标签帧、LWF 对注入帧的可见性均未验证。
+- 每帧解析与注入的成本未测，B6 做 benchmark。
+
+## Forwarded TCP 数据面（B4b）
+
+B4b 在 B4a 的 L2 callout 之上执行 TCP 的入口 DNAT、redirect 表与回程 SNAT。原帧一律被消费
+（FWP_ACTION_BLOCK），改写后的副本才注入；不存在「PERMIT 原帧再注入副本」的加法路径。
+
+### 配置与 ABI
+
+probe_forwarded_config（ABI v5，28 字节）：
+
+| 字段 | 说明 |
+|---|---|
+| enabled | 1 = 启用 redirect 数据面；0 = 关闭并清空 redirect 表 |
+| listener_port | DNAT 目标端口；也是回程识别的源端口 |
+| family | 4 / 6；必须与入口帧地址族一致 |
+| listener_address[16] | DNAT 目标地址 L（listener 所在的本机地址） |
+
+- ioctl_set_forwarded_config / ioctl_get_forwarded_config（0x80C / 0x80D）。
+- ioctl_query_forwarded_redirect（0x80E）：输入 probe_forwarded_redirect_query
+  （listener_port + client 地址/端口），输出 probe_forwarded_redirect（原始服务器、upstream_id、
+  rule_index、ingress、state）。查不到返回 STATUS_NOT_FOUND。
+- 关闭配置或在 listener 端口/地址/族变化时清空 redirect 表；只换规则 blob 不清表，旧流继续用旧表项
+  与旧 upstream（表项带建表时的 generation / upstream_id）。
+- probe_forwarded_stats 在尾部追加 redirect 计数（matched_redirect、redirected、
+  redirect_created/ingress/return/blocked/...、redirect_active/high_water），并追加诊断计数
+  redirect_multi_nb、inject_complete_calls、inject_complete_failed；结构 296 字节。v4 的 0–143
+  字段偏移不变，redirect_active/high_water/last_status/abi_version 整体后移（ABI v5，旧夹具必须同批升级）。
+
+### redirect 表
+
+- 入口 key：(ingress_ifindex, family, client_ip, client_port, server_ip, server_port)；
+  回程 key：(family, listener_port, client_ip, client_port)。两条索引指向同一批表项（哈希桶 + 链）。
+- 容量 4096。SYN-only 帧建表；数据帧命中后把状态从 syn 提升到 established。
+- FIN/RST 标记 closing，保留 5s grace；syn 30s、established 300s 无活动后回收。
+  超时回收是惰性的：查表时判定过期，槽位在下一次建表失败扫描时释放。
+- 客户端端口复用时，回程 key 冲突的旧表项先被删除，再插入新表项。
+- 表项记录入口帧的源 MAC（client_mac）与目的 MAC（local_mac），回程注入用它们还原以太网头。
+
+### 入口 DNAT
+
+命中 redirect 规则的入向 TCP 帧：
+
+1. 非 TCP（B4b 的 UDP 仍归 B5）→ 原帧 block + redirect_non_tcp。
+2. 没有 config / L / 族不匹配 → block + redirect_no_config。
+3. 查入口表：命中则 DNAT；未命中且是纯 SYN → 建表后 DNAT；未命中且非 SYN → block +
+   redirect_no_state（无法中继已建立连接）。
+4. 表满 → block + redirect_capacity；注入失败 → block + redirect_inject_failed。
+5. DNAT = 目的地址/端口改成 (L, listener_port)，重算 IPv4 头校验和与 TCP 校验和（IPv6 用伪头），
+   复制整帧后用 FwpsInjectMacReceiveAsync0 注入；原帧 FWP_ACTION_BLOCK。
+
+出向帧命中 redirect 规则时不能执行本机 DNAT，按失败关闭处理（block + redirect_no_state）。
+
+### 回程 SNAT
+
+出向 TCP 帧的源端口等于 listener_port 时按回程 key 查表。MAC 层一个 NBL 可以携带多个 NET_BUFFER
+（每个 NET_BUFFER 是一帧），必须逐 NET_BUFFER 查询/改写/注入；这是 B4b 返工修掉的真实丢包根因：
+只处理首个 NET_BUFFER 时，同一 NBL 里后续的 1448B/376B 段被 block 后没有副本，接收端出现 1824B 空洞，
+TCP 停在 ISN+1 或只收到 60–63KiB。
+
+- 命中：每个 NET_BUFFER 独立复制、源地址/端口改回原始服务器 (server_ip, server_port)，目的 MAC =
+  表项 client_mac，源 MAC = 表项 local_mac，重算校验和，FwpsInjectMacSendAsync0 注入入口网卡；
+  整个原 NBL block。FIN/RST 同时把表项标记 closing。
+- 未命中：不误改，继续走 B4a 的规则匹配（通常 fallback permit）；只有确实出现 listener 源端口候选
+  但查表失败时才计 redirect_return_miss，普通本机出向流量不会污染这个计数。
+- 一个 NBL 里的 NET_BUFFER 必须属于同一 listener 回程流；B4b 按同流假设处理，混合流不在本版支持范围。
+- 回程注入调用失败：block 原帧 + redirect_return_failed；部分 NET_BUFFER 注入失败时仍计 redirected，
+  失败段数进 redirect_inject_failed，由 TCP 重传恢复，不 fail-open。
+- 注入完成例程检查 NET_BUFFER_LIST_STATUS：非 SUCCESS 计 inject_complete_failed 并记录 last_status，
+  不再静默丢副本。
+### 防环与注入
+
+- 两层 classify 开头显式调用 FwpsQueryPacketInjectionState0；本驱动注入的帧直接 permit 并计
+  self_injected。
+- 注入的 NBL 由 FwpsAllocateNetBufferAndNetBufferList0 分配，数据缓冲用独立池标签 WfIj；
+  完成例程释放 NBL / MDL / 数据。MDL 用 NdisAllocateMdl 且 NdisHandle 传 NBL 池句柄：
+  传 nullptr 会被 PREfast C6387 判缺陷；改用 IoAllocateMdl 的 MDL 实测注入后被本机栈丢弃。
+- 帧长按整帧复制，不截断到 1600 字节；VLAN 标签与 IPv4 选项 / IPv6 扩展头按解析出的偏移处理。
+- 一帧一个注入 NBL：即使源 NBL 有多个 NET_BUFFER，也逐帧 FwpsAllocateNetBufferAndNetBufferList0，
+  避免把一个 NBL 的整块数据当成单个以太网帧发送。
+- stop 时先 FwpsInjectionHandleDestroy0（文档保证等待 outstanding 回调），再显式等待
+  outstanding_injections 归零，最后销毁 NBL 池，避免完成例程晚到踩已释放池。
+- 帧长按整帧复制，不截断到 1600 字节；VLAN 标签与 IPv4 选项 / IPv6 扩展头按解析出的偏移处理。
+### 计数
+
+在 B4a 恒等式之外追加：
+
+    inbound_frames + outbound_frames ==
+        self_injected + no_table + malformed + non_ip + permitted + blocked + redirected
+    blocked == matched_block + fallback_block + redirect_blocked + redirect_return_failed
+    matched == matched_permit + matched_block + matched_redirect
+    matched_redirect == redirect_ingress + redirect_blocked
+    redirect_blocked == no_config + no_state + capacity + non_tcp + inject_failed
+    redirected == redirect_ingress + redirect_return
+
+redirect_active / redirect_high_water 是快照时的表状态；reset_forwarded_stats 把 high_water
+重置为当前 active。
+
+### 验证
+
+VM 侧（套件会打印 [forwarded-tcp] READY 后等待外部客户端）：
+
+    wfprobe forwarded-tcp --phase core --local-ip 192.168.100.2 --listener-port 40400 \
+        --remote-address 10.99.0.1 --remote-port 40250 --backend 192.168.100.4:40250
+    wfprobe forwarded-tcp --phase upstreams ...   # 两条规则 → 两个 SOCKS5 测试上游
+    wfprobe forwarded-tcp --phase fail ...        # 只有规则、没有 config：连接超时、redirect_no_config 增加
+    wfprobe forwarded-tcp --restore-only          # 兜底：disabled config + 空 permit 表
+
+core 断言：listener accept、IOCTL 查回 server/upstream/ingress、直连或 SOCKS5 中继字节一致、
+半关闭正常收尾、redirect_created/ingress/return 增长、帧去向与 redirect 拆分恒等式成立。
+upstreams 断言两个端口分别命中 upstream 0/1 且两个测试 SOCKS5 各收到一次 CONNECT。
+fail 断言 listener 收不到连接、redirect_no_config 与 redirect_blocked 增长。
+
+Linux 侧 E2E：外部客户端连「原始服务器地址:端口」，套件/控制器把它 DNAT 到 listener 并中继回
+Linux 目标；客户端看到的对端仍是原始地址。环境没有 root 加测试路由时，用 VM Internal 网卡上的
+on-link 别名（例如 192.168.100.99/24）代替 10.99.0.0/24 路由；两种拓扑验证的是同一条 L2 入向
+路径，测试后都要删除别名/路由与防火墙规则。
+
+B4b 实测证据（2026-10-23）：
+- 根因：回程只处理 NET_BUFFER_LIST_FIRST_NB。pktmon 抓到 .99:40250→.4 的 44×1448B 已发出，
+  下一个 376B 段完全没出现；同一 NBL 的多个 NET_BUFFER 被 block 后只注入了首帧，接收端出现
+  63712B/1824B 空洞，TCP 停在 ISN+1 或 60–63KiB。修复后 multi_nb=7~33，单客户端 10/10、
+  core 13/13、5 客户端并发（core 与 SOCKS 相各一轮）5/5，客户端都实收 65536B 且 SHA/ACK 一致。
+- core 单客户端 13/13：redirected=59 (ingress=52 return=7)、multi_nb=7、complete=102/failed=0、
+  redirect_return_miss=0；客户端 acked=65538，服务端 peer 仍是 192.168.100.99:40250。
+- upstreams：顺序与并发（两个 SOCKS5）都 65536B 双向一致；--expect-accepts 5 的单上游并发
+  redirected=306 (ingress=266 return=40)、multi_nb=33、complete=520/failed=0。
+- fail：客户端超时，listener 无 accept，redirect_no_config=3、redirect_blocked=3、blocked=3。
+- 产品 E2E：relay accept #1 original=192.168.100.99:40250 source=forwarded ... upstream_id=0
+  ingress=5 upstream=socks5:192.168.100.4:40500，in/out 各 65536；退出 enabled=0、空 blob、
+  accepted=1 refused=0、code=0。
+- host 回归：rules 10 轮、selftest、gates、udp-rules、forwarded-rules（F1/F2/F3/F6）全 PASS。
+### 边界
+
+- 第一版只支持单入口、单 listener 端口、单 L；多入口/多 L 留 B6。
+- UDP redirect 在 B4b 仍然 block（B5 接入）。
+- 只处理首片；非首片没有传输层头部，按 no_state block（文档与实现一致）。
+- 表满路径没有用 4096 条真实连接压测；容量语义由建表返回值与 redirect_capacity 计数锁住。
+- LWF（WinpkFilter）对注入帧的可见性仍未测；显式注入状态查询只解决本驱动自触发。
 
 ## 系统要求
 

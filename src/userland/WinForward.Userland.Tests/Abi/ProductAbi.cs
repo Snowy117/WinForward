@@ -20,6 +20,9 @@ internal static class ProductAbi
         ["redirect_context"] = typeof(RedirectContext),
         ["probe_forwarded_info"] = typeof(ProbeForwardedInfo),
         ["probe_forwarded_stats"] = typeof(ProbeForwardedStats),
+        ["probe_forwarded_config"] = typeof(ProbeForwardedConfig),
+        ["probe_forwarded_redirect_query"] = typeof(ProbeForwardedRedirectQuery),
+        ["probe_forwarded_redirect"] = typeof(ProbeForwardedRedirect),
     };
 
     internal static AbiStruct Describe(string headerName)

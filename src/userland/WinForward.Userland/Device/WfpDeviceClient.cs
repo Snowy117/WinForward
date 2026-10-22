@@ -90,6 +90,26 @@ public sealed class WfpDeviceClient : IDisposable
 
     public void ResetForwardedStats() => Ioctl(ProbeIoctl.ResetForwardedStatsCode, Array.Empty<byte>(), 0);
 
+    public void SetForwardedConfig(ProbeForwardedConfig config) =>
+        Ioctl(ProbeIoctl.SetForwardedConfigCode,
+              MemoryMarshal.AsBytes(new ReadOnlySpan<ProbeForwardedConfig>(in config)).ToArray(),
+              0);
+
+    public ProbeForwardedConfig GetForwardedConfig() =>
+        ReadStruct<ProbeForwardedConfig>(ProbeIoctl.GetForwardedConfigCode, "GetForwardedConfig");
+
+    /// <summary>按 (listener_port, client) 查 redirect 表；未命中时驱动返回 NOT_FOUND，这里抛 Win32Exception。</summary>
+    public ProbeForwardedRedirect QueryForwardedRedirect(ProbeForwardedRedirectQuery query)
+    {
+        byte[] input = MemoryMarshal.AsBytes(new ReadOnlySpan<ProbeForwardedRedirectQuery>(in query)).ToArray();
+        byte[] data = Ioctl(ProbeIoctl.QueryForwardedRedirectCode, input, DeviceLayout.ProbeForwardedRedirectSize);
+        if (data.Length != DeviceLayout.ProbeForwardedRedirectSize)
+        {
+            throw new InvalidOperationException(
+                $"QueryForwardedRedirect 返回 {data.Length} 字节，期望 {DeviceLayout.ProbeForwardedRedirectSize}");
+        }
+        return MemoryMarshal.Read<ProbeForwardedRedirect>(data);
+    }
     public ProbeEvent[] GetEvents(int maxEvents)
     {
         if (maxEvents <= 0)
@@ -169,6 +189,26 @@ public sealed class WfpDeviceClient : IDisposable
 
     private static string Describe(uint code)
     {
+        if (code == ProbeIoctl.GetForwardedStatsCode)
+        {
+            return "GetForwardedStats";
+        }
+
+        if (code == ProbeIoctl.SetForwardedConfigCode)
+        {
+            return "SetForwardedConfig";
+        }
+
+        if (code == ProbeIoctl.GetForwardedConfigCode)
+        {
+            return "GetForwardedConfig";
+        }
+
+        if (code == ProbeIoctl.QueryForwardedRedirectCode)
+        {
+            return "QueryForwardedRedirect";
+        }
+
         if (code == ProbeIoctl.SetConfigCode)
         {
             return "SetConfig";

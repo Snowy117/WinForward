@@ -1,3 +1,4 @@
+using System.Net;
 using WinForward.Userland.Configuration;
 using WinForward.Userland.Forwarded;
 using WinForward.Userland.Policy;
@@ -9,7 +10,7 @@ namespace WinForward.Userland.Control;
 /// </summary>
 /// <remarks>
 /// <see cref="Forwarded"/> / <see cref="ForwardedBlob"/> 为 null 表示配置里没有 forwarded 段；
-/// B2 只把 forwarded 的编译结果带到控制器，真正的下发（IOCTL / redirect 表）属于 B4；
+/// B4b 起控制器会把 forwarded 表与 redirect 数据面配置（listener 端口/地址 L）一起下发；
 /// <see cref="ForwardedUpstreams"/> 与 <see cref="Configuration.ControllerConfiguration.ForwardedUpstreams"/> 是同一张有序表。
 /// </remarks>
 public sealed class ControllerSettings
@@ -32,7 +33,7 @@ public sealed class ControllerSettings
     /// <summary>可选的 forwarded 策略；null 表示没有 forwarded 段。</summary>
     public ForwardedPolicyTable? Forwarded { get; init; }
 
-    /// <summary>forwarded 表编译出的字节流；null 表示没有 forwarded 段，B2 不会下发它。</summary>
+    /// <summary>forwarded 表编译出的字节流；null 表示没有 forwarded 段，控制器改为下发空 permit 表。</summary>
     public byte[]? ForwardedBlob { get; init; }
 
     /// <summary>命名上游表，与 <see cref="Configuration.ControllerConfiguration.Upstreams"/> 同源。</summary>
@@ -44,6 +45,12 @@ public sealed class ControllerSettings
     /// B4 用 id 从这里取 endpoint，不依赖 <see cref="Upstreams"/> 的枚举顺序。
     /// </summary>
     public IReadOnlyList<ForwardedUpstream> ForwardedUpstreams { get; init; } = [];
+
+    /// <summary>
+    /// forwarded DNAT 的本地地址 L（listener 绑定地址 / 注入帧的目的地址）。
+    /// null 时按 forwarded 规则的入口适配器自动选第一个 IPv4 地址；找不到就拒绝启用 forwarded。
+    /// </summary>
+    public IPAddress? ForwardedListenerAddress { get; init; }
 
     public TimeSpan ShutdownTimeout { get; init; } = TimeSpan.FromSeconds(3);
 }

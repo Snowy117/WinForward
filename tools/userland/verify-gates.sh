@@ -96,7 +96,7 @@ sed -i 's/redirect_context_magic = 0x31434657U;/redirect_context_magic = 0x31434
 expect_mutation_red "ABI/改 redirect_context 魔数" run_abi_with_root "$tmp"
 reset_header
 
-sed -i 's/public const uint AbiVersion = 4;/public const uint AbiVersion = 5;/' "$tmp/tools/wfprobe/Protocol.cs"
+sed -i 's/public const uint AbiVersion = 5;/public const uint AbiVersion = 6;/' "$tmp/tools/wfprobe/Protocol.cs"
 expect_mutation_red "ABI/改夹具的 ABI 版本" run_abi_with_root "$tmp"
 reset_header
 
@@ -162,7 +162,7 @@ cp "$socks5_client.bak" "$socks5_client"
 
 backup src/userland/WinForward.Userland/Relay/OutboundConnector.cs
 connector="src/userland/WinForward.Userland/Relay/OutboundConnector.cs"
-sed -i 's/if (_socks5 is not null)/if (false)/' "$connector"
+sed -i 's/if (socks5 is not null)/if (false)/' "$connector"
 expect_mutation_red "SOCKS5/配了上游却走直连（静默回退）" dotnet run --project "$tests_project" -c Release -- test
 cp "$connector.bak" "$connector"
 

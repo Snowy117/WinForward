@@ -1,11 +1,12 @@
+using System.Net;
 using System.Runtime.InteropServices;
 
 namespace WinForward.Probe;
 
-// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v4）。
+// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v5）。
 internal static class Protocol
 {
-    public const uint AbiVersion = 4;
+    public const uint AbiVersion = 5;
 
     // CTL_CODE(FILE_DEVICE_UNKNOWN, function, METHOD_BUFFERED, FILE_ANY_ACCESS)
     private static uint MakeIoctl(uint function) => (0x22u << 16) | (function << 2);
@@ -25,6 +26,10 @@ internal static class Protocol
     public const uint IoctlGetForwardedStats = 0x80A;
     public const uint IoctlResetForwardedStats = 0x80B;
 
+    // v5：forwarded TCP 数据面。
+    public const uint IoctlSetForwardedConfig = 0x80C;
+    public const uint IoctlGetForwardedConfig = 0x80D;
+    public const uint IoctlQueryForwardedRedirect = 0x80E;
     public static uint SetConfigCode => MakeIoctl(IoctlSetConfig);
     public static uint GetConfigCode => MakeIoctl(IoctlGetConfig);
     public static uint GetStatsCode => MakeIoctl(IoctlGetStats);
@@ -37,7 +42,9 @@ internal static class Protocol
     public static uint GetForwardedInfoCode => MakeIoctl(IoctlGetForwardedInfo);
     public static uint GetForwardedStatsCode => MakeIoctl(IoctlGetForwardedStats);
     public static uint ResetForwardedStatsCode => MakeIoctl(IoctlResetForwardedStats);
-
+    public static uint SetForwardedConfigCode => MakeIoctl(IoctlSetForwardedConfig);
+    public static uint GetForwardedConfigCode => MakeIoctl(IoctlGetForwardedConfig);
+    public static uint QueryForwardedRedirectCode => MakeIoctl(IoctlQueryForwardedRedirect);
     public const uint MaxSelfProcessIds = 8;
     public const uint RuleBlobMaxSize = 64 * 1024;
 
@@ -182,8 +189,96 @@ internal struct ProbeForwardedStats
     public ulong NoWriteRight;
     public ulong RejectedBlobs;
     public ulong TablesReplaced;
+    public ulong MatchedRedirect;
+    public ulong Redirected;
+    public ulong RedirectCreated;
+    public ulong RedirectIngress;
+    public ulong RedirectReturn;
+    public ulong RedirectBlocked;
+    public ulong RedirectReturnFailed;
+    public ulong RedirectNoConfig;
+    public ulong RedirectNoState;
+    public ulong RedirectCapacity;
+    public ulong RedirectNonTcp;
+    public ulong RedirectInjectFailed;
+    public ulong RedirectExpired;
+    public ulong RedirectReturnMiss;
+    public ulong RedirectMultiNb;
+    public ulong InjectCompleteCalls;
+    public ulong InjectCompleteFailed;
+    public uint RedirectActive;
+    public uint RedirectHighWater;
     public uint LastStatus;
     public uint AbiVersion;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal unsafe struct ProbeForwardedConfig
+{
+    public uint Enabled;
+    public ushort ListenerPort;
+    public byte Family;
+    public byte Reserved0;
+    public fixed byte ListenerAddress[16];
+    public uint Reserved1;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal unsafe struct ProbeForwardedRedirectQuery
+{
+    public ushort ListenerPort;
+    public byte Family;
+    public byte Reserved0;
+    public fixed byte ClientAddress[16];
+    public ushort ClientPort;
+    public ushort Reserved1;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal unsafe struct ProbeForwardedRedirect
+{
+    public const uint MagicValue = 0x31524657; // "WFR1"
+    public const ushort VersionValue = 1;
+
+    public uint Magic;
+    public ushort Version;
+    public byte Family;
+    public byte Protocol;
+    public fixed byte ClientAddress[16];
+    public ushort ClientPort;
+    public fixed byte ServerAddress[16];
+    public ushort ServerPort;
+    public ushort ListenerPort;
+    public ushort Reserved0;
+    public uint IngressIfIndex;
+    public uint UpstreamId;
+    public uint RuleIndex;
+    public uint State;
+
+    public IPAddress ClientIP
+    {
+        get
+        {
+            fixed (byte* pointer = ClientAddress)
+            {
+                return AddressOf(pointer, Family);
+            }
+        }
+    }
+
+    public IPAddress ServerIP
+    {
+        get
+        {
+            fixed (byte* pointer = ServerAddress)
+            {
+                return AddressOf(pointer, Family);
+            }
+        }
+    }
+
+    private static IPAddress AddressOf(byte* address, byte family) =>
+        family == 4 ? new IPAddress(new ReadOnlySpan<byte>(address, 4)) : new IPAddress(new ReadOnlySpan<byte>(address, 16));
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
@@ -229,7 +324,10 @@ internal static class ProtocolLayout
         Check<ProbeStats>(264, "ProbeStats");
         Check<ProbeRuleInfo>(32, "ProbeRuleInfo");
         Check<ProbeForwardedInfo>(32, "ProbeForwardedInfo");
-        Check<ProbeForwardedStats>(152, "ProbeForwardedStats");
+        Check<ProbeForwardedStats>(296, "ProbeForwardedStats");
+        Check<ProbeForwardedConfig>(28, "ProbeForwardedConfig");
+        Check<ProbeForwardedRedirectQuery>(24, "ProbeForwardedRedirectQuery");
+        Check<ProbeForwardedRedirect>(64, "ProbeForwardedRedirect");
         Check<ProbeEvent>(64, "ProbeEvent");
         Check<RedirectContext>(36, "RedirectContext");
     }

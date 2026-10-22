@@ -498,18 +498,18 @@ internal static class ForwardedSuite
         byte[] truncated = valid[..(valid.Length - 4)];
         CheckRejected(device, truncated, 87, "F6 截断的 blob 被拒");
 
-        byte[] redirect = ForwardedBlobBuilder.Build(
+        byte[] permitWithUpstream = ForwardedBlobBuilder.Build(
             new[]
             {
                 new ForwardedTestRule
                 {
-                    Action = Protocol.RuleActionRedirect,
+                    Action = Protocol.RuleActionPermit,
                     IngressAdapterId = ifIndex,
                     UpstreamId = 0,
                 },
             },
             Protocol.RuleActionPermit);
-        CheckRejected(device, redirect, 50, "F6 redirect 规则被拒（B4a 不执行，STATUS_NOT_SUPPORTED）");
+        CheckRejected(device, permitWithUpstream, 87, "F6 非 redirect 带 upstream 被拒（upstream 组合非法）");
 
         ProbeForwardedInfo after = device.GetForwardedInfo();
         ProbeForwardedStats statsAfter = device.GetForwardedStats();
@@ -803,14 +803,17 @@ internal static class ForwardedSuite
                     $"{name}：classify_calls == no_write_right + in + out");
         Check.Equal((long)(stats.InboundFrames + stats.OutboundFrames),
                     (long)(stats.SelfInjected + stats.NoTable + stats.Malformed + stats.NonIp + stats.Permitted +
-                           stats.Blocked),
+                           stats.Blocked + stats.Redirected),
                     $"{name}：帧去向守恒");
         Check.Equal((long)stats.Permitted, (long)(stats.MatchedPermit + stats.FallbackPermit),
                     $"{name}：permitted == matched_permit + fallback_permit");
-        Check.Equal((long)stats.Blocked, (long)(stats.MatchedBlock + stats.FallbackBlock),
-                    $"{name}：blocked == matched_block + fallback_block");
-        Check.Equal((long)stats.Matched, (long)(stats.MatchedPermit + stats.MatchedBlock),
-                    $"{name}：matched == matched_permit + matched_block");
+        Check.Equal((long)stats.Blocked,
+                    (long)(stats.MatchedBlock + stats.FallbackBlock + stats.RedirectBlocked +
+                           stats.RedirectReturnFailed),
+                    $"{name}：blocked == matched_block + fallback_block + redirect 失败");
+        Check.Equal((long)stats.Matched,
+                    (long)(stats.MatchedPermit + stats.MatchedBlock + stats.MatchedRedirect),
+                    $"{name}：matched == permit + block + redirect");
         Check.Equal((long)stats.Fallback, (long)(stats.FallbackPermit + stats.FallbackBlock),
                     $"{name}：fallback == fallback_permit + fallback_block");
     }
@@ -818,10 +821,12 @@ internal static class ForwardedSuite
     private static bool InvariantsHold(ProbeForwardedStats stats) =>
         stats.ClassifyCalls == stats.NoWriteRight + stats.InboundFrames + stats.OutboundFrames &&
         stats.InboundFrames + stats.OutboundFrames ==
-        stats.SelfInjected + stats.NoTable + stats.Malformed + stats.NonIp + stats.Permitted + stats.Blocked &&
+        stats.SelfInjected + stats.NoTable + stats.Malformed + stats.NonIp + stats.Permitted + stats.Blocked +
+            stats.Redirected &&
         stats.Permitted == stats.MatchedPermit + stats.FallbackPermit &&
-        stats.Blocked == stats.MatchedBlock + stats.FallbackBlock &&
-        stats.Matched == stats.MatchedPermit + stats.MatchedBlock &&
+        stats.Blocked ==
+            stats.MatchedBlock + stats.FallbackBlock + stats.RedirectBlocked + stats.RedirectReturnFailed &&
+        stats.Matched == stats.MatchedPermit + stats.MatchedBlock + stats.MatchedRedirect &&
         stats.Fallback == stats.FallbackPermit + stats.FallbackBlock;
 
     private static uint? FindAdapterIndex(string address)

@@ -29,7 +29,7 @@ constexpr wchar_t forwarded_callout_description[] =
     L"WinForward forwarded rules on native MAC frame layers (pass/block)";
 constexpr std::uint32_t retire_wait_rounds = 200; // 10 ms * 200 = 2 s
 constexpr std::uint32_t retire_wait_milliseconds = 10;
-
+constexpr std::uint32_t injection_pool_tag = 'jIfW';
 } // namespace
 
 forwarded_state g_forwarded_state{};
@@ -205,17 +205,7 @@ forwarded_table* allocate_forwarded_table(const std::uint8_t* data, std::uint32_
         return nullptr;
     }
 
-    for (std::uint32_t index = 0; index < table->view.rule_count; ++index)
-    {
-        if (table->view.rules[index].action == rule_action::redirect)
-        {
-            DbgPrint("wfprobe: forwarded rule %u is redirect; this build cannot execute it (B4b)\n", index);
-            ExFreePoolWithTag(table, rule_pool_tag);
-            status = STATUS_NOT_SUPPORTED;
-            return nullptr;
-        }
-    }
-
+    // B4b：redirect 规则由 classify 的数据面执行；这里不再整块拒绝。
     status = STATUS_SUCCESS;
     return table;
 }
@@ -247,6 +237,26 @@ NTSTATUS probe_forwarded_start(HANDLE engine_handle) noexcept
     {
         state.injection_handle = nullptr;
         return status;
+    }
+
+    NET_BUFFER_LIST_POOL_PARAMETERS pool_parameters{};
+    pool_parameters.Header.Type = NDIS_OBJECT_TYPE_DEFAULT;
+    pool_parameters.Header.Revision = NET_BUFFER_LIST_POOL_PARAMETERS_REVISION_1;
+    pool_parameters.Header.Size = NDIS_SIZEOF_NET_BUFFER_LIST_POOL_PARAMETERS_REVISION_1;
+    pool_parameters.fAllocateNetBuffer = TRUE;
+    pool_parameters.DataSize = 0;
+    pool_parameters.PoolTag = injection_pool_tag;
+    state.nbl_pool = NdisAllocateNetBufferListPool(nullptr, &pool_parameters);
+    if (state.nbl_pool == nullptr)
+    {
+        probe_forwarded_stop(engine_handle);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    if (!forwarded_redirect_init(state.redirects))
+    {
+        probe_forwarded_stop(engine_handle);
+        return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     status = register_layer(state.inbound,
@@ -290,6 +300,23 @@ void probe_forwarded_stop(HANDLE engine_handle) noexcept
         FwpsInjectionHandleDestroy0(state.injection_handle);
         state.injection_handle = nullptr;
     }
+    // FwpsInjectionHandleDestroy0 按文档会等所有 outstanding 注入回调；这里再显式等一次，
+    // 保证 NBL 池在最后一个完成例程释放 NBL 之后才被销毁。
+    for (std::uint32_t attempt = 0;
+         attempt < retire_wait_rounds && InterlockedCompareExchange64(&state.outstanding_injections, 0, 0) != 0;
+         ++attempt)
+    {
+        wait_one_tick();
+    }
+
+    if (state.nbl_pool != nullptr)
+    {
+        NdisFreeNetBufferListPool(state.nbl_pool);
+        state.nbl_pool = nullptr;
+    }
+
+    forwarded_redirect_free(state.redirects);
+    RtlZeroMemory(&state.config, sizeof(state.config));
 }
 
 void probe_forwarded_release_all() noexcept
@@ -346,6 +373,138 @@ NTSTATUS probe_forwarded_apply_blob(const void* buffer, ULONG input_length) noex
     return STATUS_SUCCESS;
 }
 
+NTSTATUS probe_forwarded_apply_config(const void* buffer, ULONG input_length) noexcept
+{
+    forwarded_state& state = g_forwarded_state;
+    if (buffer == nullptr || input_length < sizeof(probe_forwarded_config))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    probe_forwarded_config candidate{};
+    RtlCopyMemory(&candidate, buffer, sizeof(candidate));
+    if (candidate.reserved0 != 0 || candidate.reserved1 != 0)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (candidate.family != 0 && candidate.family != 4 && candidate.family != 6)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    const bool enabled = candidate.enabled != 0;
+    if (enabled)
+    {
+        if (candidate.listener_port == 0 || (candidate.family != 4 && candidate.family != 6))
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+        const std::uint32_t address_size = candidate.family == 4 ? 4U : 16U;
+        bool address_present = false;
+        for (std::uint32_t index = 0; index < 16; ++index)
+        {
+            if (index < address_size)
+            {
+                address_present = address_present || candidate.listener_address[index] != 0;
+            }
+            else if (candidate.listener_address[index] != 0)
+            {
+                return STATUS_INVALID_PARAMETER;
+            }
+        }
+        if (!address_present)
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+    }
+
+    KIRQL old_irql{};
+    const bool raised = forwarded_lock(old_irql);
+    const probe_forwarded_config previous = state.config;
+    const bool listener_changed = previous.listener_port != candidate.listener_port ||
+                                  previous.family != candidate.family ||
+                                  !RtlEqualMemory(previous.listener_address, candidate.listener_address, 16);
+    state.config = candidate;
+    if (!enabled || previous.enabled != candidate.enabled || listener_changed)
+    {
+        forwarded_redirect_clear(state.redirects);
+    }
+    state.stats.last_status = static_cast<std::uint32_t>(STATUS_SUCCESS);
+    forwarded_unlock(raised, old_irql);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS probe_forwarded_get_config(void* buffer, ULONG output_length) noexcept
+{
+    if (buffer == nullptr || output_length < sizeof(probe_forwarded_config))
+    {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    forwarded_state& state = g_forwarded_state;
+    KIRQL old_irql{};
+    const bool raised = forwarded_lock(old_irql);
+    const probe_forwarded_config snapshot = state.config;
+    forwarded_unlock(raised, old_irql);
+
+    RtlCopyMemory(buffer, &snapshot, sizeof(snapshot));
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+probe_forwarded_query_redirect(const void* buffer, ULONG input_length, void* output, ULONG output_length) noexcept
+{
+    if (buffer == nullptr || input_length < sizeof(probe_forwarded_redirect_query) || output == nullptr ||
+        output_length < sizeof(probe_forwarded_redirect))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    probe_forwarded_redirect_query query{};
+    RtlCopyMemory(&query, buffer, sizeof(query));
+    if (query.reserved0 != 0 || query.reserved1 != 0 || query.listener_port == 0 || query.client_port == 0 ||
+        (query.family != 4 && query.family != 6))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    forwarded_state& state = g_forwarded_state;
+    forwarded_redirect_snapshot snapshot{};
+    forwarded_redirect_lookup lookup = forwarded_redirect_lookup::missing;
+
+    KIRQL old_irql{};
+    const bool raised = forwarded_lock(old_irql);
+    lookup = forwarded_redirect_find_return(
+        state.redirects, query.family, query.listener_port, query.client_address, query.client_port, snapshot);
+    if (lookup == forwarded_redirect_lookup::expired)
+    {
+        ++state.stats.redirect_expired;
+    }
+    forwarded_unlock(raised, old_irql);
+
+    if (lookup != forwarded_redirect_lookup::found)
+    {
+        return STATUS_NOT_FOUND;
+    }
+
+    probe_forwarded_redirect result{};
+    result.magic = forwarded_redirect_magic;
+    result.version = forwarded_redirect_version;
+    result.family = snapshot.family;
+    result.protocol = 6;
+    result.client_port = snapshot.client_port;
+    result.server_port = snapshot.server_port;
+    result.listener_port = snapshot.listener_port;
+    result.ingress_ifindex = snapshot.ingress_ifindex;
+    result.upstream_id = snapshot.upstream_id;
+    result.rule_index = snapshot.rule_index;
+    result.state = snapshot.state;
+    RtlCopyMemory(result.client_address, snapshot.client_address, 16);
+    RtlCopyMemory(result.server_address, snapshot.server_address, 16);
+    RtlCopyMemory(output, &result, sizeof(result));
+    return STATUS_SUCCESS;
+}
+
 void probe_forwarded_info_snapshot(probe_forwarded_info& info) noexcept
 {
     forwarded_state& state = g_forwarded_state;
@@ -372,6 +531,11 @@ void probe_forwarded_stats_snapshot(probe_forwarded_stats& stats) noexcept
     KIRQL old_irql{};
     const bool raised = forwarded_lock(old_irql);
     RtlCopyMemory(&stats, &state.stats, sizeof(stats));
+    stats.redirect_active = state.redirects.active;
+    if (state.redirects.high_water > stats.redirect_high_water)
+    {
+        stats.redirect_high_water = state.redirects.high_water;
+    }
     forwarded_unlock(raised, old_irql);
 }
 
@@ -381,8 +545,12 @@ void probe_forwarded_reset_stats() noexcept
 
     KIRQL old_irql{};
     const bool raised = forwarded_lock(old_irql);
+    const std::uint32_t active = state.redirects.active;
+    state.redirects.high_water = active;
     RtlZeroMemory(&state.stats, sizeof(state.stats));
     state.stats.abi_version = probe_abi_version;
+    state.stats.redirect_active = active;
+    state.stats.redirect_high_water = active;
     forwarded_unlock(raised, old_irql);
 }
 

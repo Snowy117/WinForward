@@ -181,8 +181,8 @@ try {
 
     $r1 = Read-Text $report1
     Assert "退出时关闭重定向" ($r1 -match "controller-config-disabled enabled=0") $r1.Trim()
-    Assert "A3/V4 原始目的地读回正确" ($r1 -match "relay accept #\d+ original=127\.0\.0\.1:$echoPort family=IPv4") $r1.Trim()
-    Assert "A3/V6 原始目的地读回正确" ($r1 -match "relay accept #\d+ original=::1:$echoPort family=IPv6") $r1.Trim()
+    Assert "A3/V4 原始目的地读回正确" ($r1 -match "relay accept #\d+ original=127\.0\.0\.1:$echoPort source=host family=IPv4") $r1.Trim()
+    Assert "A3/V6 原始目的地读回正确" ($r1 -match "relay accept #\d+ original=::1:$echoPort source=host family=IPv6") $r1.Trim()
     Assert "A4 两条会话各搬运 $Bytes 字节" (([regex]::Matches($r1, "relay close #\d+ in=$Bytes out=$Bytes")).Count -eq 2) $r1.Trim()
     Assert "退出摘要 2 条连接、双向 $($Bytes * 2) 字节" ($r1 -match "controller-stop accepted=2 refused=0 bytes_in=$($Bytes * 2) bytes_out=$($Bytes * 2)") $r1.Trim()
     Assert "没有第二条 accept（没有成环）" (([regex]::Matches($r1, "relay accept #")).Count -eq 2) $r1.Trim()

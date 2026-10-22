@@ -87,6 +87,32 @@ internal sealed class WfpDevice : IDisposable
 
     public void ResetForwardedStats() => Ioctl(Protocol.ResetForwardedStatsCode, ReadOnlySpan<byte>.Empty, 0);
 
+    public unsafe void SetForwardedConfig(ProbeForwardedConfig config)
+    {
+        ReadOnlySpan<byte> bytes = new(&config, sizeof(ProbeForwardedConfig));
+        Ioctl(Protocol.SetForwardedConfigCode, bytes, 0);
+    }
+
+    public unsafe ProbeForwardedConfig GetForwardedConfig()
+    {
+        byte[] data = Ioctl(Protocol.GetForwardedConfigCode, ReadOnlySpan<byte>.Empty,
+                            sizeof(ProbeForwardedConfig));
+        if (data.Length != sizeof(ProbeForwardedConfig))
+            throw new InvalidOperationException(
+                $"GetForwardedConfig 返回 {data.Length} 字节，期望 {sizeof(ProbeForwardedConfig)}");
+        return MemoryMarshal.Read<ProbeForwardedConfig>(data);
+    }
+
+    public unsafe ProbeForwardedRedirect QueryForwardedRedirect(ProbeForwardedRedirectQuery query)
+    {
+        ReadOnlySpan<byte> input = new(&query, sizeof(ProbeForwardedRedirectQuery));
+        byte[] data = Ioctl(Protocol.QueryForwardedRedirectCode, input, sizeof(ProbeForwardedRedirect));
+        if (data.Length != sizeof(ProbeForwardedRedirect))
+            throw new InvalidOperationException(
+                $"QueryForwardedRedirect 返回 {data.Length} 字节，期望 {sizeof(ProbeForwardedRedirect)}");
+        return MemoryMarshal.Read<ProbeForwardedRedirect>(data);
+    }
+
     // 诊断：把 UTF-16LE 字节交给内核的 collect_process_path，回读 UTF-8 长度与内容。
     public (uint Utf8Length, string Text) MeasureProcessPath(byte[] utf16)
     {

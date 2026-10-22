@@ -335,6 +335,25 @@ _Dispatch_type_(IRP_MJ_DEVICE_CONTROL) NTSTATUS dispatch_device_control(PDEVICE_
         probe_forwarded_reset_stats();
         status = STATUS_SUCCESS;
         break;
+    case ioctl_set_forwarded_config:
+        status = probe_forwarded_apply_config(buffer, input_length);
+        break;
+
+    case ioctl_get_forwarded_config:
+        status = probe_forwarded_get_config(buffer, output_length);
+        if (NT_SUCCESS(status))
+        {
+            information = sizeof(probe_forwarded_config);
+        }
+        break;
+
+    case ioctl_query_forwarded_redirect:
+        status = probe_forwarded_query_redirect(buffer, input_length, buffer, output_length);
+        if (NT_SUCCESS(status))
+        {
+            information = sizeof(probe_forwarded_redirect);
+        }
+        break;
 
     case ioctl_measure_process_path:
     {

@@ -10,6 +10,8 @@
 #include <cstdint>
 
 #include "probe_forwarded.h"
+#include "probe_forwarded_frame.h"
+#include "probe_forwarded_redirect.h"
 
 namespace winforward::wfp::probe
 {
@@ -21,8 +23,12 @@ struct forwarded_state
     std::uint32_t generation;
     KSPIN_LOCK lock;
     HANDLE injection_handle;
+    NDIS_HANDLE nbl_pool; // 注入帧的 NBL 池（FwpsAllocateNetBufferAndNetBufferList0 使用）
+    volatile LONG64 outstanding_injections; // 已排队但完成例程还没回调的注入数
     layer_state inbound;
     layer_state outbound;
+    probe_forwarded_config config;
+    forwarded_redirect_table redirects;
     probe_forwarded_stats stats;
 };
 
@@ -104,6 +110,21 @@ inline void publish_forwarded_counters(forwarded_state& state, const probe_forwa
     state.stats.no_write_right += delta.no_write_right;
     state.stats.rejected_blobs += delta.rejected_blobs;
     state.stats.tables_replaced += delta.tables_replaced;
+    state.stats.matched_redirect += delta.matched_redirect;
+    state.stats.redirected += delta.redirected;
+    state.stats.redirect_created += delta.redirect_created;
+    state.stats.redirect_ingress += delta.redirect_ingress;
+    state.stats.redirect_return += delta.redirect_return;
+    state.stats.redirect_blocked += delta.redirect_blocked;
+    state.stats.redirect_return_failed += delta.redirect_return_failed;
+    state.stats.redirect_no_config += delta.redirect_no_config;
+    state.stats.redirect_no_state += delta.redirect_no_state;
+    state.stats.redirect_capacity += delta.redirect_capacity;
+    state.stats.redirect_non_tcp += delta.redirect_non_tcp;
+    state.stats.redirect_inject_failed += delta.redirect_inject_failed;
+    state.stats.redirect_expired += delta.redirect_expired;
+    state.stats.redirect_return_miss += delta.redirect_return_miss;
+    state.stats.redirect_multi_nb += delta.redirect_multi_nb;
     forwarded_unlock(raised, old_irql);
 }
 

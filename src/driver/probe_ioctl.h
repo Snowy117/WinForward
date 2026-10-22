@@ -1,6 +1,6 @@
 #pragma once
 
-// 驱动与测试程序之间的控制面 ABI（v4）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
+// 驱动与测试程序之间的控制面 ABI（v5）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
 // 两侧都有布局断言。任何字段调整都必须同时提升 probe_abi_version。
 //
 // 与 src/common/redirect_context.h 的分工：那个头定义的是“用途数据”（随连接走、用户态用
@@ -13,7 +13,7 @@
 namespace winforward::wfp::probe
 {
 
-inline constexpr std::uint32_t probe_abi_version = 4;
+inline constexpr std::uint32_t probe_abi_version = 5;
 
 // 单块规则 blob 的上限。METHOD_BUFFERED 会替我们复制一份输入，这个上限只用于拒绝明显
 // 异常的下发（正常策略是几百字节到几 KB）。
@@ -55,6 +55,97 @@ inline constexpr std::uint32_t ioctl_get_forwarded_info = make_ioctl(0x809);
 inline constexpr std::uint32_t ioctl_get_forwarded_stats = make_ioctl(0x80A);
 inline constexpr std::uint32_t ioctl_reset_forwarded_stats = make_ioctl(0x80B);
 
+// v5：forwarded TCP 数据面。三块新 IOCTL 与 host 配置完全独立：
+//   - set/get_forwarded_config：redirect 的启用开关、listener 端口与本地地址 L（DNAT 目标）；
+//   - query_forwarded_redirect：listener 接受连接后按 (listener_port, client_ip, client_port)
+//     查原始目的地 / upstream_id / ingress，查不到返回 STATUS_NOT_FOUND。
+// 关闭 forwarded config 会清空 redirect 表；换 blob 不清表（旧流保持旧表项与旧 upstream）。
+inline constexpr std::uint32_t ioctl_set_forwarded_config = make_ioctl(0x80C);
+inline constexpr std::uint32_t ioctl_get_forwarded_config = make_ioctl(0x80D);
+inline constexpr std::uint32_t ioctl_query_forwarded_redirect = make_ioctl(0x80E);
+
+// 一次 redirect 查询的输入：用户态用 accepted socket 的本地端口（listener）与对端（client）填。
+// family 与 client_address 必须与驱动表项的地址族一致。
+struct probe_forwarded_redirect_query
+{
+    std::uint16_t listener_port;
+    std::uint8_t family; // 4 / 6
+    std::uint8_t reserved0;
+    std::uint8_t client_address[16];
+    std::uint16_t client_port;
+    std::uint16_t reserved1;
+};
+
+static_assert(sizeof(probe_forwarded_redirect_query) == 24, "probe_forwarded_redirect_query 是对外 ABI");
+static_assert(offsetof(probe_forwarded_redirect_query, listener_port) == 0);
+static_assert(offsetof(probe_forwarded_redirect_query, family) == 2);
+static_assert(offsetof(probe_forwarded_redirect_query, client_address) == 4);
+static_assert(offsetof(probe_forwarded_redirect_query, client_port) == 20);
+static_assert(offsetof(probe_forwarded_redirect_query, reserved1) == 22);
+
+// redirect 表项的生命周期状态。数值是对外 ABI，只追加。
+inline constexpr std::uint32_t forwarded_redirect_state_syn = 1;
+inline constexpr std::uint32_t forwarded_redirect_state_established = 2;
+inline constexpr std::uint32_t forwarded_redirect_state_closing = 3;
+
+// 查询输出。magic/version 让用户态在解析字段前先认版本；地址按原样保存（IPv4 只用前 4 字节）。
+inline constexpr std::uint32_t forwarded_redirect_magic = 0x31524657U; // 内存中为 "WFR1"
+inline constexpr std::uint16_t forwarded_redirect_version = 1;
+
+struct probe_forwarded_redirect
+{
+    std::uint32_t magic;
+    std::uint16_t version;
+    std::uint8_t family; // 4 / 6
+    std::uint8_t protocol; // IPPROTO_TCP（B4b 只有 TCP）
+    std::uint8_t client_address[16];
+    std::uint16_t client_port;
+    std::uint8_t server_address[16];
+    std::uint16_t server_port;
+    std::uint16_t listener_port;
+    std::uint16_t reserved0;
+    std::uint32_t ingress_ifindex;
+    std::uint32_t upstream_id;
+    std::uint32_t rule_index;
+    std::uint32_t state; // forwarded_redirect_state_*
+};
+
+static_assert(sizeof(probe_forwarded_redirect) == 64, "probe_forwarded_redirect 是对外 ABI");
+static_assert(offsetof(probe_forwarded_redirect, magic) == 0);
+static_assert(offsetof(probe_forwarded_redirect, version) == 4);
+static_assert(offsetof(probe_forwarded_redirect, family) == 6);
+static_assert(offsetof(probe_forwarded_redirect, protocol) == 7);
+static_assert(offsetof(probe_forwarded_redirect, client_address) == 8);
+static_assert(offsetof(probe_forwarded_redirect, client_port) == 24);
+static_assert(offsetof(probe_forwarded_redirect, server_address) == 26);
+static_assert(offsetof(probe_forwarded_redirect, server_port) == 42);
+static_assert(offsetof(probe_forwarded_redirect, listener_port) == 44);
+static_assert(offsetof(probe_forwarded_redirect, reserved0) == 46);
+static_assert(offsetof(probe_forwarded_redirect, ingress_ifindex) == 48);
+static_assert(offsetof(probe_forwarded_redirect, upstream_id) == 52);
+static_assert(offsetof(probe_forwarded_redirect, rule_index) == 56);
+static_assert(offsetof(probe_forwarded_redirect, state) == 60);
+
+// forwarded 数据面配置。enabled=1 时 listener_address/listener_port 是 DNAT 目标：
+// 入口帧的目的地址与端口改写为 (listener_address, listener_port)，再由 Windows 栈投递给
+// 绑定在 listener_port 上的进程。family 只允许 4 / 6；关闭时 driver 会清空 redirect 表。
+struct probe_forwarded_config
+{
+    std::uint32_t enabled;
+    std::uint16_t listener_port;
+    std::uint8_t family; // 4 / 6；enabled=1 时必填
+    std::uint8_t reserved0;
+    std::uint8_t listener_address[16];
+    std::uint32_t reserved1;
+};
+
+static_assert(sizeof(probe_forwarded_config) == 28, "probe_forwarded_config 是对外 ABI");
+static_assert(offsetof(probe_forwarded_config, enabled) == 0);
+static_assert(offsetof(probe_forwarded_config, listener_port) == 4);
+static_assert(offsetof(probe_forwarded_config, family) == 6);
+static_assert(offsetof(probe_forwarded_config, reserved0) == 7);
+static_assert(offsetof(probe_forwarded_config, listener_address) == 8);
+static_assert(offsetof(probe_forwarded_config, reserved1) == 24);
 // 一次 classify 的结论。数值是对外 ABI，C# 侧按名字镜像；新增只追加。
 enum class probe_decision : std::uint8_t
 {
@@ -215,9 +306,14 @@ static_assert(offsetof(probe_forwarded_info, reserved0) == 28);
 // 恒等式（对任意 reset 之后的增量成立）：
 //   classify_calls == no_write_right + inbound_frames + outbound_frames
 //   inbound_frames + outbound_frames ==
-//       self_injected + no_table + malformed + non_ip + permitted + blocked
-//   permitted == matched_permit + fallback_permit；blocked == matched_block + fallback_block
-//   matched == matched_permit + matched_block；fallback == fallback_permit + fallback_block
+//       self_injected + no_table + malformed + non_ip + permitted + blocked + redirected
+//   permitted == matched_permit + fallback_permit
+//   blocked == matched_block + fallback_block + redirect_blocked + redirect_return_failed
+//   matched == matched_permit + matched_block + matched_redirect
+//   matched_redirect == redirect_ingress + redirect_blocked
+//   redirect_blocked == no_config + no_state + capacity + non_tcp + inject_failed
+//   redirected == redirect_ingress + redirect_return
+//   fallback == fallback_permit + fallback_block
 struct probe_forwarded_stats
 {
     std::uint64_t classify_calls;
@@ -238,17 +334,51 @@ struct probe_forwarded_stats
     std::uint64_t no_write_right;
     std::uint64_t rejected_blobs;
     std::uint64_t tables_replaced;
+    // v5 在 stats 尾部追加 redirect 计数；v4 的 0–143 字段偏移不变，last_status / abi_version 后移。
+    std::uint64_t matched_redirect;
+    std::uint64_t redirected;
+    // v5：redirect 数据面计数。bucket 语义：
+    //   matched_redirect：命中 redirect 规则的帧数（原帧一定被消费或 block）；
+    //   redirected：成功改写并注入的帧数（入口 DNAT + 回程 SNAT）；
+    //   redirect_blocked：入口 redirect 失败被 block 的帧数（no_config/no_state/capacity/non_tcp/inject）；
+    //   redirect_return_failed：回程 SNAT 失败被 block 的 listener 帧数。
+    std::uint64_t redirect_created;
+    std::uint64_t redirect_ingress;
+    std::uint64_t redirect_return;
+    std::uint64_t redirect_blocked;
+    std::uint64_t redirect_return_failed;
+    std::uint64_t redirect_no_config;
+    std::uint64_t redirect_no_state;
+    std::uint64_t redirect_capacity;
+    std::uint64_t redirect_non_tcp;
+    std::uint64_t redirect_inject_failed;
+    std::uint64_t redirect_expired;
+    std::uint64_t redirect_return_miss;
+    // v5 诊断：多 NET_BUFFER 的 NBL、注入完成例程的调用/失败次数。
+    std::uint64_t redirect_multi_nb;
+    std::uint64_t inject_complete_calls;
+    std::uint64_t inject_complete_failed;
+    std::uint32_t redirect_active;
+    std::uint32_t redirect_high_water;
     std::uint32_t last_status;
     std::uint32_t abi_version;
 };
 
-static_assert(sizeof(probe_forwarded_stats) == 152, "probe_forwarded_stats 是对外 ABI");
+static_assert(sizeof(probe_forwarded_stats) == 296, "probe_forwarded_stats 是对外 ABI");
 static_assert(offsetof(probe_forwarded_stats, permitted) == 24);
 static_assert(offsetof(probe_forwarded_stats, self_injected) == 88);
 static_assert(offsetof(probe_forwarded_stats, rejected_blobs) == 128);
 static_assert(offsetof(probe_forwarded_stats, tables_replaced) == 136);
-static_assert(offsetof(probe_forwarded_stats, last_status) == 144);
-static_assert(offsetof(probe_forwarded_stats, abi_version) == 148);
+static_assert(offsetof(probe_forwarded_stats, matched_redirect) == 144);
+static_assert(offsetof(probe_forwarded_stats, redirected) == 152);
+static_assert(offsetof(probe_forwarded_stats, redirect_created) == 160);
+static_assert(offsetof(probe_forwarded_stats, redirect_multi_nb) == 256);
+static_assert(offsetof(probe_forwarded_stats, inject_complete_calls) == 264);
+static_assert(offsetof(probe_forwarded_stats, inject_complete_failed) == 272);
+static_assert(offsetof(probe_forwarded_stats, redirect_active) == 280);
+static_assert(offsetof(probe_forwarded_stats, redirect_high_water) == 284);
+static_assert(offsetof(probe_forwarded_stats, last_status) == 288);
+static_assert(offsetof(probe_forwarded_stats, abi_version) == 292);
 
 // 环形事件日志。时间戳是 KeQueryInterruptTime() 的 100ns 计数，仅用于排序与相对比较；
 // 地址按原样保存（IPv4 只用前 4 字节），端口为主机字节序。

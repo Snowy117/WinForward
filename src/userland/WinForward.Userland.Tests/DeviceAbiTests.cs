@@ -1,3 +1,4 @@
+using System.Net;
 using System.Runtime.InteropServices;
 using WinForward.Userland.Device;
 using WinForward.Userland.Relay;
@@ -19,6 +20,7 @@ internal static class DeviceAbiTests
         TestRunner.Add("device/重定向目的地解析 TCP 与 UDP 上下文", RedirectDestinationProtocols);
         TestRunner.Add("device/中继拒绝非 TCP redirect context", RelayRefusalGate);
         TestRunner.Add("device/forwarded 结构可往返字节", ForwardedRoundTrip);
+        TestRunner.Add("device/forwarded config 与 redirect 查询结构可往返字节", ForwardedRedirectRoundTrip);
     }
 
     private static void LayoutVerify() => DeviceLayout.Verify();
@@ -249,6 +251,7 @@ internal static class DeviceAbiTests
         stats.Blocked = 1;
         stats.RejectedBlobs = 2;
         stats.TablesReplaced = 3;
+        stats.MatchedRedirect = 1;
         stats.AbiVersion = ProbeIoctl.AbiVersion;
         byte[] statsBytes = new byte[DeviceLayout.ProbeForwardedStatsSize];
         MemoryMarshal.Write(statsBytes, in stats);
@@ -257,6 +260,52 @@ internal static class DeviceAbiTests
         Check.Equal(11UL, BitConverter.ToUInt64(statsBytes, 0), "classify_calls 在偏移 0");
         Check.Equal(6UL, BitConverter.ToUInt64(statsBytes, 16), "outbound_frames 在偏移 16");
         Check.Equal(2UL, BitConverter.ToUInt64(statsBytes, 128), "rejected_blobs 在偏移 128");
-        Check.Equal(ProbeIoctl.AbiVersion, BitConverter.ToUInt32(statsBytes, 148), "abi_version 在偏移 148");
+        Check.Equal(ProbeIoctl.AbiVersion, BitConverter.ToUInt32(statsBytes, 292), "abi_version 在偏移 292");
+        Check.Equal(1UL, BitConverter.ToUInt64(statsBytes, 144), "matched_redirect 在偏移 144");
+    }
+
+    private static void ForwardedRedirectRoundTrip()
+    {
+        ProbeForwardedConfig config = ProbeForwardedConfig.EnabledFor(40400, IPAddress.Parse("192.168.100.2"));
+        byte[] configBytes = new byte[DeviceLayout.ProbeForwardedConfigSize];
+        MemoryMarshal.Write(configBytes, in config);
+        Check.Equal(1U, BitConverter.ToUInt32(configBytes, 0), "enabled 在偏移 0");
+        Check.Equal((ushort)40400, BitConverter.ToUInt16(configBytes, 4), "listener_port 在偏移 4");
+        Check.Equal((byte)4, configBytes[6], "family 在偏移 6");
+        Check.Equal((byte)192, configBytes[8], "listener_address 在偏移 8");
+
+        ProbeForwardedRedirectQuery query =
+            ProbeForwardedRedirectQuery.ForClient(40400, new IPEndPoint(IPAddress.Parse("192.168.100.4"), 51234));
+        byte[] queryBytes = new byte[DeviceLayout.ProbeForwardedRedirectQuerySize];
+        MemoryMarshal.Write(queryBytes, in query);
+        Check.Equal((ushort)40400, BitConverter.ToUInt16(queryBytes, 0), "query.listener_port 在偏移 0");
+        Check.Equal((byte)4, queryBytes[2], "query.family 在偏移 2");
+        Check.Equal((byte)192, queryBytes[4], "query.client_address 在偏移 4");
+
+        ProbeForwardedRedirect redirect = default;
+        redirect.Magic = ProbeForwardedRedirect.MagicValue;
+        redirect.Version = ProbeForwardedRedirect.VersionValue;
+        redirect.Family = 4;
+        redirect.Protocol = RedirectContext.ProtocolTcp;
+        redirect.ClientAddress[0] = 192;
+        redirect.ClientPort = 51234;
+        redirect.ServerAddress[0] = 10;
+        redirect.ServerPort = 40250;
+        redirect.ListenerPort = 40400;
+        redirect.IngressIfIndex = 5;
+        redirect.UpstreamId = 1;
+        redirect.RuleIndex = 2;
+        redirect.State = ProbeForwardedRedirect.StateEstablished;
+        byte[] redirectBytes = new byte[DeviceLayout.ProbeForwardedRedirectSize];
+        MemoryMarshal.Write(redirectBytes, in redirect);
+        ProbeForwardedRedirect restored = MemoryMarshal.Read<ProbeForwardedRedirect>(redirectBytes);
+        Check.Equal(ProbeForwardedRedirect.MagicValue, restored.Magic, "redirect.magic");
+        Check.Equal(ProbeForwardedRedirect.VersionValue, restored.Version, "redirect.version");
+        Check.Equal((ushort)40250, restored.ServerPort, "redirect.server_port");
+        Check.Equal(5U, restored.IngressIfIndex, "redirect.ingress_ifindex");
+        Check.Equal(1U, restored.UpstreamId, "redirect.upstream_id");
+        Check.Equal(2U, restored.RuleIndex, "redirect.rule_index");
+        Check.Equal(ProbeForwardedRedirect.StateEstablished, restored.State, "redirect.state");
+        Check.Equal("10.0.0.0", restored.ServerIP.ToString(), "redirect.server_ip 只取 IPv4 前 4 字节");
     }
 }

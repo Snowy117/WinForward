@@ -146,7 +146,8 @@ SOCKS5（VM loopback）→ 跨机 target」。
 逐字段、逐常量、逐枚举比较。只改任意一侧都会让 `abi/*` 测试变红；`tools/userland/verify-gates.sh`
 用临时副本改头、改夹具、改产品常量来证明这一点。
 
-**范围**：`abi/*` 只锁**控制面 IOCTL**（`probe_ioctl.h` + `redirect_context.h` + 夹具），包括 v4 的
+**范围**：`abi/*` 只锁**控制面 IOCTL**（`probe_ioctl.h` + `redirect_context.h` + 夹具），包括 v5 的
+`probe_forwarded_config` / `probe_forwarded_redirect*` 与 `0x80C`–`0x80E`，以及 v4 的
 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL。规则 blob 的
 `src/common/rule_blob.h` 不在这组测试里——它由 `tests/host` 的跨语言差分 ctest 锁（C# 产 blob、C++ 用
 同一份 `try_open_blob` + `match` 消费）。注意 `RuleBlobLayout`/`RuleBlobHeader` 里的字节数字是**手抄**
@@ -158,20 +159,23 @@ SOCKS5（VM loopback）→ 跨机 target」。
 
 `WinForward.Controller run --config <文件>` 的顺序：
 
-1. 编译配置（含上面所有编译期检查）并拒绝当前驱动执行不了的 forwarded 动作（`redirect` 属 B4b，
-   会在打开设备前以退出码 2 失败）；失败即退出码 2，不会碰驱动；
+1. 编译配置（含上面所有编译期检查）；配置非法时在打开设备前以退出码 2 失败，不会碰驱动；
 2. 打开 `\\.\WfProbe`（设备 DACL 只允许 SYSTEM/Administrators），校验 ABI 版本；
 3. 先把 `enabled` 置 0（清掉上一次异常退出可能留下的死端口配置）；
 4. 绑 `0.0.0.0:0` 与 `[::]:P`（v6 显式 `DualMode = false`，与 v4 共用系统分配的端口）；
 5. 下发规则 blob，回读规则数/兜底动作/blob 长度并逐项核对；再下发 forwarded 表：配置里有
    `forwarded` 段就用编译出的 blob，没有就下发一张空 permit 表（清掉上一次异常退出留下的规则），
    两种情况都回读 `installed` / 规则数 / 兜底动作 / blob 长度 / generation；
-6. 下发配置：`listener_process_id` = 本进程、`listener_port` = P、self-PID 集合 = 本进程；
-7. 接受连接 → `SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT` 读回原始目的地 →
-   带 `SIO_QUERY_WFP_CONNECTION_REDIRECT_RECORDS`（有的话）建出站（直连，或按 `socks5` 段 CONNECT 到上游）→
+6. 下发 host 配置：`listener_process_id` = 本进程、`listener_port` = P、self-PID 集合 = 本进程；
+   有 forwarded 段时再下发 forwarded config：先 `enabled=0` 清 redirect 表，再 `enabled=1` 指向
+   listener 本地地址 L（L 解析失败则回滚为 disabled）；
+7. 接受连接 → 依次尝试 forwarded redirect 表与 `SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT` 读回原始
+   目的地（forwarded 命中时按 `upstream_id` 从 `ForwardedUpstreams` 选 SOCKS5）→
+   带 `SIO_QUERY_WFP_CONNECTION_REDIRECT_RECORDS`（有的话）建出站（直连，或按所选上游 CONNECT）→
    双向转发；
-8. 退出时先把 `enabled` 置 0，再把 forwarded 表换成空 permit 表，然后停监听、等会话收尾，
-   最后报告字节数。注意：异常退出 / 进程被杀时不保证恢复 forwarded 表——那时只能靠运维脚本
+8. 退出时先把 host `enabled` 置 0，再把 forwarded config 置 disabled（清 redirect 表）并换成空
+   permit 表，然后停监听、等会话收尾，最后报告字节数。注意：异常退出 / 进程被杀时不保证恢复
+   forwarded config / 表——那时只能靠运维脚本
    或 `wfprobe forwarded-rules --restore-only` 兜底。
 
 中继的出站连接默认带上原连接的 redirect records，驱动因此用**闸 2（redirect state）**放行；
