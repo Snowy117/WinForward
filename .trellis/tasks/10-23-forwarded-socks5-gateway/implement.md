@@ -6,14 +6,18 @@
 
 | 批次 | 范围 | 依赖 | 验证 |
 |---|---|---|---|
-| **B1** | forwarded blob + matcher + C# 编译器/布局/差分（规则层） | — | ctest + dotnet test |
-| **B2** | JSON `forwarded` 段、多上游、clientCidr 解析/校验、控制器接线 | B1 | dotnet test |
-| **B3** | L2 可见性/注入 spike（VM），决定 D1 | — | research 报告 + 手工 TCP |
-| **B4** | TCP 数据面：驱动 DNAT/回程 + listener/relay/SOCKS5 E2E | B1/B2/B3 | VM 套件 |
-| **B5** | UDP 数据面：关联/NAT + SOCKS5 UDP E2E | B4 检查通过 | VM 套件 |
-| **B6** | 多入口/CIDR/热替换/失败/观测/门禁/文档/性能收尾 | B4/B5 | 完整 gate |
+| 批次 | 范围 | 依赖 | 状态 |
+|---|---|---|---|
+| **B1** | forwarded blob + matcher + C# 编译器/布局（规则层） | — | 完成（已提交） |
+| **B2** | JSON `forwarded` 段、多上游、clientCidr、控制器接线 | B1 | 完成（已提交） |
+| **B3** | L2 可见性/注入 spike（VM），决定 D1 | — | 有条件通过（A5 转 B4/B6） |
+| **B4a** | 驱动 L2 骨架：callout、forwarded blob 下发、入口匹配、pass/block、计数 | B1/B2/B3 | 下一步 |
+| **B4b** | TCP DNAT、redirect 表、查询 IOCTL、回程 SNAT、注入 | B4a | 待 B4a |
+| **B4c** | 用户态 listener/中继、upstream 选择、TCP E2E | B4b | 待 B4b |
+| **B5** | UDP 数据面：关联/NAT + SOCKS5 UDP E2E | B4c 检查通过 | 待 B4c |
+| **B6** | 多入口/CIDR/热替换/失败/观测/门禁/文档/性能收尾 | B4/B5 | 收尾 |
 
-并发边界：B1 与 B3 文件集不相交，可并行；B2 依赖 B1；B4 依赖 B1/B2/B3；B5 必须在 B4 检查通过后开始；B6 收尾。
+并发边界：B1/B2/B3 已完成；B4a→B4b→B4c 串行；B5 必须在 B4c 检查通过后开始；B6 收尾。
 
 ## 0. 前置 spike：驱动形态与可见性
 

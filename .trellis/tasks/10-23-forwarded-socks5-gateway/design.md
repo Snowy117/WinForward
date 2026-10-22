@@ -4,7 +4,7 @@
 
 | # | 决策 | 理由 |
 |---|---|---|
-| D1 | 第一版优先在现有 WFP 驱动上加 **MAC 层（L2）callout + `FwpsInjectMacSendAsync0/ReceiveAsync0`**；spike 证明可见性或注入不达标时，转独立 NDIS LWF | 复用现有 provider/callout/IOCTL/规则框架，避免重写整个驱动；L2 层拿得到完整以太网帧，能 DNAT、能回注。LWF 作为退路，数据面行为相同 |
+| D1 | 第一版采用 **WFP MAC 层（L2）callout + `FwpsInjectMacSendAsync0/ReceiveAsync0`**；B3 spike 已证明 netvsc 上可见、双向注入可用。继续 L2 的条件见 §13；spike 不达标时才转独立 NDIS LWF | 复用现有 provider/callout/IOCTL/规则框架；L2 层拿得到完整以太网帧，能 DNAT、能回注。LWF 作为退路，数据面行为相同 |
 | D2 | 原始目的地 **不走 WFP `redirect_context`**，由驱动维护 redirect 表，用户态用新 IOCTL 查询 | Forwarded 没有本机 socket，不进 `ALE_CONNECT_REDIRECT`，没有 `localRedirectContext` 和 `SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT` 可用 |
 | D3 | 配置复用 `Forwarded.Rules`：`adapterId/adapterName` 就是入口适配器，`action=proxy` + `target` 就是 SOCKS5 上游；不新增顶层 schema | 与 WinForward 包版语义一致，edition parity 成本最低；用户已有的 forwarded 配置可以直接用 |
 | D4 | 驱动侧新增独立的 `wf_forwarded_blob`（v1），不与 host 的 `wf_rule_blob` 混用；两者共享 matcher 的规范化/CIDR/端口代码 | host 规则按进程匹配，forwarded 按入口适配器匹配，字段集不同；独立 blob 避免破坏 host ABI，也避免"一个 blob 两种语义" |
@@ -256,11 +256,12 @@ struct wf_forwarded_lookup {
 | SOCKS5 上游不支持 UDP ASSOCIATE | 运行期失败关闭并计数；文档写明上游要求 |
 | 热替换串流 | 表项带 generation；旧流不查新表 |
 | IPv6 scope/link-local | 第一版 happy path；link-local 目的按包版策略 pass |
+| 加法注入不等于 DNAT | B3 spike 只证明“复制帧注入”；B4 必须消费/改写原帧，不能 PERMIT 原帧再注入副本 |
 | 性能不达标 | 记录基线；驱动内批量注入、UDP 批量作为后续优化 |
 
 **未决**：
 
-- D1 的 spike 结果（L2 vs LWF）。
+- D1 的 spike 结果：**已结案（技术可行性通过）**。netvsc 上 MAC 帧层可见、双向注入可用；继续 L2 的条件是 A5 成本补测、原帧消费/改写、流级触发、显式 `FwpsQueryPacketInjectionState0`、LWF 注入可见性补测、VLAN/出向 layer 59。A5 转 B4/B6；D7 是否正式从 NDISAPI 迁移另行产品决策。
 - External switch 是否在后续任务用 vSwitch 扩展覆盖。
 - `clientCidr` 是否需要在第一版之后加入。
 - 表容量默认值与上游连接数上限。
