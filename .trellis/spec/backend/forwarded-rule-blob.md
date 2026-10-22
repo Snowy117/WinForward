@@ -239,12 +239,14 @@ total_size          = network_pool_offset + network_entry_count * 20
 JSON → ControllerConfiguration.Forwarded (ForwardedPolicyTable) → ForwardedBlobCompiler.Compile → wf_forwarded_blob
 ```
 
-B2 只做到“解析 + 编译 + 报告”；把 blob 下发进驱动、建立 redirect 表是 B4。
+B2 只做到“解析 + 编译 + 报告”；把 blob 下发进驱动是 **B4a**（`ioctl_set_forwarded_blob`，ABI v4），
+建立 redirect 表 / DNAT / 回程是 B4b。B4a 只执行 permit / block：含 `redirect` 规则的 blob 会被驱动以
+`STATUS_NOT_SUPPORTED` 整块拒绝，`CheckCommand` / `RunCommand` 在打开设备前也会提前拒绝并指出 B4b。
 
 | JSON | 模型 | blob |
 |---|---|---|
 | `socks5Servers[].name` | `ControllerConfiguration.ForwardedUpstreams`（有序 id→endpoint）的 `Name` | 上游 id 的来源 |
-| `socks5Servers[].host/port` | `Socks5Endpoint` | 不在 blob 里；B4 用它建 SOCKS5 连接 |
+| `socks5Servers[].host/port` | `Socks5Endpoint` | 不在 blob 里；B4b 用它建 SOCKS5 连接 |
 | 旧 `socks5` | `ForwardedUpstreams` 的 `default` 项（`Upstreams["default"]` 供 target 查找） | 同上 |
 | `forwarded.fallbackAction` | `ForwardedPolicyTable.FallbackAction` | header `fallback_action` |
 | `rules[i].action` | `ForwardedPolicyRule.Action` | rule `action`（`redirect` 即包版 `proxy`） |
@@ -262,7 +264,7 @@ B2 只做到“解析 + 编译 + 报告”；把 blob 下发进驱动、建立 r
   与旧 `socks5` 同时存在视为冲突。这个编号是本次配置内的顺序，不跨配置稳定。
 - **上游表**：解析结果同时维护 `ControllerConfiguration.ForwardedUpstreams`（`Id` → `Socks5Endpoint` 的有序表，
   `Id` 就是 blob 的 `upstream_id`）和 `Upstreams`（大小写不敏感的名字字典）。`Upstreams` 只用于 `target`
-  查找；B4 按 `upstream_id` 从 `ForwardedUpstreams` 取 endpoint，不依赖字典枚举顺序。
+  查找；B4b 按 `upstream_id` 从 `ForwardedUpstreams` 取 endpoint，不依赖字典枚举顺序。
 - **适配器**：`adapterId` / `adapterName` 可单独给，也可同时给；同时给时配置层分别调用
   `IAdapterIdResolver.TryResolve` 再比对，结果不一致即报错。没有 resolver 时带 adapter 选择器的
   forwarded 规则直接报错；解析结果 `0xFFFFFFFF` 是“任意入口”哨兵，不能当具体 id。
@@ -271,8 +273,10 @@ B2 只做到“解析 + 编译 + 报告”；把 blob 下发进驱动、建立 r
 - **process**：forwarded 规则没有宿主进程，出现 `process` 直接报错。
 - **诊断**：配置层消息统一带 `forwarded.rules[i].<field>`，target / adapter 错误附带规则名；
   CIDR 族冲突、端口区间颠倒、`fallbackAction = redirect` 都在配置层提前拒绝。
-- **控制器**：`WfpController.Start` 在 `ForwardedBlob` 非空时只输出
-  `controller-forwarded count=<rules> upstreams=<n> blob=<bytes>`，B2 不新增任何设备调用；
-  `CheckCommand` 会编译 forwarded blob 并报告规则数/上游数，编译失败仍走退出码 2。
+- **控制器**：`WfpController.Start` 在 `ForwardedBlob` 非空时下发并回读校验（installed / 规则数 /
+  fallback / total_size / generation），再输出 `controller-forwarded count=<rules> upstreams=<n> blob=<bytes>`
+  与 `controller-forwarded-installed ...`；没有 forwarded 段时下发空 permit 表并同样回读（清掉上次
+  异常退出留下的规则）。退出/回滚时恢复空 permit 表并回读，异常退出不保证恢复。
+  `CheckCommand` 会编译 forwarded blob、报告规则数/上游数并提前拒绝 redirect，编译失败仍走退出码 2。
 - **上限**：配置层不做规则数/网段池上限的重复判断，最终仍由 `ForwardedBlobCompiler`
   按 `ForwardedPolicyLimits` 拒绝。

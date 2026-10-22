@@ -1,4 +1,5 @@
 using WinForward.Userland.Configuration;
+using WinForward.Userland.Control;
 using WinForward.Userland.Forwarded;
 using WinForward.Userland.Policy;
 
@@ -13,7 +14,10 @@ internal static class CheckCommand
 
         try
         {
-            ControllerConfiguration configuration = PolicyConfigurationDocument.LoadConfiguration(path);
+            IAdapterIdResolver? adapterResolver =
+                OperatingSystem.IsWindows() ? new WindowsAdapterIdResolver() : null;
+            ControllerConfiguration configuration =
+                PolicyConfigurationDocument.LoadConfiguration(path, adapterResolver);
             PolicyTable policy = configuration.Policy;
             // 没有 process 规则时编译器不会调用 normalizer；用无副作用实现，
             // 非 Windows 也能离线跑 check（有 process 规则时仍需要 Windows 解析器）。
@@ -25,6 +29,7 @@ internal static class CheckCommand
 
             if (configuration.Forwarded is not null)
             {
+                ForwardedRuntimeSupport.EnsureExecutable(configuration.Forwarded);
                 byte[] forwardedBlob = ForwardedBlobCompiler.Compile(configuration.Forwarded);
                 Console.WriteLine(
                     $"forwarded rules={configuration.Forwarded.Rules.Count} " +

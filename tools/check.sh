@@ -114,6 +114,9 @@ indent_tail() {
     tail -n "${2:-40}" <<<"$1" | sed 's/^/    /'
 }
 
+# 工作区检查用 `git ls-files --cached --others --exclude-standard`：既要覆盖已跟踪文件，
+# 也要覆盖本批新增、还没 git add 的文件；--exclude-standard 让 build/、bin/obj/ 等产物
+# 继续被 .gitignore 挡住，不会把构建目录扫进来。
 collect_git_paths() { # collect_git_paths <数组名> <git 参数...>
     local -n target="$1"
     shift
@@ -244,7 +247,8 @@ pass "环境" "${env_detail}"
 # ---------- 格式 ----------
 run_format_check_worktree() {
     local -a files=()
-    if ! collect_git_paths files ls-files -z -- "${cpp_source_globs[@]}"; then
+    if ! collect_git_paths files ls-files --cached --others --exclude-standard -z -- \
+        "${cpp_source_globs[@]}"; then
         fail "格式" "git ls-files 失败"
         return
     fi
@@ -381,7 +385,8 @@ run_effective_lines_check() {
 # ---------- cppcheck ----------
 run_cppcheck_check() {
     local -a files=()
-    if ! collect_git_paths files ls-files -z -- "${src_cpp_globs[@]}"; then
+    if ! collect_git_paths files ls-files --cached --others --exclude-standard -z -- \
+        "${src_cpp_globs[@]}"; then
         fail "cppcheck" "git ls-files 失败"
         return
     fi

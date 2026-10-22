@@ -93,7 +93,9 @@ void delete_device() noexcept
 // 注销只对「暂时忙」重试：classify 还在跑时返回 STATUS_DEVICE_BUSY（个别路径会给
 // STATUS_FWP_IN_USE）。STATUS_FWP_CALLOUT_NOT_FOUND 说明已经注销过，直接当成功。
 // 其他永久错误重试没有意义，无限重试只会把 sc stop 永久挂成 STOP_PENDING。
-void unregister_callout(layer_state& layer) noexcept
+} // namespace
+
+static void unregister_callout(layer_state& layer) noexcept
 {
     if (!layer.callout_registered)
     {
@@ -145,7 +147,7 @@ void unregister_callout(layer_state& layer) noexcept
                  0);
 }
 
-void remove_layer_filter(layer_state& layer) noexcept
+static void remove_layer_filter(layer_state& layer) noexcept
 {
     if (layer.filter_added)
     {
@@ -165,11 +167,16 @@ void unregister_callout_layer(layer_state& layer, const GUID& callout_key) noexc
     unregister_callout(layer);
 }
 
+namespace
+{
 // 全部按注册的逆序拆除。用动态 session，即使某一步删除失败，engine 关闭时也会回收
 // 本 session 添加的对象，避免开发过程中反复 load/unload 留下残留。
 void stop_wfp() noexcept
 {
     probe_state& state = g_probe_state;
+
+    // 注册顺序是 host → forwarded，拆除按逆序：先拆 L2，再拆 ALE。
+    probe_forwarded_stop(state.engine_handle);
 
     probe_delete_block_filters(state.block_filter_ids, state.block_filter_count);
     unregister_callout_layer(state.v6, callout_key_v6);
@@ -326,6 +333,14 @@ NTSTATUS start_wfp() noexcept
         stop_wfp();
         return status;
     }
+    // forwarded 与 host 并列：L2 callout 注册失败按整体启动失败处理，
+    // stop_wfp() 会把两边已注册的部分一起按逆序拆掉。
+    status = probe_forwarded_start(state.engine_handle);
+    if (!NT_SUCCESS(status))
+    {
+        stop_wfp();
+        return status;
+    }
 
     return STATUS_SUCCESS;
 }
@@ -372,6 +387,7 @@ void probe_driver_unload(PDRIVER_OBJECT driver_object) noexcept
     // 与 rule IOCTL 共用同一把互斥量：卸载期间不会再有人增删 block filter。
     KeWaitForSingleObject(&g_probe_state.rule_mutex, Executive, KernelMode, FALSE, nullptr);
     stop_wfp();
+    probe_forwarded_release_all();
     probe_release_all_rules();
     KeReleaseMutex(&g_probe_state.rule_mutex, FALSE);
     delete_device();
@@ -382,6 +398,7 @@ NTSTATUS probe_driver_entry(PDRIVER_OBJECT driver_object) noexcept
     probe_state& state = probe_state_ref();
     KeInitializeSpinLock(&state.lock);
     KeInitializeMutex(&state.rule_mutex, 0);
+    probe_forwarded_init();
     state.stats.abi_version = probe_abi_version;
     state.config.abi_version = probe_abi_version;
 

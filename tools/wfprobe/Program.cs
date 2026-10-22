@@ -67,6 +67,8 @@ internal static class Program
                     return UdpCommands.Relay(options);
                 case "udp-rules":
                     return await UdpSuite.RunAsync(options);
+                case "forwarded-rules":
+                    return await ForwardedSuite.RunAsync(options);
                 default:
                     PrintUsage();
                     return 1;
@@ -100,6 +102,12 @@ internal static class Program
   wfprobe udp-relay --bind A.B.C.D --port N [--count K] [--linger-ms M]
   wfprobe udp-rules [--timeout-ms M] [--ping-host HOST] [--connected-window-ms M]
                    [--datagrams N] [--only U1,U2,...]
+  wfprobe forwarded-rules [--ifindex N] [--local-ip A.B.C.D] [--peer HOST:PORT]
+                        [--inbound-port N] [--inbound-wait-ms M] [--timeout-ms M]
+                        [--only F1,F2,...]
+
+  forwarded-rules 的两段式用法：不带 --inbound-wait-ms 时只跑不依赖外部客户端的用例；
+  需要 Linux 客户端入向验证时，用 --inbound-wait-ms 让进程停在监听/等待状态。
 ");
     }
 

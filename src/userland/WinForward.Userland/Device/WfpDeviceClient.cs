@@ -70,6 +70,26 @@ public sealed class WfpDeviceClient : IDisposable
         Ioctl(ProbeIoctl.SetRuleBlobCode, blob, 0);
     }
 
+    public void SetForwardedBlob(byte[] blob)
+    {
+        ArgumentNullException.ThrowIfNull(blob);
+        if (blob.Length == 0 || blob.Length > ProbeIoctl.RuleBlobMaxSize)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(blob), blob.Length, $"forwarded blob 长度必须在 1..{ProbeIoctl.RuleBlobMaxSize}");
+        }
+
+        Ioctl(ProbeIoctl.SetForwardedBlobCode, blob, 0);
+    }
+
+    public ProbeForwardedInfo GetForwardedInfo() =>
+        ReadStruct<ProbeForwardedInfo>(ProbeIoctl.GetForwardedInfoCode, "GetForwardedInfo");
+
+    public ProbeForwardedStats GetForwardedStats() =>
+        ReadStruct<ProbeForwardedStats>(ProbeIoctl.GetForwardedStatsCode, "GetForwardedStats");
+
+    public void ResetForwardedStats() => Ioctl(ProbeIoctl.ResetForwardedStatsCode, Array.Empty<byte>(), 0);
+
     public ProbeEvent[] GetEvents(int maxEvents)
     {
         if (maxEvents <= 0)
@@ -167,6 +187,21 @@ public sealed class WfpDeviceClient : IDisposable
         if (code == ProbeIoctl.GetRuleInfoCode)
         {
             return "GetRuleInfo";
+        }
+
+        if (code == ProbeIoctl.SetForwardedBlobCode)
+        {
+            return "SetForwardedBlob";
+        }
+
+        if (code == ProbeIoctl.GetForwardedInfoCode)
+        {
+            return "GetForwardedInfo";
+        }
+
+        if (code == ProbeIoctl.GetForwardedStatsCode)
+        {
+            return "GetForwardedStats";
         }
 
         return $"0x{code:X8}";

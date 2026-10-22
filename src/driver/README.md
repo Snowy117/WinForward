@@ -10,7 +10,7 @@ filter 执行。host TCP 与 host UDP 共用同一套 callout、四道闸与规�
 
 | 文件 | 内容 |
 |---|---|
-| `probe_ioctl.h` | 控制面 ABI v3：IOCTL 码、配置、计数、规则表回读、事件 |
+| `probe_ioctl.h` | 控制面 ABI v4：IOCTL 码、配置、计数、host 规则表回读、forwarded 表回读、事件 |
 | `rule_table.h/.cpp` | 规则 blob 的池内存副本、校验（含 selector UTF-8/511、fallback 冲突、顺序冲突）、引用计数、原子替换与退役链 |
 | `probe_driver.h` | 驱动内部共享面（状态、锁、窄接口、callout 原型、include 顺序约束） |
 | `probe_driver.cpp` | `DriverEntry`/卸载、设备、WFP provider/callout/filter 的注册与拆除 |
@@ -18,6 +18,9 @@ filter 执行。host TCP 与 host UDP 共用同一套 callout、四道闸与规�
 | `probe_control.cpp` | IOCTL 处理：配置（含 0↔1 切换时 block filter 的挂/摘）、规则下发、计数、事件、调用者校验 |
 | `probe_classify.cpp` | classify：facts、四道防循环闸、matcher、三个动作、重定向 |
 | `process_path.cpp` | `ALE_APP_ID` 的 UTF-16 → UTF-8 转换（511 字节边界、代理对）与 0x807 诊断 |
+| `probe_forwarded.h/.cpp` | MAC 帧层（`INBOUND/OUTBOUND_MAC_FRAME_NATIVE`）的 forwarded 规则表、blob 校验、generation、IOCTL 面；callout / filter 的注册与注销 |
+| `probe_forwarded_classify.cpp` | NBL 解析（VLAN/IPv4/IPv6/TCP/UDP）、方向映射、防环、`match_forwarded`、pass/block 与计数 |
+| `probe_forwarded_state.h` | 两个翻译单元共享的 forwarded 状态、自旋锁与「计数增量原子发布」helper |
 | `wfprobe.vcxproj` | WDK 工程，`SignMode=Off`；签名由 `WfBuild.psm1` 调 signtool 完成 |
 
 ## 控制面
@@ -42,11 +45,18 @@ filter 执行。host TCP 与 host UDP 共用同一套 callout、四道闸与规�
 - `ioctl_measure_process_path`（0x807，诊断，**发布前可移除**）：把 UTF-16LE 缓冲区按
   `collect_process_path` 的规则转成 UTF-8，用于验证 511 字节边界与代理对行为；只读、无状态、
   admin-only。存在的唯一理由是长路径进程无法在测试环境构造，删掉它那段逻辑就不可验证。
+- `ioctl_set_forwarded_blob`（0x808）：下发整块 `forwarded_blob`（`src/common/forwarded_blob.h`）。
+  ABI 非法整块拒绝并返回 `STATUS_INVALID_PARAMETER`；含 `redirect` 规则时整块拒绝并返回
+  `STATUS_NOT_SUPPORTED`（B4a 不执行重定向，见下文）；两种失败都不改动旧表。
+- `ioctl_get_forwarded_info`（0x809）：`installed` / 规则数 / `fallback_action` / `total_size` /
+  `network_pool_count` / `generation`。
+- `ioctl_get_forwarded_stats`（0x80A）与 `ioctl_reset_forwarded_stats`（0x80B）：MAC 帧层的计数与
+  清零，与 host 的 `probe_stats` 完全独立（`ioctl_reset_stats` 只清 host 计数）。
 
-控制面 ABI 版本是 **3**。`probe_config` / `probe_rule_info` / `redirect_context` 的布局不变；
-`probe_event` 仍是 64 字节，`protocol` 落在偏移 58（原 `branch` 与 `matched_rule` 之间的填充位）；
-`probe_stats` 从 232 扩到 264，追加四个 UDP 计数器。旧版 `wfprobe` / 控制器在下发配置时会被
-`STATUS_REVISION_MISMATCH` 拒绝，驱动与用户态必须同批升级。
+控制面 ABI 版本是 **4**。host 侧结构不变：`probe_config` / `probe_rule_info` / `probe_event` /
+`probe_stats` / `redirect_context` 的布局与语义与 v3 完全一致。v4 只新增四个 forwarded IOCTL 与
+`probe_forwarded_info`（32 字节）/ `probe_forwarded_stats`（152 字节）两个结构，旧版 `wfprobe` /
+控制器仍会在下发配置时被 `STATUS_REVISION_MISMATCH` 拒绝，驱动与用户态必须同批升级。
 
 `wfprobe events` 会打印 `protocol=`，`wfprobe stats` 与控制器 `state` 会输出四个 UDP 计数器。
 
@@ -141,6 +151,132 @@ record refcount 1/3/100。详见
 
 套件进程自己持有 listener，并把自身 PID 放进 `self_process_ids`（用于中继新开 socket 的出站；
 listener 同 socket 回包复用入站关联，不重新 classify）；UDP 客户端在子进程里运行、不在 self 集合，首包必须被 redirect。
+
+## Forwarded（MAC 帧层）
+
+B4a 在现有 ALE 路径之外再注册一组 callout，挂在 `FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE` 与
+`FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE` 上，只处理 `forwarded_blob` 下发的规则。两条路径的对象、
+规则表、generation 与计数彼此独立：host 的 ALE callout、`probe_config`、`probe_stats` 语义不变。
+
+### 层、字段与 NBL 解析
+
+- 两层都用 `FWPS_LAYER_*_MAC_FRAME_NATIVE` 常量注册（实测入向 layer id 58、出向 59；代码不写死数字）。
+- 这两层的 `inFixedValues` 只有 `NDIS_MEDIA_TYPE` / `NDIS_PHYSICAL_MEDIA_TYPE` / `INTERFACE` /
+  `INTERFACE_TYPE` / `INTERFACE_INDEX` / `NDIS_PORT` / `L2_FLAGS` / `COMPARTMENT_ID`：没有 MAC、
+  EtherType、IP 与端口。驱动自己从 `layer_data`（`NET_BUFFER_LIST*`）解析，数据自以太网头开始。
+- 解析窗口取 `NdisGetDataBuffer` 的前 192 字节：以太网头 14 + 最多两个 VLAN 标签 8 + IPv4 选项
+  或 IPv6 扩展头 + 传输层头部足够。数据连续时 `NdisGetDataBuffer` 返回原指针并忽略调用方缓冲区，
+  实现只用返回值（B3 的排查结论）。
+- VLAN 按 `0x8100`（802.1Q）与 `0x88A8`（802.1ad）逐层剥，最多两层；IPv4 用 IHL、IPv6 走
+  逐跳 / 路由 / 目的选项 / 分片四类常见扩展头（上限四跳）。非首片没有传输层端口：协议照常参与
+  匹配，`remote_port` 记为 0。
+- 非 IPv4/IPv6 帧（ARP、LLDP 等）**不参与 forwarded 规则**：一律放行并单独计数。forwarded 规则
+  是 IP 流维度，B4a 不能因为一条规则把 ARP 拦掉导致整段失联。
+- NBL / 以太网 / IP / 传输层头部解析失败：放行并计入 `malformed`，不误伤。
+
+### 方向与匹配事实
+
+`forwarded_connection_view` 的方向是「客户端 → 远端」：
+
+| 方向 | client_address | remote_address | remote_port |
+|---|---|---|---|
+| 入向（外部客户端 → 本机） | 源地址 | 目的地址 | 目的端口 |
+| 出向（本机 → 外部客户端） | 目的地址 | 源地址 | 源端口 |
+
+`ingress_adapter_id` 取两层各自的 `FWPS_FIELD_*_INTERFACE_INDEX`（就是 `ifIndex`，与用户态
+`NetworkInterface` 的 IPv4/IPv6 Index 同一编号空间）；`0xFFFFFFFF` 表示任意入口。
+`protocol` 用 `IPPROTO_*`（TCP 6 / UDP 17 / ICMP 1 …），`family` 用 4/6。非 TCP/UDP 的
+`remote_port` 为 0，只有端口区间包含 0 的规则才会命中它们。
+
+### 动作与 block 语义
+
+- 第一个命中的规则决定动作；未命中用 blob 头部的 `fallback_action`（只允许 permit/block）。
+- pass：`FWP_ACTION_PERMIT`，原帧继续走原路径，驱动**不修改** NBL。
+- block：`FWP_ACTION_BLOCK`，帧被丢弃。**本批不注入 RST，也不伪造任何回包**：被拦的 TCP 连接
+  在客户端表现为 SYN 重传后超时/连接失败，UDP 表现为静默丢包。RST 注入留到 B4b 评估。
+- filter 用 `FWP_ACTION_CALLOUT_TERMINATING`（INSPECTION 不能改动作，block 会不生效），子层
+  `FWPM_SUBLAYER_UNIVERSAL`。**MAC_FRAME_NATIVE 层当前没有 Windows 防火墙 filter**：防火墙仍在
+  ALE 层（§7.9 的实测只适用于 ALE），所以这里的终止型 PERMIT 不会碰到防火墙；它只对同层里权重
+  更低的第三方 L2 filter 有优先权，多驱动共存（WinpkFilter 等）需要 B4b 实测。
+- 没有 forwarded 表时全部放行并计入 `no_table`；表存在但规则为空时走 fallback。
+- `redirect` 规则不被接受（`STATUS_NOT_SUPPORTED`）：B4a 不执行改道，接受它会让用户误以为流量
+  被重定向，实际是直连。
+
+### 防环
+
+classify 一开始就用 `FwpsQueryPacketInjectionState0(injection_handle, nbl, nullptr)` 查询注入状态：
+`FWPS_PACKET_INJECTED_BY_SELF` / `FWPS_PACKET_PREVIOUSLY_INJECTED_BY_SELF` 的帧直接 permit 并计入
+`self_injected`，不再参与规则匹配。注入句柄在 `probe_forwarded_start` 里用
+`FwpsInjectionHandleCreate0(AF_UNSPEC, FWPS_INJECTION_TYPE_L2, ...)` 创建；B4a 不注入，句柄只为
+这道闸（以及 B4b 复用）存在。
+
+### 计数
+
+`probe_forwarded_stats` 的字段与恒等式：
+
+```
+classify_calls == no_write_right + inbound_frames + outbound_frames
+inbound_frames + outbound_frames ==
+    self_injected + no_table + malformed + non_ip + permitted + blocked
+permitted == matched_permit + fallback_permit
+blocked   == matched_block + fallback_block
+matched   == matched_permit + matched_block
+fallback  == fallback_permit + fallback_block
+```
+
+`inbound_frames` / `outbound_frames` 是经过该层的全部帧（含 WinRM 等背景流量），不是测试帧数。
+按 adapter / 规则序号的细分计数留给 B4b/B6。
+
+### 与 host 路径的边界
+
+- host 的 `rule_table`、`probe_config`、`probe_stats`、ALE callout 与 block filter 不动；
+  `ioctl_reset_stats` 只清 host 计数。
+- 注册顺序 host → forwarded，卸载逆序：`stop_wfp` 先拆 L2 callout/filter，再拆 ALE。
+- forwarded 表替换与 host 换表共用同一把 `rule_mutex` 串行化（两边的退役等待都发生在 PASSIVE）；
+  两边的表本身互不影响。
+- forwarded 的 `generation` 与 host 的 `generation` 各自独立递增。
+
+### 验证
+
+```powershell
+wfprobe forwarded-rules --peer 192.168.100.4:40250 --timeout-ms 3000
+wfprobe forwarded-rules --only F1i --inbound-port 40260 --inbound-wait-ms 45000
+wfprobe forwarded-rules --restore-only          # 只恢复空 permit 表（看门狗 / 运维兜底）
+```
+
+默认值面向本套实验环境：`--local-ip 192.168.100.2`（用于推导入口 ifIndex 与 client/remote CIDR）、
+`--peer` 无默认（出向用例缺它就算 SKIP）、`--inbound-port 40260`、`--source-port 40310`（F1/F2/F4/F5
+依次用 base+0..base+6）、`--watchdog-seconds` 默认 max(90, inbound-wait + 60)。
+
+SKIP 不等于通过：F1/F2/F3/F6 是必需用例，缺 `--peer` 等前置条件被跳过时套件以退出码 6 结束并在
+汇总里打印 `verdict=SKIPPED required_skipped=True`；F7 需要 `--peer6` 且本 VM 默认关闭 Internal IPv6，
+属于**环境未验证**，同样计入 skipped 但不单独判失败。gate.ps1 跑的是 `--only F1,F2,F3,F6`。
+
+F2/F4 的 block 规则用固定源端口 + 端口收窄（出向 `remote_port` = 源端口），只命中测试流，不碰 WinRM
+的 5985/5986；整个套件外层还有一个恢复看门狗，进程被杀时超时后恢复空 permit 表。
+
+`wfprobe forwarded-rules` 是这一层的验证入口：
+
+- F1/F2：本机主动连外部（出向）的 permit / block（`--peer HOST:PORT`）。
+- F3：fallback permit / block。fallback=block 的用例先放行 WinRM 的 5985/5986 并启动一个本地
+  看门狗（套件级，超时恢复空 permit 表），用 ping 网关触发未命中帧。
+- F4：同一组规则换顺序，验证 first-match。
+- F5：client/remote CIDR 命中与不命中、端口不命中。
+- F6：非法 blob（magic / 截断 / redirect）整块拒绝、generation 不变、`rejected_blobs` 增加。
+- F7：IPv6 happy path（`--peer6`，需要两端有可达的 v6 地址；本环境 Internal 的 IPv6 绑定默认关闭）。
+- F1i/F2i：外部客户端 → 本机监听端口（入向）的 permit / block；用 `--inbound-wait-ms` 让套件
+  停在监听状态，外部客户端在窗口内发起连接。
+
+block 用例只断言「连接失败/超时」与计数，不承诺 RST —— 与上面的 block 语义一致。
+
+### 未覆盖 / B4b 边界
+
+- 不消费/改写原帧、不做 DNAT、不维护 redirect 表、不做回程 SNAT、不注入任何帧（B4b）。
+- 不做用户态 listener / SOCKS5 中继 / upstream 选择（B4c）。
+- UDP forwarded 规则不在本批验证（解析已覆盖 UDP 头，验证在 B5）。
+- 合成 NIC（netvsc）与 Internal vSwitch 入口已验证；物理 NIC / External switch / VMQ-SR-IOV、
+  嵌套 guest、VLAN 标签帧、LWF 对注入帧的可见性均未验证（后者 B4b 才相关）。
+- 每帧解析的成本未测，B6 做 benchmark。
 
 ## 系统要求
 

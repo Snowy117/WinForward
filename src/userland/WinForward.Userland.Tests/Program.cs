@@ -33,6 +33,7 @@ return 2;
 static void RegisterAll()
 {
     ForwardedLayoutTests.Register();
+    AdapterResolverTests.Register();
     ForwardedCompilerTests.Register();
     ForwardedConfigurationTests.Register();
     LayoutTests.Register();

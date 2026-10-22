@@ -23,11 +23,18 @@ internal static class RunCommand
         byte[]? forwardedBlob;
         try
         {
-            configuration = PolicyConfigurationDocument.LoadConfiguration(configPath);
+            // 适配器选择器（stable id / 接口名 → ifIndex）只在 Windows 上解析；
+            // Linux 上保持没有 resolver，带 adapter 的配置按 B2 的规则在配置期报错。
+            IAdapterIdResolver? adapterResolver =
+                OperatingSystem.IsWindows() ? new WindowsAdapterIdResolver() : null;
+            configuration = PolicyConfigurationDocument.LoadConfiguration(configPath, adapterResolver);
             blob = RuleBlobCompiler.Compile(configuration.Policy, FwpmAppIdNormalizer.ForWindows());
             forwardedBlob = configuration.Forwarded is null
                                 ? null
                                 : ForwardedBlobCompiler.Compile(configuration.Forwarded);
+            // B4a 的驱动不执行 redirect：在这里（打开设备、绑监听之前）就拒绝，
+            // 而不是等 relay 起好之后由 ioctl 返回 Win32 50 留下半启动状态。
+            ForwardedRuntimeSupport.EnsureExecutable(configuration.Forwarded);
         }
         catch (Exception exception) when (exception is ConfigurationException or PolicyCompileException)
         {

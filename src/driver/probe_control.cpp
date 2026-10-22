@@ -137,6 +137,32 @@ NTSTATUS get_rule_info(void* buffer, ULONG output_length) noexcept
     return STATUS_SUCCESS;
 }
 
+NTSTATUS get_forwarded_info(void* buffer, ULONG output_length) noexcept
+{
+    if (buffer == nullptr || output_length < sizeof(probe_forwarded_info))
+    {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    probe_forwarded_info info{};
+    probe_forwarded_info_snapshot(info);
+    RtlCopyMemory(buffer, &info, sizeof(info));
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS get_forwarded_stats(void* buffer, ULONG output_length) noexcept
+{
+    if (buffer == nullptr || output_length < sizeof(probe_forwarded_stats))
+    {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    probe_forwarded_stats snapshot{};
+    probe_forwarded_stats_snapshot(snapshot);
+    RtlCopyMemory(buffer, &snapshot, sizeof(snapshot));
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS apply_rule_blob(const void* buffer, ULONG input_length) noexcept
 {
     probe_state& state = probe_state_ref();
@@ -283,6 +309,31 @@ _Dispatch_type_(IRP_MJ_DEVICE_CONTROL) NTSTATUS dispatch_device_control(PDEVICE_
         {
             information = sizeof(probe_rule_info);
         }
+        break;
+
+    case ioctl_set_forwarded_blob:
+        status = probe_forwarded_apply_blob(buffer, input_length);
+        break;
+
+    case ioctl_get_forwarded_info:
+        status = get_forwarded_info(buffer, output_length);
+        if (NT_SUCCESS(status))
+        {
+            information = sizeof(probe_forwarded_info);
+        }
+        break;
+
+    case ioctl_get_forwarded_stats:
+        status = get_forwarded_stats(buffer, output_length);
+        if (NT_SUCCESS(status))
+        {
+            information = sizeof(probe_forwarded_stats);
+        }
+        break;
+
+    case ioctl_reset_forwarded_stats:
+        probe_forwarded_reset_stats();
+        status = STATUS_SUCCESS;
         break;
 
     case ioctl_measure_process_path:

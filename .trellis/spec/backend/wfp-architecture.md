@@ -88,7 +88,7 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 
 两侧都有布局断言：C++ 侧 `static_assert`（尺寸、对齐、`offsetof`），C# 侧以布局一致性测试锁定。版本号变更即视为破坏性变更。
 
-控制面 ABI（`probe_ioctl.h`）当前是 v3：`probe_event` 增加 `protocol`，`probe_stats` 增加 `udp_classify_calls` / `udp_permitted` / `udp_blocked` / `udp_redirected`；驱动与用户态必须同批升级。
+控制面 ABI（`probe_ioctl.h`）当前是 v4：v3 的 `probe_event` / `probe_stats` 字段不变；v4 新增 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL（`0x808`–`0x80B`）。驱动与用户态必须同批升级。
 
 ---
 
@@ -219,3 +219,35 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 - **规则语义。** `protocol=udp` 是 17；`protocol=any` 同时覆盖 TCP 与 UDP（相对旧版的行为变化）；`permitted_non_tcp` 只表示既非 TCP 也非 UDP。
 - **配置约束。** 无进程选择器的 block 规则会连中继自己的上游 UDP 流量一起拦（与 TCP 相同），需要用进程选择器收窄。
 - **验证入口。** `wfprobe udp-rules` 是正式套件；`udp-listen` / `udp-relay` / `udp-client` 只用于手工排查。
+
+### 7.12 MAC 帧层（forwarded）的实现事实（B4a 实测）
+
+- **层与字段。** 入向 `FWPS_LAYER_INBOUND_MAC_FRAME_NATIVE`（实测 layer id 58）、出向
+  `FWPS_LAYER_OUTBOUND_MAC_FRAME_NATIVE`（59）。两层的 `inFixedValues` 只有媒体类型 / 接口 /
+  接口类型 / 接口索引 / NDIS 端口 / L2 标志 / 分区，没有 MAC、EtherType、IP 或端口；全部从
+  `layer_data`（`NET_BUFFER_LIST*`，数据自以太网头开始）自己解析。代码用常量注册，不写死 58/59。
+- **block 必须由终止型 callout 给出。** `FWP_ACTION_CALLOUT_INSPECTION` 只能观察、不能改动作；
+  要让 `FWP_ACTION_BLOCK` 真正丢帧，filter 必须是 `FWP_ACTION_CALLOUT_TERMINATING`。子层用
+  `FWPM_SUBLAYER_UNIVERSAL`。**MAC_FRAME_NATIVE 层当前没有 Windows 防火墙 filter**：防火墙仍在
+  ALE 层，§7.9 的实测只适用于 ALE，不能把那里的“更高权重子层先仲裁”搬过来；终止型 L2 filter
+  只对同层里权重更低的第三方 L2 filter 有优先权，多驱动共存（WinpkFilter 等）需要 B4b 实测。
+- **丢弃即超时，不注入 RST。** block 生效时客户端看到 SYN 重传后超时/连接失败；驱动不伪造
+  回包。F2 / F2i 用例按这个口径断言。
+- **防环要用 NBL，不是 metadata。** `FwpsQueryPacketInjectionState0` 的第二个参数是
+  `const NET_BUFFER_LIST*`；`FWPS_PACKET_INJECTED_BY_SELF` / `..._PREVIOUSLY_..._BY_SELF` 直接
+  permit。注入句柄用 `FwpsInjectionHandleCreate0(AF_UNSPEC, FWPS_INJECTION_TYPE_L2, &h)` 创建。
+- **非 IP 帧不参与规则。** ARP / LLDP 等既没有地址也没有端口，纳入规则会让一条 block 规则
+  直接切断 L2 邻接；驱动对它们一律 permit 并单独计数（`non_ip`）。解析失败同理（`malformed`）。
+- **方向语义。** 入向 client=源 / remote=目的 / remote_port=目的端口；出向 client=目的 /
+  remote=源 / remote_port=源端口。`ingress_adapter_id` 就是 ifIndex，与用户态
+  `NetworkInterface.GetIPv4Properties().Index` 同一编号空间。
+- **NBL 取数要用返回值。** `NdisGetDataBuffer` 在数据连续时返回原指针并忽略调用方缓冲区；
+  继续用缓冲区会读到未初始化内存（B3 排查结论）。VLAN 0x8100/0x88A8、IPv4 IHL、IPv6 扩展头
+  都要按实际 L2 头长度偏移。
+- **验证入口。** `wfprobe forwarded-rules`（F1–F7 + F1i/F2i）；host 既有 `rules` / `gates` /
+  `selftest` 与 `userland-e2e` 在 L2 callout 常驻下仍全绿。block 用例（F2/F4）用固定源端口 +
+  端口收窄规则只命中测试流，套件级看门狗在进程被杀时恢复空 permit 表。
+- **已知风险（B4b/B6 复核）。** 两层 L2 callout 与 host 的 ALE callout 在同一驱动里注册：L2 注册失败
+  会让整个驱动加载失败（不是 host fail-open）。B4b/B6 需要决定是否把 host 路径改成“L2 失败不影响
+  host”，本批不改结构。控制器退出时会把 forwarded 表恢复成空 permit 表并回读校验，但异常退出 /
+  进程被杀不保证恢复——那是套件级看门狗与运维脚本的职责。

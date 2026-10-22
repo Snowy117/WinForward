@@ -16,6 +16,8 @@ public static class DeviceLayout
     public const int ProbeConfigSize = 64;
     public const int ProbeStatsSize = 264;
     public const int ProbeRuleInfoSize = 32;
+    public const int ProbeForwardedInfoSize = 32;
+    public const int ProbeForwardedStatsSize = 152;
     public const int ProbeEventSize = 64;
     public const int ProcessPathMeasurementSize = 520;
     public const int RedirectContextSize = 36;
@@ -35,6 +37,7 @@ public static class DeviceLayout
             VerifyProbeConfig();
             VerifyProbeStats();
             VerifyProbeRuleInfo();
+            VerifyProbeForwarded();
             VerifyProbeEvent();
             VerifyProcessPathMeasurement();
             VerifyRedirectContext();
@@ -105,6 +108,41 @@ public static class DeviceLayout
         CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.TotalSize), 20);
         CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.ProcessPoolSize), 24);
         CheckOffset<ProbeRuleInfo>(nameof(ProbeRuleInfo.NetworkPoolCount), 28);
+    }
+
+    private static void VerifyProbeForwarded()
+    {
+        CheckSize<ProbeForwardedInfo>(ProbeForwardedInfoSize);
+        CheckOffset<ProbeForwardedInfo>(nameof(ProbeForwardedInfo.AbiVersion), 0);
+        CheckOffset<ProbeForwardedInfo>(nameof(ProbeForwardedInfo.Generation), 4);
+        CheckOffset<ProbeForwardedInfo>(nameof(ProbeForwardedInfo.Installed), 8);
+        CheckOffset<ProbeForwardedInfo>(nameof(ProbeForwardedInfo.RuleCount), 12);
+        CheckOffset<ProbeForwardedInfo>(nameof(ProbeForwardedInfo.FallbackAction), 16);
+        CheckOffset<ProbeForwardedInfo>(nameof(ProbeForwardedInfo.TotalSize), 20);
+        CheckOffset<ProbeForwardedInfo>(nameof(ProbeForwardedInfo.NetworkPoolCount), 24);
+        CheckOffset<ProbeForwardedInfo>(nameof(ProbeForwardedInfo.Reserved0), 28);
+
+        CheckSize<ProbeForwardedStats>(ProbeForwardedStatsSize);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.ClassifyCalls), 0);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.InboundFrames), 8);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.OutboundFrames), 16);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.Permitted), 24);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.Blocked), 32);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.Matched), 40);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.MatchedPermit), 48);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.MatchedBlock), 56);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.Fallback), 64);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.FallbackPermit), 72);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.FallbackBlock), 80);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.SelfInjected), 88);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.NoTable), 96);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.Malformed), 104);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.NonIp), 112);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.NoWriteRight), 120);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RejectedBlobs), 128);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.TablesReplaced), 136);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.LastStatus), 144);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.AbiVersion), 148);
     }
 
     private static void VerifyProbeEvent()

@@ -48,6 +48,8 @@
     <ClCompile Include="probe_control.cpp" />
 
     <ClCompile Include="probe_driver.cpp" />
+    <ClCompile Include="probe_forwarded.cpp" />
+    <ClCompile Include="probe_forwarded_classify.cpp" />
     <ClCompile Include="rule_table.cpp" />
 
   </ItemGroup>

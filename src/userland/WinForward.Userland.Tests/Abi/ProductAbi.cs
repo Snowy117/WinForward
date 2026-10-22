@@ -18,6 +18,8 @@ internal static class ProductAbi
         ["probe_event"] = typeof(ProbeEvent),
         ["process_path_measurement"] = typeof(ProcessPathMeasurement),
         ["redirect_context"] = typeof(RedirectContext),
+        ["probe_forwarded_info"] = typeof(ProbeForwardedInfo),
+        ["probe_forwarded_stats"] = typeof(ProbeForwardedStats),
     };
 
     internal static AbiStruct Describe(string headerName)

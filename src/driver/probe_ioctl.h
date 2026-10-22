@@ -1,6 +1,6 @@
 #pragma once
 
-// 驱动与测试程序之间的控制面 ABI（v3）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
+// 驱动与测试程序之间的控制面 ABI（v4）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
 // 两侧都有布局断言。任何字段调整都必须同时提升 probe_abi_version。
 //
 // 与 src/common/redirect_context.h 的分工：那个头定义的是“用途数据”（随连接走、用户态用
@@ -13,7 +13,7 @@
 namespace winforward::wfp::probe
 {
 
-inline constexpr std::uint32_t probe_abi_version = 3;
+inline constexpr std::uint32_t probe_abi_version = 4;
 
 // 单块规则 blob 的上限。METHOD_BUFFERED 会替我们复制一份输入，这个上限只用于拒绝明显
 // 异常的下发（正常策略是几百字节到几 KB）。
@@ -45,6 +45,15 @@ inline constexpr std::uint32_t ioctl_get_rule_info = make_ioctl(0x806);
 // 不给这个入口，collect_process_path 的 511 字节边界就不可验证。
 inline constexpr std::uint32_t ioctl_measure_process_path = make_ioctl(0x807);
 inline constexpr std::uint32_t process_path_measure_input_max = 2048;
+
+// v4：MAC 帧层（forwarded）规则表。三块 IOCTL 与 host 的规则表完全独立，互不影响：
+//   - set_forwarded_blob 只替换 forwarded 表，不碰 rule_table / probe_config / ALE callout；
+//   - get_forwarded_info / get_forwarded_stats 是只读快照；
+//   - reset_forwarded_stats 只清 forwarded 计数，host 的 reset_stats 语义不变。
+inline constexpr std::uint32_t ioctl_set_forwarded_blob = make_ioctl(0x808);
+inline constexpr std::uint32_t ioctl_get_forwarded_info = make_ioctl(0x809);
+inline constexpr std::uint32_t ioctl_get_forwarded_stats = make_ioctl(0x80A);
+inline constexpr std::uint32_t ioctl_reset_forwarded_stats = make_ioctl(0x80B);
 
 // 一次 classify 的结论。数值是对外 ABI，C# 侧按名字镜像；新增只追加。
 enum class probe_decision : std::uint8_t
@@ -177,6 +186,69 @@ struct probe_rule_info
 };
 
 static_assert(sizeof(probe_rule_info) == 32, "probe_rule_info 是对外 ABI");
+
+// forwarded 规则表回读。字段与 probe_rule_info 同构：判据同样是「非法 blob 之后 generation 不变」。
+// abi_version 放在偏移 0，客户端在解析其余字段之前先核对版本。
+struct probe_forwarded_info
+{
+    std::uint32_t abi_version;
+    std::uint32_t generation; // 每次成功替换 +1
+    std::uint32_t installed; // 1 = 当前有表
+    std::uint32_t rule_count;
+    std::uint32_t fallback_action; // rule_action 的数值
+    std::uint32_t total_size;
+    std::uint32_t network_pool_count;
+    std::uint32_t reserved0; // 必须为 0
+};
+
+static_assert(sizeof(probe_forwarded_info) == 32, "probe_forwarded_info 是对外 ABI");
+static_assert(offsetof(probe_forwarded_info, abi_version) == 0);
+static_assert(offsetof(probe_forwarded_info, generation) == 4);
+static_assert(offsetof(probe_forwarded_info, installed) == 8);
+static_assert(offsetof(probe_forwarded_info, rule_count) == 12);
+static_assert(offsetof(probe_forwarded_info, fallback_action) == 16);
+static_assert(offsetof(probe_forwarded_info, total_size) == 20);
+static_assert(offsetof(probe_forwarded_info, network_pool_count) == 24);
+static_assert(offsetof(probe_forwarded_info, reserved0) == 28);
+
+// MAC 帧层计数。全部是单调累加，reset_forwarded_stats 清零后重新累加。
+// 恒等式（对任意 reset 之后的增量成立）：
+//   classify_calls == no_write_right + inbound_frames + outbound_frames
+//   inbound_frames + outbound_frames ==
+//       self_injected + no_table + malformed + non_ip + permitted + blocked
+//   permitted == matched_permit + fallback_permit；blocked == matched_block + fallback_block
+//   matched == matched_permit + matched_block；fallback == fallback_permit + fallback_block
+struct probe_forwarded_stats
+{
+    std::uint64_t classify_calls;
+    std::uint64_t inbound_frames;
+    std::uint64_t outbound_frames;
+    std::uint64_t permitted;
+    std::uint64_t blocked;
+    std::uint64_t matched;
+    std::uint64_t matched_permit;
+    std::uint64_t matched_block;
+    std::uint64_t fallback;
+    std::uint64_t fallback_permit;
+    std::uint64_t fallback_block;
+    std::uint64_t self_injected; // 防环：FwpsQueryPacketInjectionState0 判定为本驱动注入
+    std::uint64_t no_table; // 没有 forwarded 表时的默认放行
+    std::uint64_t malformed; // NBL / 以太网 / IP / 传输层头部解析失败（一律放行）
+    std::uint64_t non_ip; // 非 IPv4/IPv6 帧（ARP 等）：forwarded 规则不接管，一律放行
+    std::uint64_t no_write_right;
+    std::uint64_t rejected_blobs;
+    std::uint64_t tables_replaced;
+    std::uint32_t last_status;
+    std::uint32_t abi_version;
+};
+
+static_assert(sizeof(probe_forwarded_stats) == 152, "probe_forwarded_stats 是对外 ABI");
+static_assert(offsetof(probe_forwarded_stats, permitted) == 24);
+static_assert(offsetof(probe_forwarded_stats, self_injected) == 88);
+static_assert(offsetof(probe_forwarded_stats, rejected_blobs) == 128);
+static_assert(offsetof(probe_forwarded_stats, tables_replaced) == 136);
+static_assert(offsetof(probe_forwarded_stats, last_status) == 144);
+static_assert(offsetof(probe_forwarded_stats, abi_version) == 148);
 
 // 环形事件日志。时间戳是 KeQueryInterruptTime() 的 100ns 计数，仅用于排序与相对比较；
 // 地址按原样保存（IPv4 只用前 4 字节），端口为主机字节序。

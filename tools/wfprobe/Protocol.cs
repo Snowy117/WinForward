@@ -2,10 +2,10 @@ using System.Runtime.InteropServices;
 
 namespace WinForward.Probe;
 
-// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v3）。
+// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v4）。
 internal static class Protocol
 {
-    public const uint AbiVersion = 3;
+    public const uint AbiVersion = 4;
 
     // CTL_CODE(FILE_DEVICE_UNKNOWN, function, METHOD_BUFFERED, FILE_ANY_ACCESS)
     private static uint MakeIoctl(uint function) => (0x22u << 16) | (function << 2);
@@ -19,6 +19,12 @@ internal static class Protocol
     public const uint IoctlGetRuleInfo = 0x806;
     public const uint IoctlMeasureProcessPath = 0x807;
 
+    // v4：MAC 帧层（forwarded）规则表与计数。与 host 的规则表/计数完全独立。
+    public const uint IoctlSetForwardedBlob = 0x808;
+    public const uint IoctlGetForwardedInfo = 0x809;
+    public const uint IoctlGetForwardedStats = 0x80A;
+    public const uint IoctlResetForwardedStats = 0x80B;
+
     public static uint SetConfigCode => MakeIoctl(IoctlSetConfig);
     public static uint GetConfigCode => MakeIoctl(IoctlGetConfig);
     public static uint GetStatsCode => MakeIoctl(IoctlGetStats);
@@ -27,6 +33,10 @@ internal static class Protocol
     public static uint SetRuleBlobCode => MakeIoctl(IoctlSetRuleBlob);
     public static uint GetRuleInfoCode => MakeIoctl(IoctlGetRuleInfo);
     public static uint MeasureProcessPathCode => MakeIoctl(IoctlMeasureProcessPath);
+    public static uint SetForwardedBlobCode => MakeIoctl(IoctlSetForwardedBlob);
+    public static uint GetForwardedInfoCode => MakeIoctl(IoctlGetForwardedInfo);
+    public static uint GetForwardedStatsCode => MakeIoctl(IoctlGetForwardedStats);
+    public static uint ResetForwardedStatsCode => MakeIoctl(IoctlResetForwardedStats);
 
     public const uint MaxSelfProcessIds = 8;
     public const uint RuleBlobMaxSize = 64 * 1024;
@@ -138,6 +148,44 @@ internal struct ProbeRuleInfo
     public uint NetworkPoolCount;
 }
 
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal struct ProbeForwardedInfo
+{
+    public uint AbiVersion;
+    public uint Generation;
+    public uint Installed;
+    public uint RuleCount;
+    public uint FallbackAction;
+    public uint TotalSize;
+    public uint NetworkPoolCount;
+    public uint Reserved0;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 8)]
+internal struct ProbeForwardedStats
+{
+    public ulong ClassifyCalls;
+    public ulong InboundFrames;
+    public ulong OutboundFrames;
+    public ulong Permitted;
+    public ulong Blocked;
+    public ulong Matched;
+    public ulong MatchedPermit;
+    public ulong MatchedBlock;
+    public ulong Fallback;
+    public ulong FallbackPermit;
+    public ulong FallbackBlock;
+    public ulong SelfInjected;
+    public ulong NoTable;
+    public ulong Malformed;
+    public ulong NonIp;
+    public ulong NoWriteRight;
+    public ulong RejectedBlobs;
+    public ulong TablesReplaced;
+    public uint LastStatus;
+    public uint AbiVersion;
+}
+
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
 internal unsafe struct ProbeEvent
 {
@@ -180,6 +228,8 @@ internal static class ProtocolLayout
         Check<ProbeConfig>(64, "ProbeConfig");
         Check<ProbeStats>(264, "ProbeStats");
         Check<ProbeRuleInfo>(32, "ProbeRuleInfo");
+        Check<ProbeForwardedInfo>(32, "ProbeForwardedInfo");
+        Check<ProbeForwardedStats>(152, "ProbeForwardedStats");
         Check<ProbeEvent>(64, "ProbeEvent");
         Check<RedirectContext>(36, "RedirectContext");
     }

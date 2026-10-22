@@ -1,4 +1,5 @@
 using WinForward.Userland.Device;
+using WinForward.Userland.Forwarded;
 using WinForward.Userland.Policy;
 using WinForward.Userland.Relay;
 
@@ -21,6 +22,10 @@ public sealed class WfpController : IAsyncDisposable
     private readonly TextWriter _report;
     private readonly object _reportGate = new();
     private bool _stopped;
+
+    // 没有 forwarded 段时下发的空表：清掉上一次异常退出可能留下的规则。空表 = 全部走 fallback permit。
+    private static readonly byte[] EmptyForwardedBlob =
+        ForwardedBlobCompiler.Compile(new ForwardedPolicyTable([], RuleAction.Permit));
 
     private WfpController(WfpDeviceClient device, RelayServer relay, TextWriter report)
     {
@@ -58,11 +63,21 @@ public sealed class WfpController : IAsyncDisposable
             ReportRules(device, settings);
             if (settings.ForwardedBlob is not null)
             {
+                device.SetForwardedBlob(settings.ForwardedBlob);
+                VerifyForwarded(device, settings.Report, settings.ForwardedBlob,
+                                settings.Forwarded?.Rules.Count ?? 0,
+                                settings.Forwarded?.FallbackAction ?? RuleAction.Permit);
                 Report(settings.Report,
                        ControllerReport.Forwarded(
                            settings.Forwarded?.Rules.Count ?? 0,
                            settings.ForwardedUpstreams.Count,
                            settings.ForwardedBlob.Length));
+            }
+            else
+            {
+                device.SetForwardedBlob(EmptyForwardedBlob);
+                VerifyForwarded(device, settings.Report, EmptyForwardedBlob, 0, RuleAction.Permit);
+                Report(settings.Report, "controller-forwarded-cleared rules=0 fallback=permit");
             }
 
             uint processId = (uint)Environment.ProcessId;
@@ -93,6 +108,18 @@ public sealed class WfpController : IAsyncDisposable
                 Report(settings.Report, $"controller-rollback-error {exception.GetType().Name}: {exception.Message}");
             }
 
+            try
+            {
+                device.SetForwardedBlob(EmptyForwardedBlob);
+                VerifyForwarded(device, settings.Report, EmptyForwardedBlob, 0, RuleAction.Permit);
+                Report(settings.Report, "controller-forwarded-cleared rules=0 fallback=permit");
+            }
+            catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                Report(settings.Report,
+                       $"controller-forwarded-clear-error {exception.GetType().Name}: {exception.Message}");
+            }
+
             if (relay is not null)
             {
                 relay.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -120,6 +147,17 @@ public sealed class WfpController : IAsyncDisposable
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             Report(_report, $"controller-disable-error {exception.GetType().Name}: {exception.Message}");
+        }
+
+        try
+        {
+            _device.SetForwardedBlob(EmptyForwardedBlob);
+            VerifyForwarded(_device, _report, EmptyForwardedBlob, 0, RuleAction.Permit);
+            Report("controller-forwarded-cleared rules=0 fallback=permit");
+        }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            Report($"controller-forwarded-clear-error {exception.GetType().Name}: {exception.Message}");
         }
 
         // 先停监听、等会话收尾，再报计数：否则 controller-stop 里的 bytes 可能还是 0。
@@ -156,6 +194,48 @@ public sealed class WfpController : IAsyncDisposable
                 $"驱动回读 blob 长度 {info.TotalSize} 与下发的 {settings.RuleBlob.Length} 不一致");
         }
     }
+
+    private static void VerifyForwarded(WfpDeviceClient device,
+                                        TextWriter report,
+                                        byte[] blob,
+                                        int expectedRules,
+                                        RuleAction expectedFallback)
+    {
+        ProbeForwardedInfo info = device.GetForwardedInfo();
+        if (info.AbiVersion != ProbeIoctl.AbiVersion)
+        {
+            throw new InvalidOperationException(
+                $"forwarded 表 ABI 版本 {info.AbiVersion} 与产品侧 {ProbeIoctl.AbiVersion} 不一致");
+        }
+
+        if (info.Installed != 1)
+        {
+            throw new InvalidOperationException("forwarded blob 下发后驱动报告 installed=0");
+        }
+
+        if (info.RuleCount != (uint)expectedRules)
+        {
+            throw new InvalidOperationException(
+                $"驱动回读 forwarded 规则数 {info.RuleCount} 与下发的 {expectedRules} 不一致");
+        }
+
+        if (info.FallbackAction != (uint)expectedFallback)
+        {
+            throw new InvalidOperationException(
+                $"驱动回读 forwarded 兜底动作 {info.FallbackAction} 与下发的 {(uint)expectedFallback} 不一致");
+        }
+
+        if (info.TotalSize != (uint)blob.Length)
+        {
+            throw new InvalidOperationException(
+                $"驱动回读 forwarded blob 长度 {info.TotalSize} 与下发的 {blob.Length} 不一致");
+        }
+
+        Report(report,
+               ControllerReport.ForwardedInstalled(
+                   info.Generation, info.RuleCount, info.FallbackAction, (int)info.TotalSize));
+    }
+
 
     private static void ReportRules(WfpDeviceClient device, ControllerSettings settings)
     {

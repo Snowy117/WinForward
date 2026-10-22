@@ -18,6 +18,7 @@ internal static class DeviceAbiTests
         TestRunner.Add("device/重定向上下文可往返字节", RedirectContextRoundTrip);
         TestRunner.Add("device/重定向目的地解析 TCP 与 UDP 上下文", RedirectDestinationProtocols);
         TestRunner.Add("device/中继拒绝非 TCP redirect context", RelayRefusalGate);
+        TestRunner.Add("device/forwarded 结构可往返字节", ForwardedRoundTrip);
     }
 
     private static void LayoutVerify() => DeviceLayout.Verify();
@@ -64,6 +65,11 @@ internal static class DeviceAbiTests
         Check.Equal(ProbeIoctl.SetRuleBlobCode, ProbeIoctl.MakeIoctl(ProbeIoctl.SetRuleBlobFunction), "SetRuleBlob");
         Check.Equal(0x00222000u, ProbeIoctl.SetConfigCode, "CTL_CODE 的字节值");
         Check.Equal(0x0022201Cu, ProbeIoctl.MeasureProcessPathCode, "诊断接口的字节值");
+        Check.Equal(ProbeIoctl.SetForwardedBlobCode, ProbeIoctl.MakeIoctl(ProbeIoctl.SetForwardedBlobFunction), "SetForwardedBlob");
+        Check.Equal(ProbeIoctl.GetForwardedInfoCode, ProbeIoctl.MakeIoctl(ProbeIoctl.GetForwardedInfoFunction), "GetForwardedInfo");
+        Check.Equal(ProbeIoctl.GetForwardedStatsCode, ProbeIoctl.MakeIoctl(ProbeIoctl.GetForwardedStatsFunction), "GetForwardedStats");
+        Check.Equal(ProbeIoctl.ResetForwardedStatsCode, ProbeIoctl.MakeIoctl(ProbeIoctl.ResetForwardedStatsFunction), "ResetForwardedStats");
+        Check.Equal(0x00222020u, ProbeIoctl.SetForwardedBlobCode, "forwarded IOCTL 的字节值");
     }
 
     private static void EventRoundTrip()
@@ -213,5 +219,44 @@ internal static class DeviceAbiTests
                     "UDP redirect context 的拒绝原因");
         // 语义钉住：把 RelayRefusalReason 的 UDP 分支改成返回 null，上面这条断言会变红；
         // 它测的是拒绝决策本身，而不是 RedirectDestination 的解析结果。
+    }
+
+    private static void ForwardedRoundTrip()
+    {
+        ProbeForwardedInfo info = default;
+        info.AbiVersion = ProbeIoctl.AbiVersion;
+        info.Generation = 7;
+        info.Installed = 1;
+        info.RuleCount = 3;
+        info.FallbackAction = 1;
+        info.TotalSize = 640;
+        info.NetworkPoolCount = 2;
+        byte[] infoBytes = new byte[DeviceLayout.ProbeForwardedInfoSize];
+        MemoryMarshal.Write(infoBytes, in info);
+
+        Check.Equal(DeviceLayout.ProbeForwardedInfoSize, infoBytes.Length, "forwarded info 长度");
+        Check.Equal(ProbeIoctl.AbiVersion, BitConverter.ToUInt32(infoBytes, 0), "forwarded abi_version 在偏移 0");
+        Check.Equal(7U, BitConverter.ToUInt32(infoBytes, 4), "generation 在偏移 4");
+        Check.Equal(1U, BitConverter.ToUInt32(infoBytes, 8), "installed 在偏移 8");
+        Check.Equal(640U, BitConverter.ToUInt32(infoBytes, 20), "total_size 在偏移 20");
+        Check.Equal(2U, BitConverter.ToUInt32(infoBytes, 24), "network_pool_count 在偏移 24");
+
+        ProbeForwardedStats stats = default;
+        stats.ClassifyCalls = 11;
+        stats.InboundFrames = 5;
+        stats.OutboundFrames = 6;
+        stats.Permitted = 10;
+        stats.Blocked = 1;
+        stats.RejectedBlobs = 2;
+        stats.TablesReplaced = 3;
+        stats.AbiVersion = ProbeIoctl.AbiVersion;
+        byte[] statsBytes = new byte[DeviceLayout.ProbeForwardedStatsSize];
+        MemoryMarshal.Write(statsBytes, in stats);
+
+        Check.Equal(DeviceLayout.ProbeForwardedStatsSize, statsBytes.Length, "forwarded stats 长度");
+        Check.Equal(11UL, BitConverter.ToUInt64(statsBytes, 0), "classify_calls 在偏移 0");
+        Check.Equal(6UL, BitConverter.ToUInt64(statsBytes, 16), "outbound_frames 在偏移 16");
+        Check.Equal(2UL, BitConverter.ToUInt64(statsBytes, 128), "rejected_blobs 在偏移 128");
+        Check.Equal(ProbeIoctl.AbiVersion, BitConverter.ToUInt32(statsBytes, 148), "abi_version 在偏移 148");
     }
 }

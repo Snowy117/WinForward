@@ -314,10 +314,15 @@ def locate_root(explicit: str | None) -> Path:
     return Path(completed.stdout.strip()).resolve()
 
 
-def tracked_files(root: Path) -> list[str]:
+def worktree_files(root: Path) -> list[str]:
+    """工作区里被 git 跟踪或「未跟踪但未被忽略」的文件。
+
+    只列 `git ls-files`（已跟踪）会漏掉本批新增、还没 `git add` 的源文件，让门禁假绿；
+    `--exclude-standard` 继续尊重 .gitignore，build/、bin/obj/ 不会混进来。
+    """
     try:
         completed = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z"],
+            ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
             capture_output=True,
             check=False,
         )
@@ -368,7 +373,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         prog="forbidden.py",
         description="按 forbidden-rules.txt 检查 C++ 源码里的禁用写法。",
     )
-    parser.add_argument("files", nargs="*", help="仓库相对路径；省略时用 git ls-files")
+    parser.add_argument("files", nargs="*", help="仓库相对路径；省略时用工作区里的跟踪文件 + 未忽略的新文件")
     parser.add_argument(
         "--root", help="仓库根目录（默认取 git rev-parse --show-toplevel）"
     )
@@ -395,7 +400,7 @@ def main(argv: list[str]) -> int:
         elif arguments.files_from:
             candidates = listed_files(Path(arguments.files_from))
         else:
-            candidates = tracked_files(root)
+            candidates = worktree_files(root)
         prefix = Path(arguments.prefix).resolve() if arguments.prefix else root
         if not prefix.is_dir():
             raise EnvironmentProblem(f"--prefix 不是目录：{arguments.prefix}")

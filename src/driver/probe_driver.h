@@ -1,8 +1,8 @@
 #pragma once
 
 // 驱动内部共享面：probe_driver / probe_control / probe_classify / rule_table / block_filters /
-// redirect_target 六个翻译单元。设备与 WFP 对象的生命周期只在 probe_driver.cpp 里；classify 侧只碰下面列出的窄接口。
-
+// redirect_target / probe_forwarded 七个翻译单元。设备与 WFP 对象的生命周期只在 probe_driver.cpp 里；
+// classify 侧只碰下面列出的窄接口。
 #ifndef NDIS630
 #define NDIS630 1
 #endif
@@ -36,6 +36,9 @@
 #include "matcher.h"
 #include "rule_blob.h"
 #include "rule_table.h"
+#include "forwarded_blob.h"
+#include "forwarded_matcher.h"
+#include "probe_forwarded.h"
 // clang-format on
 
 namespace winforward::wfp::probe
@@ -171,4 +174,7 @@ NTSTATUS NTAPI probe_notify_fn(FWPS_CALLOUT_NOTIFY_TYPE notify_type,
 [[nodiscard]] NTSTATUS probe_install_block_filters(const blob_view& view, UINT64* ids, std::uint32_t& count) noexcept;
 void probe_delete_block_filters(UINT64* ids, std::uint32_t& count) noexcept;
 
+// 拆除一个已注册层：filter → callout 定义 → callout 本体（带 BUSY/IN_USE 重试）。host 与
+// forwarded 的注册流程各自独立，拆除共用这一份，避免两套重试规则漂移。
+void unregister_callout_layer(layer_state& layer, const GUID& callout_key) noexcept;
 } // namespace winforward::wfp::probe

@@ -96,6 +96,15 @@ try {
     $code = Invoke-WfSuite -Root $Root -ToolExe $toolBinary -Arguments @("rules", "--iterations", $ReplaceIterations)
     Assert "rules 套件" ($code -eq 0) "exit=$code"
 
+    "===== MAC 帧层 forwarded（F1/F2/F3/F6；F2/F4 用固定源端口收窄，不碰 WinRM）====="
+    # 直接调用而不走 Invoke-WfSuite：套件用 Write-Host 输出，gate 的日志/重定向收不到；
+    # 这里把 stdout+stderr 收进变量再打印，失败时能直接看到是哪条断言。
+    $forwardedOutput = & $toolBinary forwarded-rules --peer $Remote --only F1,F2,F3,F6 --timeout-ms 3000 2>&1 |
+        Out-String
+    $forwardedOutput
+    $code = $LASTEXITCODE
+    Assert "forwarded-rules 套件" ($code -eq 0) "exit=$code"
+
     "===== UDP：redirect/permit/block/any/进程选择器/IPv6/生命周期/热替换（U1–U13）====="
     $pingHost = ($Remote -split ':')[0]
     # 连接窗口用默认 1000ms；完整 1/10/60/180/300s 测量见 udp-rules 的 research 记录，gate 不等 300s。

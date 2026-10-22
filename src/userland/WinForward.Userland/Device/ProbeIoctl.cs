@@ -14,7 +14,7 @@ namespace WinForward.Userland.Device;
 public static class ProbeIoctl
 {
     /// <summary>ABI 版本。任何字段调整都必须同时提升它。</summary>
-    public const uint AbiVersion = 3;
+    public const uint AbiVersion = 4;
 
     /// <summary>self-PID 集合容量（防循环闸 4）。</summary>
     public const uint MaxSelfProcessIds = 8;
@@ -40,6 +40,12 @@ public static class ProbeIoctl
     public const uint GetRuleInfoFunction = 0x806;
     public const uint MeasureProcessPathFunction = 0x807;
 
+    // v4：MAC 帧层（forwarded）规则表与计数，与 host 的规则表/计数完全独立。
+    public const uint SetForwardedBlobFunction = 0x808;
+    public const uint GetForwardedInfoFunction = 0x809;
+    public const uint GetForwardedStatsFunction = 0x80A;
+    public const uint ResetForwardedStatsFunction = 0x80B;
+
     public const uint SetConfigCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (SetConfigFunction << 2) | MethodBuffered;
     public const uint GetConfigCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (GetConfigFunction << 2) | MethodBuffered;
     public const uint GetStatsCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (GetStatsFunction << 2) | MethodBuffered;
@@ -48,6 +54,10 @@ public static class ProbeIoctl
     public const uint SetRuleBlobCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (SetRuleBlobFunction << 2) | MethodBuffered;
     public const uint GetRuleInfoCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (GetRuleInfoFunction << 2) | MethodBuffered;
     public const uint MeasureProcessPathCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (MeasureProcessPathFunction << 2) | MethodBuffered;
+    public const uint SetForwardedBlobCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (SetForwardedBlobFunction << 2) | MethodBuffered;
+    public const uint GetForwardedInfoCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (GetForwardedInfoFunction << 2) | MethodBuffered;
+    public const uint GetForwardedStatsCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (GetForwardedStatsFunction << 2) | MethodBuffered;
+    public const uint ResetForwardedStatsCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (ResetForwardedStatsFunction << 2) | MethodBuffered;
 
     /// <summary>与 C++ 侧 <c>make_ioctl</c> 相同的计算方式，测试用它交叉核对上面的常量。</summary>
     public static uint MakeIoctl(uint function) =>

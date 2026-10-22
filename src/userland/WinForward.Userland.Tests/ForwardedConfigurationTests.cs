@@ -68,9 +68,11 @@ internal static class ForwardedConfigurationTests
         TestRunner.Add("forwarded-config/同一入口两个 clientCidr 分开编号", ClientCidrRules);
         TestRunner.Add("forwarded-config/旧 socks5 的 default 排在上游最后", LegacySocks5AppendedLast);
         TestRunner.Add("forwarded-config/controller-forwarded 报告格式", ControllerForwardedReport);
+        TestRunner.Add("forwarded-config/controller-forwarded-installed 报告格式", ControllerForwardedInstalledReport);
         TestRunner.Add("forwarded-config/socks5Servers 名字不能为空", ServerEmptyName);
         TestRunner.Add("forwarded-config/remotePorts 越界", RemotePortOutOfRange);
         TestRunner.Add("forwarded-config/编译结果符合 B1 布局", CompilesToBlob);
+        TestRunner.Add("forwarded-config/redirect 规则在打开设备前被拒绝", RedirectRejectedEarly);
     }
 
     private static ControllerConfiguration Parse(string json, IAdapterIdResolver? resolver = null) =>
@@ -434,6 +436,22 @@ internal static class ForwardedConfigurationTests
                     "多上游");
     }
 
+    private static void ControllerForwardedInstalledReport()
+    {
+        Check.Equal("controller-forwarded-installed generation=7 count=2 fallback=1 blob=640",
+                    ControllerReport.ForwardedInstalled(7, 2, 1, 640),
+                    "回读报告");
+    }
+
+    private static void RedirectRejectedEarly()
+    {
+        ControllerConfiguration configuration = Parse(
+            """{ "fallbackAction": "permit", "socks5Servers": [ { "name": "main", "host": "127.0.0.1", "port": 1080 } ], "forwarded": { "rules": [ { "name": "web", "action": "redirect", "target": "main" } ] } }""");
+        Check.ThrowsContaining<ConfigurationException>(
+            () => ForwardedRuntimeSupport.EnsureExecutable(configuration.Forwarded),
+            "B4b",
+            "redirect 在打开设备前被拒绝并指出 B4b");
+    }
     private static string ForwardedReport(ControllerConfiguration configuration)
     {
         ForwardedPolicyTable table = configuration.Forwarded ?? throw new TestFailure("forwarded 表不能为 null");
