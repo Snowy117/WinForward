@@ -19,7 +19,9 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "10-23-fwd-b1-forwarded-blob"
+    "10-23-fwd-b1-forwarded-blob",
+    "10-23-fwd-b2-config-wiring",
+    "10-23-fwd-b3-l2-spike"
   ],
   "parent": null,
   "relatedFiles": [
