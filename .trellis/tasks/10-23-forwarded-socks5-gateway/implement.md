@@ -7,17 +7,31 @@
 | 批次 | 范围 | 依赖 | 验证 |
 |---|---|---|---|
 | 批次 | 范围 | 依赖 | 状态 |
+| 批次 | 范围 | 依赖 | 状态 |
 |---|---|---|---|
 | **B1** | forwarded blob + matcher + C# 编译器/布局（规则层） | — | 完成（已提交） |
 | **B2** | JSON `forwarded` 段、多上游、clientCidr、控制器接线 | B1 | 完成（已提交） |
 | **B3** | L2 可见性/注入 spike（VM），决定 D1 | — | 有条件通过（A5 转 B4/B6） |
-| **B4a** | 驱动 L2 骨架：callout、forwarded blob 下发、入口匹配、pass/block、计数 | B1/B2/B3 | 下一步 |
-| **B4b** | TCP DNAT、redirect 表、查询 IOCTL、回程 SNAT、注入 | B4a | 待 B4a |
-| **B4c** | 用户态 listener/中继、upstream 选择、TCP E2E | B4b | 待 B4b |
-| **B5** | UDP 数据面：关联/NAT + SOCKS5 UDP E2E | B4c 检查通过 | 待 B4c |
-| **B6** | 多入口/CIDR/热替换/失败/观测/门禁/文档/性能收尾 | B4/B5 | 收尾 |
+| **B4a** | 驱动 L2 骨架：callout、forwarded blob 下发、入口匹配、pass/block、计数 | B1/B2/B3 | 完成（已提交） |
+| **B4b** | TCP DNAT、redirect 表、查询 IOCTL、回程 SNAT、原帧消费、用户态中继、E2E（含原 B4c） | B4a | 完成（已提交） |
+| **B5** | UDP 数据面：关联/NAT + SOCKS5 UDP E2E | B4b 检查通过 | 下一步 |
+| **B6** | 多入口/CIDR/热替换/失败/观测/门禁/文档/性能收尾 | B4b/B5 | 收尾 |
 
-并发边界：B1/B2/B3 已完成；B4a→B4b→B4c 串行；B5 必须在 B4c 检查通过后开始；B6 收尾。
+并发边界：B1/B2/B3/B4a/B4b 已完成；B5 在 B4b 检查通过后开始；B6 收尾。
+
+### B6 输入（B3/B4b 遗留，非阻断）
+
+- A5 成本：内核侧 sink 或 iperf3，同 pps/包大小 CPU 量级对照；58.1% 只作量级参考。
+- LWF 关闭变体：修复后 + LWF 关闭的 5 并发复测（带外控制台/可恢复会话）。
+- forwarded 上游失败 E2E；4096 表满真实压测；混合 NET_BUFFER 流（入口/回程同流假设）。
+- verify 端口契约：提交 Linux 客户端脚本、文档化 `listener+1000`、CI 禁止 `--no-verify`、gate/防火墙放行。
+- 套件断言：`self_injected == inject_complete_calls`；acked 改用 `tcpi_bytes_received`/服务端 ACK；
+  `redirect_blocked`/`inject_failed` 的 NBL/帧级口径统一。
+- `return_miss` 在混合命中+miss NBL 的漏计；入口 DNAT 混合 NB 的同流校验/文档。
+- stop 等待 outstanding 仅 2s 超时仍销毁池的 UAF 风险；gate 卸载池检查加 `WfIj`/`WfTr`。
+- 分片 TCP 首片校验和不可重算：fail-closed + 文档。
+- on-link 别名 vs 10.99 真实路由；forwarded-tcp 纳入独立 Linux 门禁。
+- 文档残项：README 重复帧长说明、`data_length` 注释、`redirect_return_failed` 注释、verify 协议。
 
 ## 0. 前置 spike：驱动形态与可见性
 
