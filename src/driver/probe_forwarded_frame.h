@@ -31,6 +31,8 @@ struct forwarded_frame_facts
     std::uint8_t protocol;
     std::uint8_t family; // 4 / 6
     std::uint8_t tcp_flags;
+    std::uint32_t
+        fragment_id; // IPv4 identification / IPv6 Fragment 头的 identification；非分片/IPv6 atomic fragment 为 0
     bool first_fragment; // 没有分片头也算 true；IPv4 只看 fragment offset
     bool fragmented; // IPv4 MF 或 offset != 0；IPv6 出现过 Fragment 头
     std::uint8_t destination_mac[6];
@@ -67,5 +69,9 @@ struct forwarded_frame_rewrite
                                                     std::uint32_t interface_index,
                                                     std::uint32_t ndis_port,
                                                     const forwarded_frame_rewrite& rewrite) noexcept;
+
+// 停止路径等待所有注入完成例程回调。返回 true 表示 outstanding 已归零；false 表示仍有
+// 注入未回调，调用方必须保留 NBL 池（否则完成例程会 use-after-free）。
+[[nodiscard]] bool probe_forwarded_drain_injections(std::uint32_t rounds, std::uint32_t milliseconds) noexcept;
 
 } // namespace winforward::wfp::probe

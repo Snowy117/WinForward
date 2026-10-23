@@ -79,6 +79,7 @@ namespace detail
     }
 
     const auto connection_family = static_cast<std::uint8_t>(connection.family);
+
     if (selected.family != rule_family_any && selected.family != connection_family)
     {
         return false;
@@ -124,7 +125,6 @@ namespace detail
 
     return true;
 }
-
 } // namespace detail
 
 // 按数组顺序返回首个命中的动作、序号与上游。未命中时 matched 为 false，action 取
@@ -157,5 +157,4 @@ namespace detail
         .matched = false,
     };
 }
-
 } // namespace winforward::wfp

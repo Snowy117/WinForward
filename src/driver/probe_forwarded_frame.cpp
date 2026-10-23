@@ -36,6 +36,12 @@ constexpr std::uint8_t ipv6_next_destination_options = 60;
     return static_cast<std::uint16_t>((static_cast<std::uint16_t>(data[0]) << 8) | data[1]);
 }
 
+[[nodiscard]] std::uint32_t read_be32(const std::uint8_t* data) noexcept
+{
+    return (static_cast<std::uint32_t>(data[0]) << 24) | (static_cast<std::uint32_t>(data[1]) << 16) |
+           (static_cast<std::uint32_t>(data[2]) << 8) | static_cast<std::uint32_t>(data[3]);
+}
+
 [[nodiscard]] bool
 parse_ipv4(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset, forwarded_frame_facts& facts) noexcept
 {
@@ -67,6 +73,7 @@ parse_ipv4(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset
     const bool first_fragment = (static_cast<std::uint32_t>(fragment) & 0x1FFFU) == 0;
     facts.first_fragment = first_fragment;
     facts.fragmented = more_fragments || !first_fragment;
+    facts.fragment_id = facts.fragmented ? read_be16(frame + offset + 4) : 0;
     facts.family = 4;
     facts.protocol = frame[offset + 9];
     facts.ip_header_length = header_length;
@@ -113,6 +120,7 @@ parse_ipv6(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset
     std::uint32_t transport = offset + ipv6_header_size;
     bool first_fragment = true;
     bool fragmented = false;
+    std::uint32_t fragment_id = 0;
 
     for (std::uint32_t hop = 0; hop < ipv6_max_extension_hops; ++hop)
     {
@@ -141,7 +149,9 @@ parse_ipv6(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset
             }
             const std::uint16_t fragment = read_be16(frame + transport + 2);
             first_fragment = (static_cast<std::uint32_t>(fragment) >> 3) == 0;
-            fragmented = true;
+            // offset=0 且 M=0 是 atomic fragment：它本身就是完整 datagram，不按分片处理。
+            fragmented = (fragment & 0x1U) != 0 || !first_fragment;
+            fragment_id = read_be32(frame + transport + 4);
             next_header = frame[transport];
             transport += 8;
             continue;
@@ -163,6 +173,7 @@ parse_ipv6(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset
     facts.transport_offset = transport;
     facts.first_fragment = first_fragment;
     facts.fragmented = fragmented;
+    facts.fragment_id = fragmented ? fragment_id : 0;
     RtlCopyMemory(facts.source_address, frame + offset + 8, 16);
     RtlCopyMemory(facts.destination_address, frame + offset + 24, 16);
     if (first_fragment && next_header == ip_protocol_tcp && length >= transport + tcp_min_header_size &&
@@ -202,7 +213,16 @@ void NTAPI injection_complete(void* context, NET_BUFFER_LIST* nbl, BOOLEAN dispa
         InterlockedIncrement64(reinterpret_cast<volatile LONG64*>(&state.stats.inject_complete_failed));
         state.stats.last_status = static_cast<std::uint32_t>(injection_status);
     }
-    InterlockedDecrement64(&state.outstanding_injections);
+
+#if defined(WFPROBE_FAULT_INJECTION)
+    const std::uint32_t completion_delay_us = g_forwarded_state.injection_complete_delay_us;
+    state.last_completion_delay_us = completion_delay_us;
+    if (completion_delay_us != 0)
+    {
+        ++state.delayed_completions;
+        KeStallExecutionProcessor(completion_delay_us);
+    }
+#endif
 
     NET_BUFFER* buffer = NET_BUFFER_LIST_FIRST_NB(nbl);
     PMDL mdl = buffer != nullptr ? NET_BUFFER_FIRST_MDL(buffer) : nullptr;
@@ -217,6 +237,7 @@ void NTAPI injection_complete(void* context, NET_BUFFER_LIST* nbl, BOOLEAN dispa
     {
         ExFreePoolWithTag(data, injection_pool_tag);
     }
+    InterlockedDecrement64(&state.outstanding_injections);
 }
 
 [[nodiscard]] bool rewrite_in_bounds(const forwarded_frame_facts& facts) noexcept
@@ -479,13 +500,29 @@ NTSTATUS probe_forwarded_inject_frame(const NET_BUFFER* source,
                                                    nullptr);
     if (!NT_SUCCESS(status))
     {
-        InterlockedDecrement64(&state.outstanding_injections);
-        // 注入 API 拒绝：NBL 仍归调用方，按 FwpsAllocate 的对称路径释放。
+        // 注入 API 拒绝：NBL 仍归调用方，按 FwpsAllocate 的对称路径释放；counter 最后减，
+        // 与完成例程的顺序一致。
         FwpsFreeNetBufferList0(injected);
         NdisFreeMdl(mdl);
         ExFreePoolWithTag(storage, injection_pool_tag);
+        InterlockedDecrement64(&state.outstanding_injections);
     }
     return status;
+}
+
+bool probe_forwarded_drain_injections(const std::uint32_t rounds, const std::uint32_t milliseconds) noexcept
+{
+    forwarded_state& state = g_forwarded_state;
+    for (std::uint32_t attempt = 0;
+         attempt < rounds && InterlockedCompareExchange64(&state.outstanding_injections, 0, 0) != 0;
+         ++attempt)
+    {
+        LARGE_INTEGER interval{};
+        interval.QuadPart = -static_cast<LONGLONG>(milliseconds) * 10000;
+        KeDelayExecutionThread(KernelMode, FALSE, &interval);
+    }
+
+    return InterlockedCompareExchange64(&state.outstanding_injections, 0, 0) == 0;
 }
 
 } // namespace winforward::wfp::probe

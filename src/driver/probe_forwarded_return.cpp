@@ -118,14 +118,16 @@ forwarded_return_decision handle_forwarded_tcp_return(forwarded_state& state,
         delta.redirect_multi_nb = 1;
     }
 
-    if (injected > 0)
+    if (injected > 0 && failed == 0)
     {
         delta.redirect_return = 1;
         delta.redirected = 1;
-        if (failed > 0)
+        if (missed > 0)
         {
-            delta.redirect_inject_failed = failed;
+            // 混合命中+未命中的 NBL：原 NBL 整体 block（fail closed），miss 按 NET_BUFFER 逐个计数。
+            delta.redirect_return_miss = missed;
         }
+
         if (closing)
         {
             mark_forwarded_redirect_closing(state,
@@ -138,18 +140,25 @@ forwarded_return_decision handle_forwarded_tcp_return(forwarded_state& state,
         return { true, true };
     }
 
-    if (configured && failed > 0)
+    if (failed > 0)
     {
-        // 所有命中表项的回程帧都没能排队注入：原帧已 block，必须显式计入失败。
+        // 部分或全部回程帧注入失败：原 NBL 整体 block，按失败计；不能把部分成功当 redirected。
         delta.redirect_return_failed = 1;
         delta.blocked = 1;
+        delta.redirect_inject_failed = failed;
+        if (missed > 0)
+        {
+            delta.redirect_return_miss = missed;
+        }
         return { true, true };
     }
 
     if (configured && candidates > 0 && missed > 0)
     {
-        delta.redirect_return_miss = 1;
+        // 纯 miss：整个 NBL 按普通本机流量放行，miss 按 NET_BUFFER 逐个计数。
+        delta.redirect_return_miss = missed;
     }
+
     return { false, false };
 }
 

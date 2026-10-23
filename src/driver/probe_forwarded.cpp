@@ -231,6 +231,7 @@ NTSTATUS probe_forwarded_start(HANDLE engine_handle) noexcept
     {
         return STATUS_INVALID_PARAMETER;
     }
+    install_forwarded_test_delay(state);
 
     NTSTATUS status = FwpsInjectionHandleCreate0(AF_UNSPEC, FWPS_INJECTION_TYPE_L2, &state.injection_handle);
     if (!NT_SUCCESS(status))
@@ -287,6 +288,7 @@ NTSTATUS probe_forwarded_start(HANDLE engine_handle) noexcept
 void probe_forwarded_stop(HANDLE engine_handle) noexcept
 {
     forwarded_state& state = g_forwarded_state;
+    record_forwarded_stop_entry(state);
 
     // 注册逆序：出向先拆，再拆入向。拆除例程与 host 共用（同一套 BUSY/IN_USE 重试）。
     if (engine_handle != nullptr)
@@ -300,20 +302,13 @@ void probe_forwarded_stop(HANDLE engine_handle) noexcept
         FwpsInjectionHandleDestroy0(state.injection_handle);
         state.injection_handle = nullptr;
     }
-    // FwpsInjectionHandleDestroy0 按文档会等所有 outstanding 注入回调；这里再显式等一次，
-    // 保证 NBL 池在最后一个完成例程释放 NBL 之后才被销毁。
-    for (std::uint32_t attempt = 0;
-         attempt < retire_wait_rounds && InterlockedCompareExchange64(&state.outstanding_injections, 0, 0) != 0;
-         ++attempt)
-    {
-        wait_one_tick();
-    }
-
-    if (state.nbl_pool != nullptr)
-    {
-        NdisFreeNetBufferListPool(state.nbl_pool);
-        state.nbl_pool = nullptr;
-    }
+    // FwpsInjectionHandleDestroy0 按文档会等所有 outstanding 注入回调；这里再显式等一次。
+    // 超时（例如完成例程被卡住）时不能销毁 NBL 池：完成例程还会 FwpsFreeNetBufferList0，
+    // 池已释放就是 use-after-free。宁可泄漏这个池并留下高可见度告警，也不释放仍在用的池。
+    const bool drained = probe_forwarded_drain_injections(1000, 10); // 10 ms * 1000 = 10 s
+    const LONG64 outstanding_after = InterlockedCompareExchange64(&state.outstanding_injections, 0, 0);
+    record_forwarded_stop_counters(state, outstanding_after);
+    finalize_forwarded_injection_pool(state, drained, outstanding_after);
 
     forwarded_redirect_free(state.redirects);
     RtlZeroMemory(&state.config, sizeof(state.config));

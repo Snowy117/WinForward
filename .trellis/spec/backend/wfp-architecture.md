@@ -289,8 +289,8 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
   SHA-256 与 TCP ACK 字节数，套件按 client_port 配对断言，缺回报/内容不符即 FAIL（--no-verify 仅手工）。
   产品 E2E 由 WinForward.Controller run 驱动。实测计数与恒等式见 src/driver/README.md 的 B4b 段。
   forwarded-rules 的 F6 不再把 redirect 当作非法 blob。
-- **边界。** 单入口 / 单 listener 端口 / 单 L；UDP 数据面见 §7.14；表满路径用 capacity=8 测试
-  构建验证；LWF 对注入帧的可见性仍未测。一个 NBL 内的 NET_BUFFER 按同一 listener 回程流处理，
+- **边界。** 单入口 / 单 listener 端口 / 单 L；UDP 数据面见 §7.14；表满路径用生产 4096 真满
+  验证；LWF 对注入帧的可见性仍未测。一个 NBL 内的 NET_BUFFER 按同一 listener 回程流处理，
   混合流不在本版支持范围。
 
 ### 7.14 Forwarded UDP 数据面（B5 实测）
@@ -299,17 +299,20 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
   (ingress, family, protocol, client, server)、回程 (family, protocol, listener_port, client)。同一
   listener 端口上的 TCP/UDP 表项不能互串。TCP/UDP 共用容量 4096；UDP 首个 datagram 建表，状态直接
   established，60s 无活动回收；TCP 的三段超时不变。回收是惰性的，过期后下一个 datagram 重建表项。
-- **入口 DNAT。** forwarded config enabled 时，**任何 UDP 分片**（IPv4 首片、IPv4 非首片、IPv6
-  分片）都在规则匹配之前 block + udp_fragmented，不建表、不注入；非分片才按规则匹配。
+- **入口 DNAT。** forwarded config enabled 时，首片（offset=0，带端口）按**完整规则（含端口）**匹配：
+  命中 redirect 才 block + udp_fragmented，并把 `(入口, 族, 协议, 源/目的地址, IPv4 ID/IPv6 fragment ID)`
+  记入 256 项、2s 的跟随表；非首片没有端口，查跟随表命中才 block + udp_fragmented，否则按普通帧
+  继续。host/其他端口的分片不会被误伤；非分片帧按规则匹配。
   非分片帧查/建表，目的地址/端口改为 (L, listener_port)，重算 IPv4 头与 UDP 校验和（IPv4/IPv6
   都重算），逐 NET_BUFFER 用 FwpsInjectMacReceiveAsync0 注入，原帧 block。
 - **回程 SNAT。** 出向 UDP 帧源端口等于 listener_port 时按 (family, protocol=17, listener, client)
   查表；命中则源地址/端口改回原始服务器、目的 MAC=client_mac、源 MAC=local_mac，重算 UDP 校验和，
   FwpsInjectMacSendAsync0 注入入口网卡，原 NBL block。候选全部未命中时 permit（listener 回客户端的
   普通本机流量），并计 udp_return_miss；命中但注入失败 → block + udp_return_failed。
-- **失败关闭。** 无 config/L → udp_no_config，表满 → udp_capacity，任何分片 → udp_fragmented，
-  注入失败 → udp_inject_failed；入口失败统一计 udp_blocked 并 block 原帧。UDP 无 RST，失败是静默丢包。
-  分片在规则匹配前 block，因此 matched_redirect 恒等式带 udp_fragmented 项。
+- **失败关闭。** 无 config/L → udp_no_config，表满 → udp_capacity，**forwarded redirect 规则地址空间
+  内**的分片 → udp_fragmented（首片完整匹配 redirect 或非首片命中跟随表），注入失败 →
+  udp_inject_failed；入口失败统一计 udp_blocked 并 block 原帧。UDP 无 RST，失败是静默丢包。
+  分片 block 不建 redirect 表，因此 matched_redirect 恒等式带 udp_fragmented 项。
   恒等式见 src/driver/README.md 的 B5 段与 probe_ioctl.h 注释。
 - **ABI。** probe_forwarded_stats 扩到 400 字节（UDP 计数 udp_created/ingress/return/blocked/
   return_failed/return_miss/no_config/no_state/capacity/fragmented/inject_failed/expired/multi_nb）。
@@ -321,11 +324,11 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
   UDP ASSOCIATE，空闲 30s 回收、容量 1024，缺 upstream/上游失败一律丢包不回退直连；回程用同一
   listener socket sendto，驱动负责 SNAT。WfpController 在 forwarded config 启用后启动 UDP relay，
   退出时先 disabled config（清表）再停 relay，最后空 blob。
-- **验证入口。** wfprobe forwarded-udp --phase core|socks5|fail|fragment|capacity|reject（--restore-only
+- **验证入口。** wfprobe forwarded-udp --phase core|socks5|fail|fragment|fragment-host|capacity|reject（--restore-only
   兜底）；core 直连 Linux UDP echo 并绑定原始目的地 decoy 证明原帧未 permit，socks5 用进程内两个假
-  SOCKS5 UDP 上游验证 upstream_id 选择与关联复用，fail 验证无 config 时静默丢包，fragment 发 4000
-  字节 datagram 验证全部分片 fail closed，capacity 用小容量测试构建验证表满，reject 验证 ASSOCIATE
-  失败静默丢包。外部 Linux 客户端经 verify TCP 端口回报实收字节/SHA/源地址；--expect-created 2
+  SOCKS5 UDP 上游验证 upstream_id 选择与关联复用，fail 验证无 config 时静默丢包，fragment 用
+  raw 显式 9 片 / 1280 MTU 9 片验证 forwarded 空间内 fail closed，fragment-host 验证 host 分片
+  不被误伤，capacity 用生产 4096 真满，reject 验证 ASSOCIATE 失败静默丢包。外部 Linux 客户端经 verify TCP 端口回报实收字节/SHA/源地址；--expect-created 2
   配合客户端 65s 间隔可验证 60s 超时回收。
 - **实测（2026-10-23）。** core 10/10；socks5 两客户端各 10/10、两个上游各只 1 次 ASSOCIATE；
   fail 5 条 datagram 全部 udp_no_config；60s 超时后 udp_created=2/udp_expired=1；forwarded-tcp core、
@@ -333,6 +336,7 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
   （WinForward.Controller + Linux fake SOCKS5 UDP 40500）5/5、源地址恢复为原始服务器，产品日志
   `udp-relay stop in=6 relayed=5 back=5 associations=1 failures=0 drops=1`（drops 是直接打到 listener 的
   query-miss datagram）。
-- **边界。** 单入口/单 listener 端口/单 L 不变；所有 UDP 分片 fail closed；native IPv6 UDP 代码路径
-  已实现但本环境未在入口网卡做 E2E（Linux 的 fd00 地址在另一张网卡）；host UDP 的 listener/中继
-  不在本仓库，未命中 forwarded 表的 datagram 丢弃。
+- **边界。** 单入口/单 listener 端口/单 L 不变；分片闸只覆盖 forwarded redirect 规则地址空间：
+  首片按完整规则（含端口）匹配并写 (入口, 族, 协议, 源/目的地址, IP ID) 跟随表，非首片查表 block；host/其他端口分片按
+  原路径。非首片先于首片到达时无法跟随（放行），TCP 分片与出向分片不在闸内。native IPv6 UDP
+  代码路径已实现并在 1280 MTU 9 片下 E2E；host UDP 的 listener/中继不在本仓库。

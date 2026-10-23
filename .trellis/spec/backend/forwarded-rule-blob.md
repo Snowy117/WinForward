@@ -306,15 +306,18 @@ redirect 规则的 `upstream_id` 是用户态选 SOCKS5 的唯一依据；驱动
 的含义与 TCP 相同。驱动在执行层按协议分派：
 
 - `protocol=udp` 的 redirect 规则命中后，非分片首个 datagram 建表（没有 SYN），后续 datagram 查表；
-  **任何 UDP 分片**（IPv4 首片/非首片、IPv6 分片）在规则匹配前统一 block + `udp_fragmented`，不建表、不注入。
-  表项 key 增加协议，TCP/UDP 共用 listener 端口也不会互串。UDP 空闲 60s 回收，容量与 TCP 共享 4096。
+  首片（带端口）按完整规则匹配，命中 redirect 才 block + `udp_fragmented` 并记录跟随表；非首片查
+  `(入口, 族, 协议, 源/目的地址, IP ID)` 跟随表，命中才 block。跟随表 256 项、2s 轮转；host/其他
+  端口的分片按原路径。表项 key 增加协议，TCP/UDP 共用 listener 端口也不会互串。UDP 空闲 60s 回收，
+  容量与 TCP 共享 4096。
 - 回程 UDP 帧按 listener 源端口 + 客户端地址/端口 + protocol=17 查表，再 SNAT 回原始服务器；
   用户态 listener 用**同一个 socket** `sendto` 客户端，驱动负责源地址还原。
 - 用户态查询复用 `ioctl_query_forwarded_redirect`：`probe_forwarded_redirect_query.protocol=17`；
   输出 `probe_forwarded_redirect.protocol` 回填 17，其余字段（server/upstream/ingress/rule）不变。
-- `forwarded-udp` 套件验证 core/socks5/fail/fragment/capacity/reject：core 额外绑定原始目的地 decoy，
-  fragment 用 4000 字节 datagram 验证分片 fail closed，capacity 用 capacity=8 测试构建验证表满，
-  reject 验证 ASSOCIATE 失败静默丢包；host UDP、forwarded TCP 与 `forwarded-rules` 的回归在 B5 不改语义。
+- `forwarded-udp` 套件验证 core/socks5/fail/fragment/fragment-host/capacity/reject：core 额外绑定原始
+  目的地 decoy；fragment 用 raw 显式 9 片（IPv4）或 1280 MTU 9 片（IPv6）验证 forwarded 空间内
+  fail closed；fragment-host 验证同一 remote IP、不同端口的 host 分片仍按原路径重组；capacity 用
+  生产 4096 真满（4097 个源端口）；reject 验证 ASSOCIATE 失败静默丢包。
 - 产品 E2E 使用 WinForward.Controller + Linux fake SOCKS5 UDP：5/5，源地址恢复，产品日志
   `udp-relay stop in=6 relayed=5 back=5 associations=1 failures=0 drops=1`；未命中 forwarded 表的
   直接 datagram 计 drop，不直连。

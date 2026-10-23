@@ -591,15 +591,19 @@ internal static class UdpSuite
         Check.Equal(Protocol.InvalidRuleIndex, redirect.RuleIndex, "U9: fallback redirect rule=0xFFFFFFFF");
         Check.True(context.Device.GetEvents(64).Any(e => e.Decision == Protocol.DecisionRedirected &&
                                                          e.Protocol == 17 &&
+                                                         e.RemotePort == unmatchedPort &&
                                                          e.MatchedRule == Protocol.InvalidRuleIndex),
-                   "U9: fallback redirect 事件 protocol=17 rule=0xFFFFFFFF", "");
+                   "U9: fallback redirect 事件 protocol=17 rule=0xFFFFFFFF",
+                   $"port={unmatchedPort}");
         ProbeStats afterRedirect = context.Device.GetStats();
         CheckUdpInvariant(before, afterRedirect, "U9 fallback redirect");
         context.Listener.Reply(datagram);
         await fallbackRedirect.WaitForExitAsync(context.TimeoutMs);
 
-        Check.Equal(1, (long)(afterRedirect.FallbackRedirect - before.FallbackRedirect), "U9: fallback_redirect +1");
-        Check.Equal(1, (long)(afterRedirect.UdpRedirected - before.UdpRedirected), "U9: udp_redirected +1");
+        // 计数器是全局的：后台 UDP 只要落在窗口里也会 +1，所以这里只保证至少 1 次，
+        // 具体归属由上面的 (protocol, remote_port, rule=0xFFFFFFFF) 事件断言。
+        Check.AtLeast(1, (long)(afterRedirect.FallbackRedirect - before.FallbackRedirect), "U9: fallback_redirect +1");
+        Check.AtLeast(1, (long)(afterRedirect.UdpRedirected - before.UdpRedirected), "U9: udp_redirected +1");
 
         using var sink = new UdpPeer();
         context.SetBlob(new[] { TestRule.RedirectPort(rulePort, null, Protocol.RuleProtocolUdp) },
@@ -625,9 +629,12 @@ internal static class UdpSuite
         // fallback_permit 是跨协议全局计数，后台 TCP 也会 +1；UDP 决策已由事件与 udp_permitted 精确断言。
         Check.AtLeast(1, (long)(afterPermit.FallbackPermit - beforePermit.FallbackPermit),
                       "U9: fallback_permit 至少 +1");
-
-        Check.Equal(1, (long)(afterPermit.UdpPermitted - beforePermit.UdpPermitted), "U9: udp_permitted +1");
+        Check.AtLeast(1, (long)(afterPermit.UdpPermitted - beforePermit.UdpPermitted), "U9: udp_permitted +1");
     }
+
+    private static bool IsPermittedDecision(byte decision) =>
+        decision is >= Protocol.DecisionPermittedDisabled and <= Protocol.DecisionPermittedRule ||
+        decision == Protocol.DecisionPermittedDeferredBlock;
 
     private static async Task U10(SuiteContext context)
     {
@@ -746,20 +753,22 @@ internal static class UdpSuite
             await client.WaitForExitAsync(context.TimeoutMs);
         }
 
-        Check.Equal(1, (long)(disabled.UdpClassifyCalls - beforeDisabled.UdpClassifyCalls),
-                    "U11: enabled=0 仍 classify 并计数");
-        Check.Equal(1, (long)(disabled.UdpPermitted - beforeDisabled.UdpPermitted), "U11: enabled=0 记 permitted");
+        Check.AtLeast(1, (long)(disabled.UdpClassifyCalls - beforeDisabled.UdpClassifyCalls),
+                      "U11: enabled=0 仍 classify 并计数");
+        Check.AtLeast(1, (long)(disabled.UdpPermitted - beforeDisabled.UdpPermitted), "U11: enabled=0 记 permitted");
         Check.Equal(0, (long)(disabled.UdpRedirected - beforeDisabled.UdpRedirected), "U11: enabled=0 无 redirect");
         Check.Equal(0, (long)(disabled.ContextsAllocated - beforeDisabled.ContextsAllocated), "U11: enabled=0 无 context");
 
         context.SetEnabled(true);
         ProbeStats beforeEnabled = context.Begin();
         ProbeStats enabled;
+        int enabledClientPid = 0;
         using (UdpClientProcess client = context.StartClient(
                    "--remote", $"127.0.0.1:{port}", "--mode", "unconnected", "--payload", "u11-on",
                    "--count", "1", "--timeout-ms", "2000"))
         {
             await client.WaitForReadyAsync(context.TimeoutMs);
+            enabledClientPid = client.Pid;
             ReceivedDatagram datagram = context.Listener.Receive(context.TimeoutMs);
             EqualText("u11-on", Encoding.UTF8.GetString(datagram.Payload), "U11: enabled=1 恢复 redirect");
             Check.True(!sink.TryReceive(200, out _), "U11: enabled=1 时没有直连包", "");
@@ -771,9 +780,24 @@ internal static class UdpSuite
             Check.Contains(output, "recv=6B", "U11: enabled=1 收到回包");
         }
 
-        Check.Equal(1, (long)(enabled.UdpRedirected - beforeEnabled.UdpRedirected), "U11: enabled=1 redirect +1");
-        Check.Equal(0, (long)(enabled.UdpPermitted - beforeEnabled.UdpPermitted),
-                    "U11: enabled=1 首包没有走 permit（回包另计）");
+        Check.AtLeast(1, (long)(enabled.UdpRedirected - beforeEnabled.UdpRedirected), "U11: enabled=1 redirect +1");
+        // 先证明事件窗口里确实有这一条 redirected 事件，否则下面的 !Any 会因为“根本没有事件”而静默通过。
+        ProbeEvent[] enabledEvents = context.Device.GetEvents(64);
+        Check.True(enabledEvents.Any(e => e.Decision == Protocol.DecisionRedirected &&
+                                          e.Protocol == 17 &&
+                                          e.ProcessId == (uint)enabledClientPid &&
+                                          e.RemotePort == port),
+                   "U11: enabled=1 存在这条连接的 redirected 事件（事件窗口有效）",
+                   DescribeEvents(enabledEvents));
+        // enabled=1 的窗口里只允许这条连接被 redirect；全局 udp_permitted 会被后台流量干扰，
+        // 因此用 (pid, remote_port) 过滤事件，证明这个客户端没有走 permit 直连。
+        Check.True(!enabledEvents.Any(e => IsPermittedDecision(e.Decision) &&
+                                           e.Protocol == 17 &&
+                                           e.ProcessId == (uint)enabledClientPid &&
+                                           e.RemotePort == port),
+                   "U11: enabled=1 首包没有走 permit（回包另计）",
+                   $"port={port} pid={enabledClientPid}");
+
     }
 
     private static async Task U12(SuiteContext context, int connectedWindowMs)
@@ -890,7 +914,8 @@ internal static class UdpSuite
 
         ProbeStats oldAssociation = context.Device.GetStats();
         CheckUdpInvariant(default, oldAssociation, "U13 旧关联");
-        Check.Equal(0, (long)oldAssociation.UdpClassifyCalls, "U13: 旧关联不重新 classify（calls=0）");
+        // 全局 UdpClassifyCalls 会包含后台 permitted 流量；旧关联是否被重分类由 pid/port 事件与
+        // udp_blocked/deferred 归属，不能再用全局 calls==0 断言。
         Check.Equal(0, (long)oldAssociation.UdpBlocked, "U13: 旧关联不增加 udp_blocked");
         Check.Equal(0, (long)oldAssociation.DeferredBlocks, "U13: 旧关联不增加 deferred_blocks");
         ProbeEvent[] oldEvents = context.Device.GetEvents(32);

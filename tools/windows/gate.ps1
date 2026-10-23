@@ -31,11 +31,11 @@ function Assert([string]$name, [bool]$condition, [string]$detail) {
         "ASSERT FAIL: $name ($detail)"
     }
 }
-function Get-WfPrOutstanding([string]$ToolExe) {
+function Get-PoolOutstanding([string]$Tag, [string]$ToolExe) {
     if (-not $ToolExe -or -not (Test-Path -LiteralPath $ToolExe -PathType Leaf)) {
         return $null
     }
-    $text = (& $ToolExe pooltag --tag WfPr | Out-String)
+    $text = (& $ToolExe pooltag --tag $Tag | Out-String)
     if ($text -match 'nonpaged_outstanding=(\d+)') {
         return [long]$Matches[1]
     }
@@ -64,6 +64,8 @@ try {
     Assert "签名状态 Valid" ($install.SignatureStatus -eq "Valid") $install.SignatureStatus
     "服务状态：$($install.State)"
     Assert "驱动进入 RUNNING" ($install.State -match "RUNNING") $install.State
+    $installedSha = (Get-FileHash (Join-Path $env:SystemRoot "System32\drivers\wfprobe.sys") -Algorithm SHA256).Hash
+    "驱动 SHA256：$installedSha"
     $bootBefore = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
     "boot time: $bootBefore"
 
@@ -172,22 +174,30 @@ catch {
 finally {
     if ($serviceStarted) {
         "===== 卸载 ====="
-        $poolBeforeUninstall = Get-WfPrOutstanding $toolBinary
-        "卸载前 WfPr outstanding：$poolBeforeUninstall"
+        $poolTags = @("WfPr", "WfIj", "WfTr")
+        $poolBefore = @{}
+        foreach ($tag in $poolTags) {
+            $poolBefore[$tag] = Get-PoolOutstanding $tag $toolBinary
+            "卸载前 $tag outstanding：$($poolBefore[$tag])"
+        }
         Uninstall-Driver -ToolExe $toolBinary
         $state = (sc.exe query $serviceName 2>$null | Select-String "STATE")
         if ($state) { "卸载后状态：$($state.Line.Trim())" }
-        $poolAfterUninstall = Get-WfPrOutstanding $toolBinary
-        if ($null -ne $poolBeforeUninstall -and $null -ne $poolAfterUninstall) {
-            if ($poolAfterUninstall -gt $poolBeforeUninstall) {
-                $script:failures++
-                $script:result = 1
-                "ASSERT FAIL: 卸载没有新增 WfPr outstanding ($poolBeforeUninstall -> $poolAfterUninstall)"
+        foreach ($tag in $poolTags) {
+            $before = $poolBefore[$tag]
+            $after = Get-PoolOutstanding $tag $toolBinary
+            "卸载后 $tag outstanding：$after"
+            if ($null -ne $before -and $null -ne $after) {
+                if ($after -gt $before) {
+                    $script:failures++
+                    $script:result = 1
+                    "ASSERT FAIL: 卸载没有新增 $tag outstanding ($before -> $after)"
+                } else {
+                    "ASSERT PASS: 卸载没有新增 $tag outstanding ($before -> $after)"
+                }
             } else {
-                "ASSERT PASS: 卸载没有新增 WfPr outstanding ($poolBeforeUninstall -> $poolAfterUninstall)"
+                "卸载前后 $tag outstanding：无法读取（按环境缺口跳过比较，tool=$toolBinary）"
             }
-        } else {
-            "卸载前后 WfPr outstanding：无法读取（按环境缺口跳过比较，tool=$toolBinary）"
         }
     }
 }

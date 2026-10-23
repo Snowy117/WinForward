@@ -29,6 +29,7 @@
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
       <AdditionalIncludeDirectories>$(VC_IncludePath);..\..\src\common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions Condition="'$(WfFaultInjection)' == 'true'">WFPROBE_FAULT_INJECTION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <AdditionalDependencies>Wdmsec.lib;fwpkclnt.lib;ndis.lib;%(AdditionalDependencies)</AdditionalDependencies>

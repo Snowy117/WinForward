@@ -4,6 +4,7 @@ include(GoogleTest)
 add_executable(wf_common_tests
     forwarded_blob_builder.h
     forwarded_blob_test.cpp
+    forwarded_fragment_table_test.cpp
     forwarded_matcher_test.cpp
     matcher_test.cpp
     redirect_context_test.cpp

@@ -18,13 +18,21 @@ internal static class ForwardedUdpSuite
     private const string DefaultRemoteAddress = "192.168.100.99";
     private const string DefaultBackend = "192.168.100.4:40250";
 
+    private static WatchdogHandle? s_watchdog;
+    private static int s_watchdogSeconds = 120;
+    private static uint s_installedGeneration;
+
     public static async Task<int> RunAsync(Options options)
     {
         if (options.Has("restore-only"))
         {
             using var restoreDevice = new WfpDevice();
-            Restore(restoreDevice, options.GetInt("listener-port", DefaultListenerPort));
-            Console.WriteLine("[forwarded-udp] restore-only rules=0 fallback=permit config=disabled");
+            if (Restore(restoreDevice, options.GetInt("listener-port", DefaultListenerPort),
+                        options.GetInt("generation", -1)))
+            {
+                Console.WriteLine("[forwarded-udp] restore-only rules=0 fallback=permit config=disabled " +
+                                  $"generation={options.GetInt("generation", -1)}");
+            }
             return 0;
         }
 
@@ -40,8 +48,6 @@ internal static class ForwardedUdpSuite
         int verifyTimeoutMs = options.GetInt("verify-timeout-ms", 20000);
         int capacity = options.GetInt("capacity", 4096);
         int sweepBase = options.GetInt("sweep-base", 41001);
-        int capacityPortStart = options.GetInt("capacity-port-start", 40001);
-        int capacityPortEnd = options.GetInt("capacity-port-end", 41000);
         string? clientCidr = options.Get("client-cidr");
         int verifyPort = options.GetInt("verify-port", listenerPort + 1000);
         uint ifIndex = options.Has("ifindex") ? options.GetUInt("ifindex", 0) : FindAdapterIndex(localIp) ?? 0;
@@ -54,21 +60,28 @@ internal static class ForwardedUdpSuite
         ProbeStats stats = device.GetStats();
         Check.Equal(Protocol.AbiVersion, (long)stats.AbiVersion, "驱动 ABI 版本与夹具一致");
 
-        using OnLinkAlias alias = OnLinkAlias.Ensure(remoteAddress, localIp, ifIndex, !options.Has("no-alias"));
-        if (!alias.Ready)
+        // OnLinkAlias 只支持 IPv4；IPv6 分片用链路本地地址，不需要别名（调用方需显式 --no-alias）。
+        bool skipAlias = IPAddress.Parse(remoteAddress).AddressFamily == AddressFamily.InterNetworkV6 &&
+                         options.Has("no-alias");
+        using OnLinkAlias? alias = skipAlias
+                                       ? null
+                                       : OnLinkAlias.Ensure(remoteAddress, localIp, ifIndex, !options.Has("no-alias"));
+        if (alias is not null && !alias.Ready)
         {
             Console.WriteLine($"[forwarded-udp] alias 不可用：{alias.Error}");
             return 7;
         }
+
         int watchdogSeconds = options.GetInt("watchdog-seconds", Math.Max(120, (waitMs / 1000) + 60));
-        using var watchdog = StartRestoreWatchdog(watchdogSeconds, listenerPort);
+        s_watchdogSeconds = watchdogSeconds;
+        s_watchdog = new WatchdogHandle();
         try
         {
             return phase switch
             {
                 "core" => await RunCoreAsync(device, ifIndex, listenerPort, localIp, family, IPAddress.Parse(remoteAddress),
                                              remotePort, backend, clientCidr, waitMs, expectDatagrams, expectCreated,
-                                             verifyPort, verifyTimeoutMs),
+                                             verifyPort, verifyTimeoutMs, options.Has("no-verify")),
                 "socks5" => await RunSocks5Async(device, ifIndex, listenerPort, localIp, family,
                                                  IPAddress.Parse(remoteAddress), remotePort, clientCidr, waitMs,
                                                  expectDatagrams, verifyPort, verifyTimeoutMs),
@@ -77,36 +90,41 @@ internal static class ForwardedUdpSuite
                                              verifyTimeoutMs),
                 "fragment" => await RunFragmentAsync(device, ifIndex, listenerPort, localIp, family,
                                                      IPAddress.Parse(remoteAddress), remotePort, clientCidr,
-                                                     waitMs),
+                                                     waitMs, options.GetInt("expect-fragments", 9),
+                                                     options.GetInt("fragment-timeout-ms", 8000),
+                                                     options.GetInt("fragment-permit-first-port", 0)),
+                "fragment-host" => await RunFragmentHostAsync(device, ifIndex, listenerPort, localIp, family,
+                                                              IPAddress.Parse(remoteAddress), remotePort, clientCidr,
+                                                              waitMs, IPAddress.Parse(options.Get("host-fragment-address") ?? localIp),
+                                                              options.GetInt("host-fragment-port", 40600),
+                                                              options.GetInt("fragment-timeout-ms", 8000)),
                 "capacity" => await RunCapacityAsync(device, ifIndex, listenerPort, localIp, family,
                                                      IPAddress.Parse(remoteAddress), remotePort, clientCidr,
-                                                     waitMs, capacity, sweepBase, capacityPortStart,
-                                                     capacityPortEnd),
+                                                     waitMs, capacity, sweepBase),
                 "reject" => await RunRejectAsync(device, ifIndex, listenerPort, localIp, family,
                                                  IPAddress.Parse(remoteAddress), remotePort, clientCidr,
                                                  waitMs),
-                _ => throw new ArgumentException($"未知 phase：{phase}（core / socks5 / fail / fragment / capacity / reject）"),
+                _ => throw new ArgumentException($"未知 phase：{phase}（core / socks5 / fail / fragment / fragment-host / capacity / reject）"),
             };
         }
         finally
         {
             if (!options.Has("keep-blob"))
             {
-                Restore(device, listenerPort);
+                Restore(device, listenerPort, (int)s_installedGeneration);
             }
 
-            if (watchdog is not null && !watchdog.HasExited)
-            {
-                watchdog.Kill(true);
-            }
+            s_watchdog?.Dispose();
+            s_watchdog = null;
         }
+
     }
 
     private static async Task<int> RunCoreAsync(WfpDevice device, uint ifIndex, int listenerPort, string localIp,
                                                 byte family, IPAddress remoteAddress, int remotePort,
                                                 IPEndPoint backend, string? clientCidr, int waitMs,
                                                 int expectDatagrams, int expectCreated, int verifyPort,
-                                                int verifyTimeoutMs)
+                                                int verifyTimeoutMs, bool noVerify)
     {
         byte[] blob = ForwardedBlobBuilder.Build(
             new[] { RedirectRule(ifIndex, clientCidr, remoteAddress, remotePort, remotePort, 0) },
@@ -117,8 +135,9 @@ internal static class ForwardedUdpSuite
         using var listener = BindUdp(listenerPort);
         using var backendSocket = BindEphemeralUdp();
         using Socket? decoy = TryBindDecoy(remoteAddress, remotePort);
-        using var verifyListener = StartVerifyListener(verifyPort);
-        Console.WriteLine($"[forwarded-udp] READY phase=core listener={listenerPort} verify_port={verifyPort} " +
+        using TcpListener? verifyListener = noVerify ? null : StartVerifyListener(verifyPort);
+        Console.WriteLine($"[forwarded-udp] READY phase=core listener={listenerPort} " +
+                          $"verify_port={(noVerify ? "skipped" : verifyPort.ToString())} " +
                           $"remote={remoteAddress}:{remotePort} backend={backend} datagrams={expectDatagrams} " +
                           $"created={expectCreated} decoy={(decoy is null ? "unbound" : "bound")}");
         Console.Out.Flush();
@@ -187,32 +206,57 @@ internal static class ForwardedUdpSuite
 
         Check.True(decoy is not null, "U7：decoy 绑定原始目的地",
                    decoy is null ? $"绑定 {remoteAddress}:{remotePort} 失败" : "bound");
+        int decoyDatagrams = 0;
+        long decoyBytesTotal = 0;
         string decoyDetail = "无数据";
         if (decoy is not null && decoy.Poll(200_000, SelectMode.SelectRead))
         {
             byte[] decoyBuffer = new byte[65535];
-            EndPoint decoyPeer = new IPEndPoint(IPAddress.Any, 0);
-            int decoyBytes = decoy.ReceiveFrom(decoyBuffer, ref decoyPeer);
-            string preview = Convert.ToHexString(decoyBuffer.AsSpan(0, Math.Min(decoyBytes, 16)));
-            decoyDetail = $"available={decoy.Available} from={decoyPeer} bytes={decoyBytes} head={preview}";
+            while (decoy.Available > 0)
+            {
+                EndPoint decoyPeer = new IPEndPoint(IPAddress.Any, 0);
+                int decoyBytes = decoy.ReceiveFrom(decoyBuffer, ref decoyPeer);
+                if (decoyBytes <= 0)
+                {
+                    break;
+                }
+
+                ++decoyDatagrams;
+                decoyBytesTotal += decoyBytes;
+                string preview = Convert.ToHexString(decoyBuffer.AsSpan(0, Math.Min(decoyBytes, 16)));
+                decoyDetail = $"datagrams={decoyDatagrams} bytes={decoyBytesTotal} from={decoyPeer} head={preview}";
+            }
         }
 
-        Check.True(decoyDetail == "无数据",
+        // 断言前确认窗口仍然有效：规则表被外部恢复（典型是上一轮被 kill 的套件遗留的看门狗）时，
+        // 原帧会按 fallback permit 落到本机栈并被 decoy 收到。这必须报成窗口失效，不能当成驱动回归。
+        ProbeForwardedInfo windowInfo = device.GetForwardedInfo();
+        ProbeForwardedConfig windowConfig = device.GetForwardedConfig();
+        Check.True(windowInfo.Installed == 1 && windowInfo.RuleCount == 1 && windowConfig.Enabled == 1,
+                   "U7：断言窗口内 forwarded 表与 config 仍然生效（没有被动过）",
+                   $"installed={windowInfo.Installed} rules={windowInfo.RuleCount} " +
+                   $"config_enabled={windowConfig.Enabled} generation={windowInfo.Generation} " +
+                   $"fallback_permit={stats.FallbackPermit} matched_redirect={stats.MatchedRedirect}");
+        Check.True(decoyDatagrams == 0,
                    "U7：原始目的地没有收到未改写帧（decoy 无数据）", decoyDetail);
 
-        string expectedSha = ExpectedPayloadSha(expectDatagrams);
-        List<VerifyRecord> verified = await CollectVerificationAsync(verifyListener, 1, expectDatagrams, expectedSha,
-                                                                     verifyTimeoutMs);
-        Check.Equal(1, verified.Count, "客户端回报了一条验证记录");
-        if (verified.Count == 1)
+
+        if (!noVerify)
         {
-            VerifyRecord verifiedRecord = verified[0];
-            Check.Equal(expectDatagrams, verifiedRecord.Count, "客户端收到全部回包");
-            Check.Equal(expectDatagrams * PayloadSize, verifiedRecord.Bytes, "客户端实收字节数");
-            Check.Equal(remotePort, verifiedRecord.TargetPort, "客户端看到的源端口是原始服务器端口");
-            Check.True(verifiedRecord.SourceOk, "客户端看到的源地址是原始服务器地址", $"{verifiedRecord.Source}");
-            Check.True(string.Equals(verifiedRecord.Sha, expectedSha, StringComparison.Ordinal),
-                       "客户端收到的字节 SHA 一致", $"expected={expectedSha[..12]} actual={verifiedRecord.Sha}");
+            string expectedSha = ExpectedPayloadSha(expectDatagrams);
+            List<VerifyRecord> verified = await CollectVerificationAsync(verifyListener!, 1, expectDatagrams,
+                                                                         expectedSha, verifyTimeoutMs);
+            Check.Equal(1, verified.Count, "客户端回报了一条验证记录");
+            if (verified.Count == 1)
+            {
+                VerifyRecord verifiedRecord = verified[0];
+                Check.Equal(expectDatagrams, verifiedRecord.Count, "客户端收到全部回包");
+                Check.Equal(expectDatagrams * PayloadSize, verifiedRecord.Bytes, "客户端实收字节数");
+                Check.Equal(remotePort, verifiedRecord.TargetPort, "客户端看到的源端口是原始服务器端口");
+                Check.True(verifiedRecord.SourceOk, "客户端看到的源地址是原始服务器地址", $"{verifiedRecord.Source}");
+                Check.True(string.Equals(verifiedRecord.Sha, expectedSha, StringComparison.Ordinal),
+                           "客户端收到的字节 SHA 一致", $"expected={expectedSha[..12]} actual={verifiedRecord.Sha}");
+            }
         }
 
         return Check.Failures == 0 ? 0 : 6;
@@ -220,26 +264,34 @@ internal static class ForwardedUdpSuite
 
     private static async Task<int> RunFragmentAsync(WfpDevice device, uint ifIndex, int listenerPort, string localIp,
                                                     byte family, IPAddress remoteAddress, int remotePort,
-                                                    string? clientCidr, int waitMs)
+                                                    string? clientCidr, int waitMs, int expectFragments,
+                                                    int fragmentTimeoutMs, int permitFirstPort)
     {
-        byte[] blob = ForwardedBlobBuilder.Build(
-            new[] { RedirectRule(ifIndex, clientCidr, remoteAddress, remotePort, remotePort, 0) },
-            Protocol.RuleActionPermit);
-        Install(device, blob, 1, listenerPort, localIp, family);
+        ForwardedTestRule redirect = RedirectRule(ifIndex, clientCidr, remoteAddress, remotePort, remotePort, 0);
+        ForwardedTestRule[] rules = permitFirstPort > 0
+            ? new[] { PermitRule(ifIndex, clientCidr, remoteAddress, permitFirstPort, permitFirstPort), redirect }
+            : new[] { redirect };
+        byte[] blob = ForwardedBlobBuilder.Build(rules, Protocol.RuleActionPermit);
+        Install(device, blob, permitFirstPort > 0 ? 2u : 1u, listenerPort, localIp, family);
         device.ResetForwardedStats();
 
-        using var listener = BindUdp(listenerPort);
+        using var listener = BindUdpFor(listenerPort, remoteAddress.AddressFamily);
         Console.WriteLine($"[forwarded-udp] READY phase=fragment listener={listenerPort} " +
-                          $"remote={remoteAddress}:{remotePort} expect=no-datagram");
+                          $"remote={remoteAddress}:{remotePort} expect_fragments={expectFragments} " +
+                          $"permit_first_port={permitFirstPort} expect=no-datagram");
+
         Console.Out.Flush();
 
         bool received = false;
-        using (var window = new CancellationTokenSource(Math.Min(waitMs, 5000)))
+        EndPoint fragmentAny = remoteAddress.AddressFamily == AddressFamily.InterNetworkV6
+                                   ? new IPEndPoint(IPAddress.IPv6Any, 0)
+                                   : new IPEndPoint(IPAddress.Any, 0);
+        using (var window = new CancellationTokenSource(Math.Min(waitMs, fragmentTimeoutMs)))
         {
             try
             {
                 _ = await listener.ReceiveFromAsync(new byte[65535], SocketFlags.None,
-                                                    new IPEndPoint(IPAddress.Any, 0), window.Token);
+                                                    fragmentAny, window.Token);
                 received = true;
             }
             catch (OperationCanceledException)
@@ -253,48 +305,100 @@ internal static class ForwardedUdpSuite
         PrintStats("fragment", stats);
 
         Check.True(!received, "U6/U1：分片 datagram 不会到达 listener", $"received={received}");
-        Check.AtLeast(3, (long)stats.UdpFragmented, "每个分片都计入 udp_fragmented");
-        Check.AtLeast(3, (long)stats.UdpBlocked, "分片全部计入 udp_blocked");
+        Check.Equal(expectFragments, (long)stats.UdpFragmented, "每个分片都精确计入 udp_fragmented");
+        Check.Equal(expectFragments, (long)stats.UdpBlocked, "分片全部精确计入 udp_blocked");
         Check.Equal(0, (long)stats.UdpCreated, "分片不建表");
         Check.Equal(0, (long)stats.UdpIngress, "分片没有 DNAT 注入");
+        Check.Equal(0, (long)stats.UdpReturn, "分片没有回程注入");
         Check.Equal((long)stats.UdpFragmented, (long)stats.UdpBlocked, "分片：udp_blocked == udp_fragmented");
         CheckInvariants(stats, "fragment");
         return Check.Failures == 0 ? 0 : 6;
     }
 
+    private static async Task<int> RunFragmentHostAsync(WfpDevice device, uint ifIndex, int listenerPort,
+                                                        string localIp, byte family, IPAddress remoteAddress,
+                                                        int remotePort, string? clientCidr, int waitMs,
+                                                        IPAddress hostFragmentAddress,
+                                                        int hostFragmentPort, int fragmentTimeoutMs)
+    {
+        // 同一 remote IP 上，未命中 redirect 端口的 host 分片必须按原路径重组并送达。
+        byte[] blob = ForwardedBlobBuilder.Build(
+            new[] { RedirectRule(ifIndex, clientCidr, remoteAddress, remotePort, remotePort, 0) },
+            Protocol.RuleActionPermit);
+        Install(device, blob, 1, listenerPort, localIp, family);
+        device.ResetForwardedStats();
+
+        using var host = BindUdpOn(hostFragmentPort, hostFragmentAddress);
+        Console.WriteLine($"[forwarded-udp] READY phase=fragment-host host={hostFragmentAddress}:{hostFragmentPort} " +
+                          $"remote={remoteAddress}:{remotePort} expect=host-datagram");
+
+        Console.Out.Flush();
+
+        bool received = false;
+        int receivedBytes = 0;
+        using (var window = new CancellationTokenSource(Math.Min(waitMs, fragmentTimeoutMs)))
+        {
+            try
+            {
+                EndPoint hostAny = hostFragmentAddress.AddressFamily == AddressFamily.InterNetworkV6
+                                       ? new IPEndPoint(IPAddress.IPv6Any, 0)
+                                       : new IPEndPoint(IPAddress.Any, 0);
+                var result = await host.ReceiveFromAsync(new byte[65535], SocketFlags.None,
+                                                         hostAny, window.Token);
+                received = result.ReceivedBytes > 0;
+                receivedBytes = result.ReceivedBytes;
+            }
+            catch (OperationCanceledException)
+            {
+                // 下面断言失败并打印 host 收不到。
+            }
+        }
+
+        Thread.Sleep(200);
+        ProbeForwardedStats stats = device.GetForwardedStats();
+        PrintStats("fragment-host", stats);
+
+        Check.True(received, "U6/范围：host UDP 分片重组后到达本机 socket", $"received={received}");
+        Check.AtLeast(1, receivedBytes, "host UDP 分片载荷非空");
+        Check.Equal(0, (long)stats.UdpFragmented, "host 分片没有被 forwarded 分片闸计数");
+        Check.Equal(0, (long)stats.UdpBlocked, "host 分片没有被 forwarded 分片闸 block");
+        Check.Equal(0, (long)stats.UdpCreated, "host 分片不建 forwarded 表项");
+        CheckInvariants(stats, "fragment-host");
+        return Check.Failures == 0 ? 0 : 6;
+    }
+
+
     private static async Task<int> RunCapacityAsync(WfpDevice device, uint ifIndex, int listenerPort, string localIp,
                                                     byte family, IPAddress remoteAddress, int remotePort,
-                                                    string? clientCidr, int waitMs, int capacity, int sweepBase,
-                                                    int capacityPortStart, int capacityPortEnd)
+                                                    string? clientCidr, int waitMs, int capacity, int sweepBase)
     {
-        if (capacity >= 4096)
+        if (capacity <= 0 || capacity > 65536)
         {
-            Console.WriteLine("[forwarded-udp] capacity phase 需要 capacity<4096 的测试构建；" +
-                              "生产驱动 4096 无法用单个 Linux 客户端 IP 压满");
+            Console.WriteLine($"[forwarded-udp] capacity 参数非法：{capacity}");
             return 2;
         }
 
+        // 生产容量 4096 可以直接用 4096 个不同源端口压满：回程 key 含 client_port，不依赖多个客户端 IP。
         byte[] blob = ForwardedBlobBuilder.Build(
-            new[] { RedirectRule(ifIndex, clientCidr, remoteAddress, capacityPortStart, capacityPortEnd, 0) },
+            new[] { RedirectRule(ifIndex, clientCidr, remoteAddress, remotePort, remotePort, 0) },
             Protocol.RuleActionPermit);
         Install(device, blob, 1, listenerPort, localIp, family);
         device.ResetForwardedStats();
 
         using var listener = BindUdp(listenerPort);
         Console.WriteLine($"[forwarded-udp] READY phase=capacity listener={listenerPort} " +
-                          $"remote={remoteAddress} ports={capacityPortStart}-{capacityPortEnd} capacity={capacity} " +
-                          $"sweep={capacity + 1} base={sweepBase}");
+                          $"remote={remoteAddress}:{remotePort} capacity={capacity} sweep={capacity + 1} base={sweepBase}");
         Console.Out.Flush();
 
         int received = 0;
-        using (var window = new CancellationTokenSource(Math.Max(waitMs, 30000)))
+        using (var window = new CancellationTokenSource(Math.Max(waitMs, 180000)))
         {
             byte[] buffer = new byte[65535];
             EndPoint any = new IPEndPoint(IPAddress.Any, 0);
             while (received < capacity)
             {
                 using var slice = CancellationTokenSource.CreateLinkedTokenSource(window.Token);
-                slice.CancelAfter(3000);
+                slice.CancelAfter(5000);
                 try
                 {
                     SocketReceiveFromResult result =
@@ -315,16 +419,20 @@ internal static class ForwardedUdpSuite
         ProbeForwardedStats stats = device.GetForwardedStats();
         PrintStats("capacity", stats);
 
-        Check.AtLeast(1, (long)received, "capacity：listener 至少收到一条 DNAT datagram");
+        Check.Equal(capacity, received, "capacity：listener 收到全部 DNAT datagram");
         Check.Equal(capacity, (long)stats.UdpCreated, "capacity：表项数等于容量");
-        Check.AtLeast(1, (long)stats.UdpCapacity, "capacity：第 N+1 条触发 udp_capacity");
-        Check.AtLeast(1, (long)stats.UdpBlocked, "capacity：第 N+1 条被 block");
+        Check.Equal(1, (long)stats.UdpCapacity, "capacity：第 N+1 条触发 udp_capacity");
+        Check.Equal(1, (long)stats.UdpBlocked, "capacity：第 N+1 条被 block");
+        Check.Equal(capacity, (long)stats.UdpIngress, "capacity：容量内的 datagram 全部注入");
         Check.Equal(capacity + 1, (long)(stats.UdpIngress + stats.UdpBlocked),
                     "capacity：每条 datagram 都成功注入或被 block");
         CheckInvariants(stats, "capacity");
         return Check.Failures == 0 ? 0 : 6;
     }
 
+
+    // 夹具级 reject：Socks5UdpFakeServer 是进程内假上游，只验证“关联失败不回退直连”的驱动行为。
+    // 产品级 reject（WinForward.Controller + ForwardedUdpRelay）由 tools/windows/forwarded-udp-reject-e2e.ps1 验证。
     private static async Task<int> RunRejectAsync(WfpDevice device, uint ifIndex, int listenerPort, string localIp,
                                                   byte family, IPAddress remoteAddress, int remotePort,
                                                   string? clientCidr, int waitMs)
@@ -500,6 +608,7 @@ internal static class ForwardedUdpSuite
         device.SetForwardedBlob(blob);
         ProbeForwardedInfo info = device.GetForwardedInfo();
         Check.Equal(1, info.Installed, "redirect 规则可以下发");
+        s_installedGeneration = info.Generation;
         device.SetForwardedConfig(DisabledConfig(listenerPort));
         device.ResetForwardedStats();
 
@@ -575,12 +684,35 @@ internal static class ForwardedUdpSuite
         return query;
     }
 
-    private static Socket BindUdp(int port)
+    private static Socket BindUdp(int port) => BindUdpFor(port, AddressFamily.InterNetwork);
+    private static Socket BindUdpOn(int port, IPAddress address)
     {
-        Socket socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        socket.Bind(new IPEndPoint(IPAddress.Any, port));
+        Socket socket = new(address.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            socket.DualMode = false;
+        }
+
+        socket.Bind(new IPEndPoint(address, port));
         return socket;
     }
+
+    private static Socket BindUdpFor(int port, AddressFamily family)
+    {
+        Socket socket = new(family, SocketType.Dgram, ProtocolType.Udp);
+        if (family == AddressFamily.InterNetworkV6)
+        {
+            socket.DualMode = false;
+            socket.Bind(new IPEndPoint(IPAddress.IPv6Any, port));
+        }
+        else
+        {
+            socket.Bind(new IPEndPoint(IPAddress.Any, port));
+        }
+
+        return socket;
+    }
+
 
     private static Socket? TryBindDecoy(IPAddress remoteAddress, int remotePort)
     {
@@ -614,6 +746,19 @@ internal static class ForwardedUdpSuite
         return socket;
     }
 
+    private static ForwardedTestRule PermitRule(uint ifIndex, string? clientCidr, IPAddress remoteAddress,
+                                                int portStart, int portEnd) => new()
+    {
+        Action = Protocol.RuleActionPermit,
+        IngressAdapterId = ifIndex,
+        ClientCidr = clientCidr,
+        RemoteCidr = HostCidr(remoteAddress),
+        PortStart = (ushort)portStart,
+        PortEnd = (ushort)portEnd,
+        TransportProtocol = Protocol.RuleProtocolUdp,
+        Family = (byte)(remoteAddress.AddressFamily == AddressFamily.InterNetwork ? 4 : 6),
+    };
+
     private static ForwardedTestRule RedirectRule(uint ifIndex, string? clientCidr, IPAddress remoteAddress,
                                                   int portStart, int portEnd, uint upstreamId) => new()
     {
@@ -636,6 +781,7 @@ internal static class ForwardedUdpSuite
         ProbeForwardedInfo info = device.GetForwardedInfo();
         Check.Equal(1, info.Installed, "forwarded blob installed=1");
         Check.Equal(expectedRules, info.RuleCount, "forwarded 规则数回读一致");
+        s_installedGeneration = info.Generation;
 
         ProbeForwardedConfig enabled = default;
         enabled.Enabled = 1;
@@ -652,12 +798,34 @@ internal static class ForwardedUdpSuite
         Check.Equal(1, readback.Enabled, "config 回读 enabled=1");
         Check.Equal(listenerPort, readback.ListenerPort, "config 回读 listener_port");
         Check.Equal(family, readback.Family, "config 回读 family");
+        // 看门狗在 install 之后才拿到 generation：旧套件被 kill 后遗留的看门狗不能清掉新套件的表。
+        ArmWatchdog(device, listenerPort);
     }
 
     private static ProbeForwardedConfig DisabledConfig(int listenerPort) => new() { ListenerPort = (ushort)listenerPort };
 
-    private static void Restore(WfpDevice device, int listenerPort)
+    private static bool Restore(WfpDevice device, int listenerPort, int expectedGeneration = -1)
     {
+        try
+        {
+            if (expectedGeneration >= 0)
+            {
+                ProbeForwardedInfo info = device.GetForwardedInfo();
+                if (info.Installed != 1 || (long)info.Generation != expectedGeneration)
+                {
+                    Console.WriteLine($"[forwarded-udp] 忽略过期的看门狗：expected_generation={expectedGeneration} " +
+                                      $"installed={info.Installed} generation={info.Generation}");
+                    return false;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            Console.WriteLine($"[forwarded-udp] 看门狗读取表状态失败：{exception.Message}");
+            return false;
+        }
+
+        bool restored = false;
         try
         {
             device.SetForwardedConfig(DisabledConfig(listenerPort));
@@ -670,13 +838,47 @@ internal static class ForwardedUdpSuite
         try
         {
             device.SetForwardedBlob(ForwardedBlobBuilder.BuildEmpty(Protocol.RuleActionPermit));
+            restored = true;
             Console.WriteLine("[forwarded-udp] 已恢复 rules=0 fallback=permit config=disabled");
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             Console.WriteLine($"[forwarded-udp] 恢复空 blob 失败：{exception.Message}");
         }
+        return restored;
     }
+
+    private static void ArmWatchdog(WfpDevice device, int listenerPort)
+    {
+        if (s_watchdog is null)
+        {
+            return;
+        }
+
+        s_watchdog.Start(s_watchdogSeconds, listenerPort, device.GetForwardedInfo().Generation);
+    }
+
+    private sealed class WatchdogHandle : IDisposable
+    {
+        private Process? _process;
+
+        public void Start(int seconds, int listenerPort, uint generation)
+        {
+            _process ??= StartRestoreWatchdog(seconds, listenerPort, generation);
+        }
+
+        public void Dispose()
+        {
+            if (_process is not null && !_process.HasExited)
+            {
+                _process.Kill(true);
+            }
+
+            _process?.Dispose();
+            _process = null;
+        }
+    }
+
 
     private static void CheckInvariants(ProbeForwardedStats stats, string name)
     {
@@ -811,7 +1013,7 @@ internal static class ForwardedUdpSuite
         return records;
     }
 
-    private static Process? StartRestoreWatchdog(int seconds, int listenerPort)
+    private static Process? StartRestoreWatchdog(int seconds, int listenerPort, uint generation)
     {
         string? exe = Environment.ProcessPath;
         string? shell = Environment.GetEnvironmentVariable("COMSPEC");
@@ -820,19 +1022,19 @@ internal static class ForwardedUdpSuite
             return null;
         }
 
+        string logPath = Path.Combine(Path.GetTempPath(), $"wfprobe-watchdog-{listenerPort}.log");
         var startInfo = new ProcessStartInfo(shell)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
             Arguments = $"/c ping -n {seconds + 1} 127.0.0.1 >nul & \"{exe}\" forwarded-udp --restore-only " +
-                        $"--listener-port {listenerPort}",
+                        $"--listener-port {listenerPort} --generation {generation} >> \"{logPath}\" 2>&1",
         };
         try
         {
             Process? process = Process.Start(startInfo);
-            Console.WriteLine($"[forwarded-udp] 看门狗已启动：{seconds}s 后恢复空 permit 表与 disabled config");
+            Console.WriteLine($"[forwarded-udp] 看门狗已启动：{seconds}s 后恢复空 permit 表与 disabled config " +
+                              $"generation={generation} log={logPath}");
             return process;
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
@@ -841,6 +1043,7 @@ internal static class ForwardedUdpSuite
             return null;
         }
     }
+
 
     private static uint? FindAdapterIndex(string address)
     {

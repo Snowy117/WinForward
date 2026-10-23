@@ -413,9 +413,10 @@ B4b 实测证据（2026-10-23）：
 
 - 第一版只支持单入口、单 listener 端口、单 L；多入口/多 L 留 B6。
 - Forwarded UDP 自 B5 起由本驱动执行 DNAT/回程 SNAT，见下一节；多入口/多 L 仍留 B6。
-- 启用 forwarded 时，该 callout 可见的**所有** UDP 分片（含 IPv4 首片、host/其他入口）都在规则匹配前
-  统一 block + `udp_fragmented`；不建表、不注入。B6 再按入口/规则收窄。
-- 表满路径用 capacity=8 的测试构建验证（生产 4096）；单客户端 1001 个源端口无法在网卡层压满 4096。
+- 启用 forwarded 时，分片闸只 block forwarded **redirect 规则地址空间**内的 UDP 分片：首片按完整
+  规则（含端口）匹配，命中 redirect 就记录 (入口, 族, 协议, 源/目的地址, IP ID) 并 block；非首片没有端口，查同一张
+  跟随表 block。host/其他端口的分片按原路径，不再被误伤。TCP 分片与出向分片不在闸内。
+- 表满路径用生产 4096 真满验证（4097 个源端口）；不再依赖小容量测试构建。
 - LWF（WinpkFilter）对注入帧的可见性仍未测；显式注入状态查询只解决本驱动自触发。
 
 ## Forwarded UDP 数据面（B5）
@@ -437,8 +438,11 @@ datagram 建表，后续 datagram 查表**；原帧同样必须被消费（`FWP_
 
 forwarded config enabled 时，入向 UDP 帧先做分片检查，再做规则匹配：
 
-1. **任何 UDP 分片**（IPv4 首片、IPv4 非首片、IPv6 分片）统一 block + `udp_fragmented`：非首片没有
-   端口，首片也无法从单帧拼出完整 datagram；该判断在规则匹配之前，端口为 0 也不会 fallback permit。
+1. **forwarded redirect 规则地址空间内的 UDP 分片**：首片（有端口）按完整规则匹配，命中 redirect
+   才 block + `udp_fragmented`，并记录 `(入口, 族, 协议, 源/目的地址, IP ID)` 到 256 项、2s 跟随表；
+   非首片没有端口，查表命中才 block + `udp_fragmented`，否则按普通帧继续。host/其他端口的分片
+   按原路径。边界：表满覆盖最旧项、IP ID 跨流碰撞会误跟随、首片后到/丢失时非首片放行、TCP 分片
+   与出向分片不在闸内。
 2. 非分片：没有 config / L / family 不匹配 → block + `udp_no_config`。
 3. 非分片：查入口表，命中 → DNAT；未命中 → 建表后 DNAT。表满 → block + `udp_capacity`。
 4. DNAT = 目的地址/端口改成 (L, listener_port)，重算 IPv4 头校验和与 UDP 校验和（IPv4/IPv6 都
@@ -476,10 +480,11 @@ UDP 没有 RST；失败一律静默丢包。`udp_no_state` 为保留字段（非
 - `probe_forwarded_redirect_query` 的 `protocol` 字段位于偏移 22：0/6 = TCP（0 是 B4b 兼容值），
   17 = UDP；输出 `probe_forwarded_redirect.protocol` 回填表项协议。同一个 listener 端口上的 TCP/UDP
   表项由它区分。
-- `wfprobe forwarded-udp --phase core|socks5|fail|fragment|capacity|reject`：core 直连 Linux UDP echo、
+- `wfprobe forwarded-udp --phase core|socks5|fail|fragment|fragment-host|capacity|reject`：core 直连 Linux UDP echo、
   socks5 使用进程内假 SOCKS5 UDP 上游（两个 upstream 验证按 upstream_id 选择）、fail 验证无 config
-  时静默丢包、fragment 发送 4000 字节 datagram 验证全部分片 fail closed、capacity 用小容量测试
-  构建验证 `udp_capacity`、reject 验证 UDP ASSOCIATE 被拒绝时静默丢包。外部 Linux 客户端在数据面
+  时静默丢包、fragment 用 raw 显式 9 片 / 1280 MTU 9 片验证 forwarded 空间内 fail closed、
+  fragment-host 验证同一 remote 不同端口的 host 分片放行、capacity 用生产 4096 真满、
+  reject 验证 UDP ASSOCIATE 被拒绝时静默丢包。外部 Linux 客户端在数据面
   结束后连 verify 端口回报实收字节数、SHA 与源地址；core 还绑定原始目的地 decoy socket 证明原帧
   没有被 permit。`--expect-created N` 配合客户端间隔可验证 60s 超时回收；默认 N=1 时断言
   `udp_expired == 0`，N>1 才断言至少 N-1 个过期。
@@ -491,8 +496,8 @@ UDP 没有 RST；失败一律静默丢包。`udp_no_state` 为保留字段（非
 
 - 单入口 / 单 listener 端口 / 单 L；IPv6 的分片路径 fail closed，native IPv6 的 UDP 数据面代码已实现
   但本环境没有在入口网卡上完成 E2E（Linux 侧的 fd00 地址在另一张网卡）。
-- 所有 UDP 分片 fail closed；一个 NBL 里的多个 NET_BUFFER 按同一入口流处理，混合流不在本版
-  支持范围。
+- 分片闸只覆盖 forwarded redirect 规则地址空间；非首片先于首片到达时按普通流量放行，TCP 分片与
+  出向分片不在闸内。一个 NBL 里的多个 NET_BUFFER 按同一入口流处理，混合流不在本版支持范围。
 - 用户态 UDP listener 与 TCP listener 共用端口；host UDP 的 listener/中继不在本仓库，未命中
   forwarded 表的 datagram 直接丢包（B6 接 host listener）。关联空闲 30s、容量 1024、缺 upstream
   时不回退直连。

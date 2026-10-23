@@ -22,13 +22,21 @@ internal static class ForwardedTcpSuite
     private const string DefaultRemoteAddress = "10.99.0.1";
     private const string DefaultBackend = "192.168.100.4:40250";
 
+    private static WatchdogHandle? s_watchdog;
+    private static int s_watchdogSeconds = 90;
+    private static uint s_installedGeneration;
+
     public static async Task<int> RunAsync(Options options)
     {
         if (options.Has("restore-only"))
         {
             using var restoreDevice = new WfpDevice();
-            Restore(restoreDevice, options.GetInt("listener-port", DefaultListenerPort));
-            Console.WriteLine("[forwarded-tcp] restore-only rules=0 fallback=permit config=disabled");
+            if (Restore(restoreDevice, options.GetInt("listener-port", DefaultListenerPort),
+                        options.GetInt("generation", -1)))
+            {
+                Console.WriteLine("[forwarded-tcp] restore-only rules=0 fallback=permit config=disabled " +
+                                  $"generation={options.GetInt("generation", -1)}");
+            }
             return 0;
         }
 
@@ -69,7 +77,8 @@ internal static class ForwardedTcpSuite
             return 7;
         }
         int watchdogSeconds = options.GetInt("watchdog-seconds", Math.Max(90, (waitMs / 1000) + 60));
-        using var watchdog = StartRestoreWatchdog(watchdogSeconds, listenerPort);
+        s_watchdogSeconds = watchdogSeconds;
+        s_watchdog = new WatchdogHandle();
         try
         {
             return phase switch
@@ -89,14 +98,14 @@ internal static class ForwardedTcpSuite
         {
             if (!options.Has("keep-blob"))
             {
-                Restore(device, listenerPort);
+                Restore(device, listenerPort, (int)s_installedGeneration);
             }
-            if (watchdog is not null && !watchdog.HasExited)
-            {
-                watchdog.Kill(true);
-            }
+
+            s_watchdog?.Dispose();
+            s_watchdog = null;
         }
     }
+
 
     private static async Task<int> RunCoreAsync(WfpDevice device,
                                                 uint ifIndex,
@@ -326,6 +335,7 @@ internal static class ForwardedTcpSuite
         device.SetForwardedBlob(blob);
         ProbeForwardedInfo info = device.GetForwardedInfo();
         Check.Equal(1, info.Installed, "redirect 规则可以下发（B4b 不再整块拒绝）");
+        s_installedGeneration = info.Generation;
         device.SetForwardedConfig(DisabledConfig(listenerPort));
         device.ResetForwardedStats();
 
@@ -561,6 +571,7 @@ internal static class ForwardedTcpSuite
         ProbeForwardedInfo info = device.GetForwardedInfo();
         Check.Equal(1, info.Installed, "forwarded blob installed=1");
         Check.Equal(expectedRules, info.RuleCount, "forwarded 规则数回读一致");
+        s_installedGeneration = info.Generation;
 
         ProbeForwardedConfig disabled = device.GetForwardedConfig();
         Check.Equal(0, disabled.Enabled, "启用前 config 回读 enabled=0");
@@ -581,18 +592,41 @@ internal static class ForwardedTcpSuite
         Check.Equal(1, readback.Enabled, "config 回读 enabled=1");
         Check.Equal(listenerPort, readback.ListenerPort, "config 回读 listener_port");
         Check.Equal(family, readback.Family, "config 回读 family");
+        ArmWatchdog(device, listenerPort);
     }
+
 
     private static ProbeForwardedConfig DisabledConfig(int listenerPort) => new()
     {
         ListenerPort = (ushort)listenerPort,
     };
 
-    private static void Restore(WfpDevice device, int listenerPort)
+    private static bool Restore(WfpDevice device, int listenerPort, int expectedGeneration = -1)
     {
+        bool restored = false;
+        try
+        {
+            if (expectedGeneration >= 0)
+            {
+                ProbeForwardedInfo info = device.GetForwardedInfo();
+                if (info.Installed != 1 || (long)info.Generation != expectedGeneration)
+                {
+                    Console.WriteLine($"[forwarded-tcp] 忽略过期的看门狗：expected_generation={expectedGeneration} " +
+                                      $"installed={info.Installed} generation={info.Generation}");
+                    return false;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+        {
+            Console.WriteLine($"[forwarded-tcp] 看门狗读取表状态失败：{exception.Message}");
+            return false;
+        }
+
         try
         {
             device.SetForwardedConfig(DisabledConfig(listenerPort));
+
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
@@ -602,15 +636,44 @@ internal static class ForwardedTcpSuite
         try
         {
             device.SetForwardedBlob(ForwardedBlobBuilder.BuildEmpty(Protocol.RuleActionPermit));
+            restored = true;
             Console.WriteLine("[forwarded-tcp] 已恢复 rules=0 fallback=permit config=disabled");
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
             Console.WriteLine($"[forwarded-tcp] 恢复空 blob 失败：{exception.Message}");
         }
+        return restored;
+    }
+
+    private static void ArmWatchdog(WfpDevice device, int listenerPort)
+    {
+        s_watchdog?.Start(s_watchdogSeconds, listenerPort, device.GetForwardedInfo().Generation);
+    }
+
+    private sealed class WatchdogHandle : IDisposable
+    {
+        private Process? _process;
+
+        public void Start(int seconds, int listenerPort, uint generation)
+        {
+            _process ??= StartRestoreWatchdog(seconds, listenerPort, generation);
+        }
+
+        public void Dispose()
+        {
+            if (_process is not null && !_process.HasExited)
+            {
+                _process.Kill(true);
+            }
+
+            _process?.Dispose();
+            _process = null;
+        }
     }
 
     private static void CheckInvariants(ProbeForwardedStats stats, string name)
+
     {
         Check.Equal((long)stats.ClassifyCalls,
                     (long)(stats.NoWriteRight + stats.InboundFrames + stats.OutboundFrames),
@@ -759,11 +822,15 @@ internal static class ForwardedTcpSuite
             Check.Equal(plan.Bytes, record.Bytes, "客户端实际收到完整字节数");
             Check.True(string.Equals(record.Sha, plan.Sha, StringComparison.Ordinal),
                        "客户端收到的字节内容 SHA-256 一致", $"expected={plan.Sha[..12]} actual={record.Sha}");
-            Check.AtLeast(plan.Bytes, record.Acked, "客户端 TCP 已确认全部回程字节（ACK 前进）");
+            // acked 来自客户端 TCP_INFO.tcpi_bytes_acked：本机内核把 SYN 也计入 1 字节，
+            // 所以“全部发送数据被 ACK”的区间是 [payload, payload+1]；客户端用同一口径。
+            Check.True(record.Acked >= plan.Bytes && record.Acked <= plan.Bytes + 1,
+                       "客户端 TCP 已确认全部发送字节（tcpi_bytes_acked）",
+                       $"expected={plan.Bytes}..{plan.Bytes + 1} actual={record.Acked}");
         }
     }
 
-    private static Process? StartRestoreWatchdog(int seconds, int listenerPort)
+    private static Process? StartRestoreWatchdog(int seconds, int listenerPort, uint generation)
     {
         string? exe = Environment.ProcessPath;
         string? shell = Environment.GetEnvironmentVariable("COMSPEC");
@@ -772,19 +839,19 @@ internal static class ForwardedTcpSuite
             return null;
         }
 
+        string logPath = Path.Combine(Path.GetTempPath(), $"wfprobe-watchdog-{listenerPort}.log");
         var startInfo = new ProcessStartInfo(shell)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
             Arguments = $"/c ping -n {seconds + 1} 127.0.0.1 >nul & \"{exe}\" forwarded-tcp --restore-only " +
-                        $"--listener-port {listenerPort}",
+                        $"--listener-port {listenerPort} --generation {generation} >> \"{logPath}\" 2>&1",
         };
         try
         {
             Process? process = Process.Start(startInfo);
-            Console.WriteLine($"[forwarded-tcp] 看门狗已启动：{seconds}s 后恢复空 permit 表与 disabled config");
+            Console.WriteLine($"[forwarded-tcp] 看门狗已启动：{seconds}s 后恢复空 permit 表与 disabled config " +
+                              $"generation={generation} log={logPath}");
             return process;
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
@@ -793,6 +860,7 @@ internal static class ForwardedTcpSuite
             return null;
         }
     }
+
 
     private static uint? FindAdapterIndex(string address)
     {

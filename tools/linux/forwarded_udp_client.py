@@ -16,11 +16,28 @@ def payload_for(seq, size):
     return bytes(((seq * 31 + j * 7 + 3) & 0xFF) for j in range(size))
 
 
-def run_sweep(target, count, base, payload_size, source_start, source_count, dest_start, dest_end, diagonal):
+def run_sweep(target, count, base, payload_size, source_start, source_count, dest_start, dest_end, diagonal,
+              sequential, interval):
     host, port = target.rsplit(":", 1)
     payload = payload_for(0, payload_size)
     sent = 0
-    if diagonal:
+    if sequential:
+        for index in range(count):
+            if sent >= count:
+                break
+            source_port = source_start + index
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.bind(("0.0.0.0", source_port))
+                sock.sendto(payload, (host, int(port)))
+                sent += 1
+            except OSError:
+                pass
+            finally:
+                sock.close()
+            if interval > 0:
+                time.sleep(interval)
+    elif diagonal:
         for index in range(source_count):
             if sent >= count:
                 break
@@ -70,7 +87,7 @@ def run_sweep(target, count, base, payload_size, source_start, source_count, des
             finally:
                 sock.close()
     print(f"[client] sweep target={host} sent={sent} source_start={source_start} "
-          f"dest={dest_start}-{dest_end} base={base}", flush=True)
+          f"dest={dest_start}-{dest_end} base={base} sequential={sequential}", flush=True)
     return 0
 
 
@@ -86,6 +103,7 @@ def main():
     parser.add_argument("--interval", type=float, default=0.03)
     parser.add_argument("--gap", type=float, default=0.0, help="seconds to sleep after the first datagram")
     parser.add_argument("--no-response", action="store_true")
+    parser.add_argument("--sent-file", default="", help="after sending, create this file (test synchronization)")
     parser.add_argument("--no-verify", action="store_true")
     parser.add_argument("--sweep-count", type=int, default=0, help="send this many one-shot datagrams from unique ports")
     parser.add_argument("--sweep-base", type=int, default=41001)
@@ -94,6 +112,10 @@ def main():
     parser.add_argument("--sweep-dest-start", type=int, default=0)
     parser.add_argument("--sweep-dest-end", type=int, default=0)
     parser.add_argument("--sweep-diagonal", action="store_true")
+    parser.add_argument("--sweep-sequential", action="store_true",
+                        help="unique source ports, one datagram each to the fixed --target port")
+    parser.add_argument("--sweep-interval", type=float, default=0.0,
+                        help="seconds to sleep between one-shot datagrams (capacity pacing)")
     args = parser.parse_args()
 
     if args.sweep_count:
@@ -102,7 +124,8 @@ def main():
             return 2
         return run_sweep(args.target[0], args.sweep_count, args.sweep_base, args.payload_size,
                         args.sweep_source_start, args.sweep_source_count, args.sweep_dest_start,
-                        args.sweep_dest_end, args.sweep_diagonal)
+                        args.sweep_dest_end, args.sweep_diagonal, args.sweep_sequential,
+                        args.sweep_interval)
 
     if not args.target:
         print("at least one --target is required", file=sys.stderr)
@@ -143,6 +166,8 @@ def main():
                 time.sleep(args.gap)
             else:
                 time.sleep(args.interval)
+        if args.sent_file:
+            open(args.sent_file, "w", encoding="utf-8").close()
         if args.no_response:
             sock.close()
             lines.append(f"client_port={source_port} target_port={port} bytes=0 count=0 sha= source= source_ok=0 ok=0")

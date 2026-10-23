@@ -114,11 +114,14 @@ internal static class Program
                         [--backend HOST:PORT] [--client-cidr CIDR] [--wait-ms M]
                         [--expect-accepts K] [--bytes N] [--verify-port N]
                         [--verify-timeout-ms M] [--no-verify] [--restore-only]
-  wfprobe forwarded-udp --phase core|socks5|fail|fragment|capacity|reject [--local-ip A.B.C.D] [--ifindex N]
+  wfprobe forwarded-udp --phase core|socks5|fail|fragment|fragment-host|capacity|reject [--local-ip A.B.C.D] [--ifindex N]
                         [--listener-port N] [--remote-address A.B.C.D] [--remote-port N]
                         [--backend HOST:PORT] [--client-cidr CIDR] [--wait-ms M]
                         [--expect-datagrams N] [--expect-created N] [--capacity N] [--sweep-base N]
-                        [--verify-port N] [--verify-timeout-ms M] [--no-alias] [--restore-only]
+                        [--expect-fragments N] [--fragment-timeout-ms M] [--host-fragment-port N]
+                        [--host-fragment-address A.B.C.D] [--fragment-permit-first-port N]
+                        [--verify-port N] [--verify-timeout-ms M] [--no-alias] [--no-verify] [--restore-only]
+
   forwarded-tcp 先在 VM 内下发 redirect 规则与 forwarded config，再打印 [forwarded-tcp] READY 等待外部客户端；
   Linux 客户端连 10.99.0.1:40250（临时路由）即可验证 DNAT/回程/半关闭/upstream 选择。
   默认要求外部客户端在数据面结束后连 verify 端口（listener+1000）回报实际收到字节数、SHA-256 与

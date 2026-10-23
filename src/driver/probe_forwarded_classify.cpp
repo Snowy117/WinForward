@@ -62,6 +62,18 @@ void set_frame_action(FWPS_CLASSIFY_OUT0* classify_out, bool block) noexcept
     return (facts.protocol == ip_protocol_tcp && facts.transport_length != 0) ||
            (facts.protocol == ip_protocol_udp && facts.transport_length != 0);
 }
+[[nodiscard]] bool same_forwarded_flow(const forwarded_frame_facts& left, const forwarded_frame_facts& right) noexcept
+{
+    if (left.family != right.family || left.protocol != right.protocol || left.source_port != right.source_port ||
+        left.destination_port != right.destination_port)
+    {
+        return false;
+    }
+
+    const std::uint32_t address_size = left.family == 6 ? 16U : 4U;
+    return RtlEqualMemory(left.source_address, right.source_address, address_size) &&
+           RtlEqualMemory(left.destination_address, right.destination_address, address_size);
+}
 
 } // namespace
 
@@ -157,9 +169,14 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
         return;
     }
 
-    // UDP 分片在 forwarded 数据面统一 fail closed：非首片没有端口，首片也无法从单帧拼出完整
-    // datagram；必须在规则匹配之前 block，不能依赖端口规则是否命中。
-    if (facts.protocol == ip_protocol_udp && facts.fragmented)
+    const std::uint32_t interface_index = frame_interface_index(in_fixed_values, inbound);
+    const std::uint32_t ndis_port = frame_ndis_port(in_fixed_values, inbound);
+
+    // UDP 分片：首片带端口，按完整规则匹配；命中 redirect 时记录 (地址, IP ID) 并 block。
+    // 后续非首片没有端口，只能按跟随表 block。不能只按“地址空间”判断：permit 规则在
+    // redirect 规则前会让该流 fail-open，而 host 打同一 remote IP、不同端口的分片会被误 block。
+
+    if (inbound && facts.protocol == ip_protocol_udp && facts.fragmented)
     {
         probe_forwarded_config config{};
         {
@@ -171,19 +188,42 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
 
         if (config.enabled != 0)
         {
-            delta.blocked = 1;
-            delta.udp_blocked = 1;
-            delta.udp_fragmented = 1;
-            state.stats.last_status = static_cast<std::uint32_t>(STATUS_NOT_SUPPORTED);
-            release_forwarded_snapshot(table);
-            publish_forwarded_counters(state, delta);
-            set_frame_action(classify_out, true);
-            return;
+            bool block_fragment = false;
+            if (facts.first_fragment)
+            {
+                forwarded_connection_view fragment_connection{};
+                fragment_connection.ingress_adapter_id = interface_index;
+                RtlCopyMemory(fragment_connection.client_address, facts.source_address, 16);
+                RtlCopyMemory(fragment_connection.remote_address, facts.destination_address, 16);
+                fragment_connection.remote_port = facts.destination_port;
+                fragment_connection.protocol = facts.protocol;
+                fragment_connection.family = static_cast<address_family>(facts.family);
+
+                const forwarded_match_result fragment_match = match_forwarded(table->view, fragment_connection);
+                if (fragment_match.matched && fragment_match.action == rule_action::redirect)
+                {
+                    remember_forwarded_fragment_block(state, facts, interface_index);
+                    block_fragment = true;
+                }
+            }
+            else
+            {
+                block_fragment = forwarded_fragment_is_blocked(state, facts, interface_index);
+            }
+
+            if (block_fragment)
+            {
+                delta.blocked = 1;
+                delta.udp_blocked = 1;
+                delta.udp_fragmented = 1;
+                state.stats.last_status = static_cast<std::uint32_t>(STATUS_NOT_SUPPORTED);
+                release_forwarded_snapshot(table);
+                publish_forwarded_counters(state, delta);
+                set_frame_action(classify_out, true);
+                return;
+            }
         }
     }
-
-    const std::uint32_t interface_index = frame_interface_index(in_fixed_values, inbound);
-    const std::uint32_t ndis_port = frame_ndis_port(in_fixed_values, inbound);
 
     if (outbound && facts.protocol == ip_protocol_tcp && facts.transport_length != 0)
     {
@@ -267,6 +307,7 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
                 bool closing = false;
                 forwarded_frame_facts closing_facts{};
 
+                bool mixed_flow = false;
                 for (NET_BUFFER* buffer = ingress_nbl != nullptr ? NET_BUFFER_LIST_FIRST_NB(ingress_nbl) : nullptr;
                      buffer != nullptr;
                      buffer = NET_BUFFER_NEXT_NB(buffer))
@@ -274,27 +315,48 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
                     ++buffer_count;
                     forwarded_frame_facts buffer_facts{};
                     if (probe_forwarded_parse_frame(buffer, buffer_facts) != forwarded_frame_kind::ip ||
-                        buffer_facts.protocol != facts.protocol || !has_transport_payload(buffer_facts))
+                        buffer_facts.protocol != facts.protocol || !has_transport_payload(buffer_facts) ||
+                        !same_forwarded_flow(buffer_facts, facts))
                     {
-                        ++failed;
-                        continue;
+                        mixed_flow = true;
                     }
+                }
 
-                    const NTSTATUS status = probe_forwarded_inject_frame(
-                        buffer, buffer_facts, false, plan.entry.ingress_ifindex, plan.entry.ndis_port, rewrite);
-                    if (NT_SUCCESS(status))
+                if (mixed_flow)
+                {
+                    // NBL 里混入了不同流或不可解析的 NET_BUFFER：不能只改写一部分，整块 fail closed。
+                    failed = buffer_count;
+                    state.stats.last_status = static_cast<std::uint32_t>(STATUS_INVALID_PARAMETER);
+                }
+                else
+                {
+                    for (NET_BUFFER* buffer = ingress_nbl != nullptr ? NET_BUFFER_LIST_FIRST_NB(ingress_nbl) : nullptr;
+                         buffer != nullptr;
+                         buffer = NET_BUFFER_NEXT_NB(buffer))
                     {
-                        ++injected;
-                        if (facts.protocol == ip_protocol_tcp && tcp_is_fin_or_rst(buffer_facts))
+                        forwarded_frame_facts buffer_facts{};
+                        if (probe_forwarded_parse_frame(buffer, buffer_facts) != forwarded_frame_kind::ip)
                         {
-                            closing = true;
-                            closing_facts = buffer_facts;
+                            ++failed;
+                            continue;
                         }
-                    }
-                    else
-                    {
-                        ++failed;
-                        state.stats.last_status = static_cast<std::uint32_t>(status);
+
+                        const NTSTATUS status = probe_forwarded_inject_frame(
+                            buffer, buffer_facts, false, plan.entry.ingress_ifindex, plan.entry.ndis_port, rewrite);
+                        if (NT_SUCCESS(status))
+                        {
+                            ++injected;
+                            if (facts.protocol == ip_protocol_tcp && tcp_is_fin_or_rst(buffer_facts))
+                            {
+                                closing = true;
+                                closing_facts = buffer_facts;
+                            }
+                        }
+                        else
+                        {
+                            ++failed;
+                            state.stats.last_status = static_cast<std::uint32_t>(status);
+                        }
                     }
                 }
 
