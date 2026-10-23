@@ -21,8 +21,11 @@ internal static class ProductAbi
         ["probe_forwarded_info"] = typeof(ProbeForwardedInfo),
         ["probe_forwarded_stats"] = typeof(ProbeForwardedStats),
         ["probe_forwarded_config"] = typeof(ProbeForwardedConfig),
+        ["probe_forwarded_ingress"] = typeof(ProbeForwardedIngress),
+        ["probe_forwarded_ingress_config"] = typeof(ProbeForwardedIngressConfigHeader),
         ["probe_forwarded_redirect_query"] = typeof(ProbeForwardedRedirectQuery),
         ["probe_forwarded_redirect"] = typeof(ProbeForwardedRedirect),
+
     };
 
     internal static AbiStruct Describe(string headerName)

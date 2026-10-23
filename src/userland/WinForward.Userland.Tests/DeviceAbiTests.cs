@@ -263,7 +263,10 @@ internal static class DeviceAbiTests
         Check.Equal(ProbeIoctl.AbiVersion, BitConverter.ToUInt32(statsBytes, 396), "abi_version 在偏移 396");
         Check.Equal(0UL, BitConverter.ToUInt64(statsBytes, 280), "udp_created 在偏移 280");
         Check.Equal(1UL, BitConverter.ToUInt64(statsBytes, 144), "matched_redirect 在偏移 144");
+        Check.Equal(0UL, BitConverter.ToUInt64(statsBytes, 400), "redirect_return_ambiguous 在偏移 400");
+        Check.Equal(0UL, BitConverter.ToUInt64(statsBytes, 440), "udp_multi_l 在偏移 440");
     }
+
 
     private static void ForwardedRedirectRoundTrip()
     {
@@ -275,13 +278,15 @@ internal static class DeviceAbiTests
         Check.Equal((byte)4, configBytes[6], "family 在偏移 6");
         Check.Equal((byte)192, configBytes[8], "listener_address 在偏移 8");
 
-        ProbeForwardedRedirectQuery query =
-            ProbeForwardedRedirectQuery.ForClient(40400, new IPEndPoint(IPAddress.Parse("192.168.100.4"), 51234));
+        ProbeForwardedRedirectQuery query = ProbeForwardedRedirectQuery.ForClient(
+            new IPEndPoint(IPAddress.Parse("192.168.100.2"), 40400),
+            new IPEndPoint(IPAddress.Parse("192.168.100.4"), 51234));
         byte[] queryBytes = new byte[DeviceLayout.ProbeForwardedRedirectQuerySize];
         MemoryMarshal.Write(queryBytes, in query);
         Check.Equal((ushort)40400, BitConverter.ToUInt16(queryBytes, 0), "query.listener_port 在偏移 0");
         Check.Equal((byte)4, queryBytes[2], "query.family 在偏移 2");
         Check.Equal((byte)192, queryBytes[4], "query.client_address 在偏移 4");
+        Check.Equal((byte)192, queryBytes[24], "query.listener_address 在偏移 24");
 
         ProbeForwardedRedirect redirect = default;
         redirect.Magic = ProbeForwardedRedirect.MagicValue;
@@ -297,6 +302,9 @@ internal static class DeviceAbiTests
         redirect.UpstreamId = 1;
         redirect.RuleIndex = 2;
         redirect.State = ProbeForwardedRedirect.StateEstablished;
+        redirect.ListenerAddress[0] = 192;
+        redirect.ListenerAddress[3] = 2;
+        redirect.Generation = 7;
         byte[] redirectBytes = new byte[DeviceLayout.ProbeForwardedRedirectSize];
         MemoryMarshal.Write(redirectBytes, in redirect);
         ProbeForwardedRedirect restored = MemoryMarshal.Read<ProbeForwardedRedirect>(redirectBytes);
@@ -307,6 +315,9 @@ internal static class DeviceAbiTests
         Check.Equal(1U, restored.UpstreamId, "redirect.upstream_id");
         Check.Equal(2U, restored.RuleIndex, "redirect.rule_index");
         Check.Equal(ProbeForwardedRedirect.StateEstablished, restored.State, "redirect.state");
+        Check.Equal(7U, restored.Generation, "redirect.generation");
+        Check.Equal("192.0.0.2", restored.ListenerIP!.ToString(), "redirect.listener_ip 只取 IPv4 前 4 字节");
         Check.Equal("10.0.0.0", restored.ServerIP.ToString(), "redirect.server_ip 只取 IPv4 前 4 字节");
     }
+
 }

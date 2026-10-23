@@ -102,6 +102,66 @@ internal sealed class WfpDevice : IDisposable
                 $"GetForwardedConfig 返回 {data.Length} 字节，期望 {sizeof(ProbeForwardedConfig)}");
         return MemoryMarshal.Read<ProbeForwardedConfig>(data);
     }
+    public unsafe void SetForwardedIngressConfig(bool enabled, IReadOnlyList<ProbeForwardedIngress> ingresses)
+    {
+        ArgumentNullException.ThrowIfNull(ingresses);
+        if (ingresses.Count > Protocol.ForwardedIngressCapacity)
+        {
+            throw new ArgumentOutOfRangeException(nameof(ingresses), ingresses.Count,
+                                                  $"入口记录不能超过 {Protocol.ForwardedIngressCapacity}");
+        }
+
+        int headerSize = sizeof(ProbeForwardedIngressConfig);
+        int ingressSize = sizeof(ProbeForwardedIngress);
+        byte[] bytes = new byte[headerSize + (ingresses.Count * ingressSize)];
+        ProbeForwardedIngressConfig header = default;
+        header.AbiVersion = Protocol.AbiVersion;
+        header.Enabled = enabled ? 1u : 0u;
+        header.IngressCount = (uint)ingresses.Count;
+        MemoryMarshal.Write(bytes.AsSpan(0, headerSize), in header);
+        for (int index = 0; index < ingresses.Count; index++)
+        {
+            ProbeForwardedIngress ingress = ingresses[index];
+            MemoryMarshal.Write(bytes.AsSpan(headerSize + (index * ingressSize), ingressSize), in ingress);
+
+        }
+
+        Ioctl(Protocol.SetForwardedIngressConfigCode, bytes, 0);
+    }
+
+    public unsafe (bool Enabled, ProbeForwardedIngress[] Ingresses) GetForwardedIngressConfig()
+    {
+        int headerSize = sizeof(ProbeForwardedIngressConfig);
+        int ingressSize = sizeof(ProbeForwardedIngress);
+        int maxBytes = headerSize + ((int)Protocol.ForwardedIngressCapacity * ingressSize);
+        byte[] data = Ioctl(Protocol.GetForwardedIngressConfigCode, ReadOnlySpan<byte>.Empty, maxBytes);
+        if (data.Length < headerSize)
+        {
+            throw new InvalidOperationException($"GetForwardedIngressConfig 返回 {data.Length} 字节，不足头部 {headerSize}");
+        }
+
+        ProbeForwardedIngressConfig header = MemoryMarshal.Read<ProbeForwardedIngressConfig>(data);
+        if (header.IngressCount > Protocol.ForwardedIngressCapacity)
+        {
+            throw new InvalidOperationException($"入口记录数 {header.IngressCount} 超过上限 {Protocol.ForwardedIngressCapacity}");
+        }
+
+        int expected = headerSize + ((int)header.IngressCount * ingressSize);
+        if (data.Length < expected)
+        {
+            throw new InvalidOperationException($"GetForwardedIngressConfig 返回 {data.Length} 字节，{header.IngressCount} 条记录需要 {expected}");
+        }
+
+        var ingresses = new ProbeForwardedIngress[header.IngressCount];
+        for (int index = 0; index < ingresses.Length; index++)
+        {
+            ingresses[index] = MemoryMarshal.Read<ProbeForwardedIngress>(
+                data.AsSpan(headerSize + (index * ingressSize), ingressSize));
+        }
+
+        return (header.Enabled != 0, ingresses);
+    }
+
 
     public unsafe ProbeForwardedRedirect QueryForwardedRedirect(ProbeForwardedRedirectQuery query)
     {
@@ -112,6 +172,22 @@ internal sealed class WfpDevice : IDisposable
                 $"QueryForwardedRedirect 返回 {data.Length} 字节，期望 {sizeof(ProbeForwardedRedirect)}");
         return MemoryMarshal.Read<ProbeForwardedRedirect>(data);
     }
+
+    // legacy v6 查询：24 字节输入（不含 L）+ 64 字节 v1 输出。用于验证旧尺寸仍能查到表项。
+    public unsafe ProbeForwardedRedirect QueryForwardedRedirectLegacy(ProbeForwardedRedirectQuery query)
+    {
+        ReadOnlySpan<byte> input = new(&query, 24);
+        byte[] data = Ioctl(Protocol.QueryForwardedRedirectCode, input, 64);
+        if (data.Length != 64)
+        {
+            throw new InvalidOperationException($"legacy RedirectQuery 返回 {data.Length} 字节，期望 64");
+        }
+
+        byte[] padded = new byte[sizeof(ProbeForwardedRedirect)];
+        data.CopyTo(padded, 0);
+        return MemoryMarshal.Read<ProbeForwardedRedirect>(padded);
+    }
+
 
     // 诊断：把 UTF-16LE 字节交给内核的 collect_process_path，回读 UTF-8 长度与内容。
     public (uint Utf8Length, string Text) MeasureProcessPath(byte[] utf16)

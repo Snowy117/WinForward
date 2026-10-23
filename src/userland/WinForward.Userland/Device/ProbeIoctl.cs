@@ -14,7 +14,7 @@ namespace WinForward.Userland.Device;
 public static class ProbeIoctl
 {
     /// <summary>ABI 版本。任何字段调整都必须同时提升它。</summary>
-    public const uint AbiVersion = 6;
+    public const uint AbiVersion = 7;
 
     /// <summary>self-PID 集合容量（防循环闸 4）。</summary>
     public const uint MaxSelfProcessIds = 8;
@@ -50,6 +50,13 @@ public static class ProbeIoctl
     public const uint SetForwardedConfigFunction = 0x80C;
     public const uint GetForwardedConfigFunction = 0x80D;
     public const uint QueryForwardedRedirectFunction = 0x80E;
+
+    // v7：per-ingress listener 映射（16 字节头 + 0..16 条 28 字节记录）。
+    public const uint SetForwardedIngressConfigFunction = 0x80F;
+    public const uint GetForwardedIngressConfigFunction = 0x810;
+    public const uint ForwardedIngressCapacity = 16;
+    public const uint ForwardedIngressAnyIfIndex = 0xFFFFFFFF;
+
     public const uint SetConfigCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (SetConfigFunction << 2) | MethodBuffered;
     public const uint GetConfigCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (GetConfigFunction << 2) | MethodBuffered;
     public const uint GetStatsCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (GetStatsFunction << 2) | MethodBuffered;
@@ -65,6 +72,9 @@ public static class ProbeIoctl
     public const uint SetForwardedConfigCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (SetForwardedConfigFunction << 2) | MethodBuffered;
     public const uint GetForwardedConfigCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (GetForwardedConfigFunction << 2) | MethodBuffered;
     public const uint QueryForwardedRedirectCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (QueryForwardedRedirectFunction << 2) | MethodBuffered;
+    public const uint SetForwardedIngressConfigCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (SetForwardedIngressConfigFunction << 2) | MethodBuffered;
+    public const uint GetForwardedIngressConfigCode = (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (GetForwardedIngressConfigFunction << 2) | MethodBuffered;
+
     /// <summary>与 C++ 侧 <c>make_ioctl</c> 相同的计算方式，测试用它交叉核对上面的常量。</summary>
     public static uint MakeIoctl(uint function) =>
         (FileDeviceUnknown << 16) | (FileAnyAccess << 14) | (function << 2) | MethodBuffered;

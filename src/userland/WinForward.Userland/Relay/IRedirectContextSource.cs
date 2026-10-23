@@ -15,9 +15,10 @@ public interface IRedirectContextSource
     bool TryRead(Socket client, [NotNullWhen(true)] out RedirectDestination? destination, out string error);
 
     /// <summary>
-    /// UDP listener 收到 datagram 后读回原始目的地。客户端是 datagram 的源地址，listenerPort 是
-    /// 本地 UDP 监听端口；同一个 listener 端口上的 TCP/UDP 表项由宿主实现按协议区分。
+    /// UDP listener 收到 datagram 后读回原始目的地。client 是 datagram 的源地址，listener 是收到
+    /// 它的本地端点（L + 端口）；同一个端口绑多个 L 时，listener 地址决定查哪条入口映射。
     /// </summary>
-    bool TryReadUdp(EndPoint client, int listenerPort, [NotNullWhen(true)] out RedirectDestination? destination,
+    bool TryReadUdp(EndPoint client, IPEndPoint listener, [NotNullWhen(true)] out RedirectDestination? destination,
                     out string error);
+
 }

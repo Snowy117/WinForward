@@ -152,14 +152,18 @@ NTSTATUS get_forwarded_info(void* buffer, ULONG output_length) noexcept
 
 NTSTATUS get_forwarded_stats(void* buffer, ULONG output_length) noexcept
 {
-    if (buffer == nullptr || output_length < sizeof(probe_forwarded_stats))
+    if (buffer == nullptr || output_length < probe_forwarded_stats_v6_size)
     {
         return STATUS_BUFFER_TOO_SMALL;
     }
 
     probe_forwarded_stats snapshot{};
     probe_forwarded_stats_snapshot(snapshot);
-    RtlCopyMemory(buffer, &snapshot, sizeof(snapshot));
+    const ULONG written = output_length >= sizeof(snapshot)
+                              ? static_cast<ULONG>(sizeof(snapshot))
+                              : (output_length >= probe_forwarded_stats_v7_size ? probe_forwarded_stats_v7_size
+                                                                                : probe_forwarded_stats_v6_size);
+    RtlCopyMemory(buffer, &snapshot, written);
     return STATUS_SUCCESS;
 }
 
@@ -327,7 +331,10 @@ _Dispatch_type_(IRP_MJ_DEVICE_CONTROL) NTSTATUS dispatch_device_control(PDEVICE_
         status = get_forwarded_stats(buffer, output_length);
         if (NT_SUCCESS(status))
         {
-            information = sizeof(probe_forwarded_stats);
+            information = output_length >= sizeof(probe_forwarded_stats)
+                              ? sizeof(probe_forwarded_stats)
+                              : (output_length >= probe_forwarded_stats_v7_size ? probe_forwarded_stats_v7_size
+                                                                                : probe_forwarded_stats_v6_size);
         }
         break;
 
@@ -347,11 +354,27 @@ _Dispatch_type_(IRP_MJ_DEVICE_CONTROL) NTSTATUS dispatch_device_control(PDEVICE_
         }
         break;
 
+    case ioctl_set_forwarded_ingress_config:
+        status = probe_forwarded_apply_ingress_config(buffer, input_length);
+        break;
+
+    case ioctl_get_forwarded_ingress_config:
+    {
+        ULONG written = 0;
+        status = probe_forwarded_get_ingress_config(buffer, output_length, written);
+        if (NT_SUCCESS(status))
+        {
+            information = written;
+        }
+        break;
+    }
+
     case ioctl_query_forwarded_redirect:
         status = probe_forwarded_query_redirect(buffer, input_length, buffer, output_length);
         if (NT_SUCCESS(status))
         {
-            information = sizeof(probe_forwarded_redirect);
+            information = output_length >= sizeof(probe_forwarded_redirect) ? sizeof(probe_forwarded_redirect)
+                                                                            : probe_forwarded_redirect_v1_size;
         }
         break;
 

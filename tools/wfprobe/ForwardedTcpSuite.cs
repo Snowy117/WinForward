@@ -91,7 +91,14 @@ internal static class ForwardedTcpSuite
                                                        clientCidr, expectAccepts, waitMs, timeoutMs, verify),
                 "fail" => await RunFailAsync(device, ifIndex, listenerPort, localIp, family,
                                              IPAddress.Parse(remoteAddress), remotePort, clientCidr, waitMs, timeoutMs),
-                _ => throw new ArgumentException($"未知 phase：{phase}（core / upstreams / fail）"),
+                "multi" => await RunMultiAsync(device, options),
+                "noingress" => await RunNoIngressAsync(device, options),
+
+                "hotswap" => await RunHotSwapAsync(device, options),
+
+                _ => throw new ArgumentException($"未知 phase：{phase}（core / upstreams / fail / multi / noingress / hotswap）"),
+
+
             };
         }
         finally
@@ -192,6 +199,16 @@ internal static class ForwardedTcpSuite
             Check.True(session.BytesServerToClient > 0, "回程数据回到客户端", $"{session.BytesServerToClient}B");
             Check.True(session.CleanEof, "会话以半关闭/EOF 正常收尾", session.Detail);
         }
+
+        if (sessions.Count > 0)
+        {
+            ProbeForwardedRedirect legacy = device.QueryForwardedRedirectLegacy(
+                QueryFor(sessions[0].Local, sessions[0].Remote));
+            Check.Equal(1, (long)legacy.Version, "core legacy query 返回 version=1");
+            Check.True(legacy.ListenerIP is null, "core legacy query 不含 L", $"version={legacy.Version}");
+            Check.Equal(remotePort, legacy.ServerPort, "core legacy query 仍能查回 server");
+        }
+
 
         Check.AtLeast(1, (long)stats.RedirectCreated, "SYN 建表");
         Check.AtLeast(3, (long)stats.RedirectIngress, "入口 DNAT 注入（SYN + 数据 + FIN）");
@@ -313,6 +330,374 @@ internal static class ForwardedTcpSuite
         CheckInvariants(stats, "upstreams");
 
         return Check.Failures == 0 ? 0 : 6;
+    }
+
+    private static TcpListener BindOn(string address, int port)
+    {
+        TcpListener listener = new(IPAddress.Parse(address), port);
+        listener.Start();
+        return listener;
+    }
+
+    private static async Task<int> RunMultiAsync(WfpDevice device, Options options)
+    {
+        string localIp = options.Get("local-ip") ?? "192.168.100.2";
+        string secondLocalIp = options.Get("second-local-ip") ?? "192.168.100.98";
+        string externalLocalIp = options.Get("external-local-ip") ?? "192.168.77.2";
+        string remoteAddress = options.Get("remote-address") ?? "192.168.100.99";
+        string externalRemoteAddress = options.Get("external-remote-address") ?? "192.168.77.99";
+        int listenerPort = options.GetInt("listener-port", 40420);
+        int remotePort = options.GetInt("remote-port", 40250);
+        int secondRemotePort = options.GetInt("second-remote-port", remotePort + 1);
+        IPEndPoint backend = ParseEndPoint(options.Get("backend") ?? DefaultBackend);
+        int waitMs = options.GetInt("wait-ms", 30000);
+        int timeoutMs = options.GetInt("timeout-ms", 15000);
+        int sourcePortA = options.GetInt("source-port-a", 40500);
+        int sourcePortB = options.GetInt("source-port-b", 40501);
+        int payloadBytes = options.GetInt("bytes", 2048);
+
+        uint internalIndex = options.Has("ifindex") ? options.GetUInt("ifindex", 0) : FindAdapterIndex(localIp) ?? 0;
+        uint externalIndex = FindAdapterIndex(externalLocalIp) ?? 0;
+        Check.True(internalIndex != 0 && externalIndex != 0, "multi 解析两个入口 ifIndex",
+                   $"internal={internalIndex} external={externalIndex}");
+
+        using OnLinkAlias secondL = OnLinkAlias.Ensure(secondLocalIp, localIp, internalIndex, !options.Has("no-alias"));
+        using OnLinkAlias externalTarget = OnLinkAlias.Ensure(
+            externalRemoteAddress, externalLocalIp, externalIndex, !options.Has("no-alias"));
+        if (!secondL.Ready || !externalTarget.Ready)
+        {
+            Console.WriteLine($"[forwarded-tcp] multi alias 不可用：{secondL.Error} / {externalTarget.Error}");
+            return 7;
+        }
+
+        ProbeForwardedIngress[] rows =
+        {
+            Ingress(internalIndex, IPAddress.Parse(localIp), (ushort)listenerPort),
+            Ingress(internalIndex, IPAddress.Parse(secondLocalIp), (ushort)listenerPort),
+            Ingress(externalIndex, IPAddress.Parse(externalLocalIp), (ushort)listenerPort),
+        };
+        byte[] blob = ForwardedBlobBuilder.Build(
+            new[]
+            {
+                RedirectRule(internalIndex, null, IPAddress.Parse(remoteAddress), remotePort, secondRemotePort, 0),
+                RedirectRule(externalIndex, null, IPAddress.Parse(externalRemoteAddress), remotePort, remotePort, 0),
+            },
+            Protocol.RuleActionPermit);
+        device.SetForwardedIngressConfig(false, rows);
+        device.SetForwardedBlob(blob);
+        ProbeForwardedInfo info = device.GetForwardedInfo();
+        Check.Equal(1, info.Installed, "multi blob installed=1");
+        Check.Equal(2, info.RuleCount, "multi 规则数回读一致");
+        s_installedGeneration = info.Generation;
+        device.SetForwardedIngressConfig(true, rows);
+        device.ResetForwardedStats();
+
+        var listeners = new List<TcpListener>();
+        try
+        {
+            foreach (ProbeForwardedIngress row in rows)
+            {
+                listeners.Add(BindOn(row.ListenerIP!.ToString(), listenerPort));
+            }
+
+            Console.WriteLine($"[forwarded-tcp] READY phase=multi listener={listenerPort} " +
+                              $"locals={localIp},{secondLocalIp},{externalLocalIp} " +
+                              $"targets={remoteAddress}:{remotePort},{remoteAddress}:{secondRemotePort}," +
+                              $"{externalRemoteAddress}:{remotePort} " +
+                              $"source_ports={sourcePortA},{sourcePortB} bytes={payloadBytes}");
+            Console.Out.Flush();
+
+
+            var sessions = new List<SessionResult>();
+            var relays = new List<Task<SessionResult>>();
+            using var window = new CancellationTokenSource(waitMs);
+            var acceptTasks = new Dictionary<Task<Socket>, TcpListener>();
+            foreach (TcpListener listener in listeners)
+            {
+                acceptTasks[listener.AcceptSocketAsync(window.Token).AsTask()] = listener;
+            }
+
+            try
+            {
+                while (sessions.Count < 4)
+                {
+                    Task<Socket> ready = await Task.WhenAny(acceptTasks.Keys);
+                    Socket client = await ready;
+                    TcpListener listener = acceptTasks[ready];
+                    acceptTasks.Remove(ready);
+                    acceptTasks[listener.AcceptSocketAsync(window.Token).AsTask()] = listener;
+
+                    var remote = (IPEndPoint)client.RemoteEndPoint!;
+                    var local = (IPEndPoint)client.LocalEndPoint!;
+                    sessions.Add(new SessionResult { Remote = remote, Local = local });
+                    relays.Add(RelaySessionAsync(client, device, backend, null, window.Token, timeoutMs));
+                }
+
+                SessionResult[] results = await Task.WhenAll(relays);
+                for (int index = 0; index < sessions.Count; index++)
+                {
+                    sessions[index].QueryOk = results[index].QueryOk;
+                    sessions[index].ServerAddress = results[index].ServerAddress;
+                    sessions[index].ServerPort = results[index].ServerPort;
+                    sessions[index].IngressIfIndex = results[index].IngressIfIndex;
+                    sessions[index].BytesClientToServer = results[index].BytesClientToServer;
+                    sessions[index].BytesServerToClient = results[index].BytesServerToClient;
+                    sessions[index].CleanEof = results[index].CleanEof;
+                    sessions[index].Detail = results[index].Detail;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Check.True(false, "multi 在窗口内收到四条连接", $"accepted={sessions.Count}/4");
+            }
+
+            Thread.Sleep(200);
+            ProbeForwardedStats stats = device.GetForwardedStats();
+            PrintStats("multi", stats);
+
+            Check.Equal(4, sessions.Count, "multi 收到四条连接");
+            foreach (SessionResult session in sessions)
+            {
+                Check.True(session.QueryOk, "multi redirect 查询命中", session.Detail);
+                Check.Equal(payloadBytes, session.BytesClientToServer, "multi 客户端字节数");
+                Check.Equal(payloadBytes, session.BytesServerToClient, "multi 回程字节数");
+            }
+
+            SessionResult[] crossIngress = sessions.Where(session => session.Remote.Port == sourcePortA).ToArray();
+            SessionResult[] sameIngress = sessions.Where(session => session.Remote.Port == sourcePortB).ToArray();
+            Check.Equal(2, crossIngress.Length, "multi 跨入口组两条连接");
+            Check.Equal(2, sameIngress.Length, "multi 同入口多 L 组两条连接");
+
+            if (crossIngress.Length == 2)
+            {
+                var locals = crossIngress.Select(session => session.Local.Address.ToString()).ToHashSet(StringComparer.Ordinal);
+                Check.True(locals.SetEquals(new[] { localIp, externalLocalIp }), "multi 跨入口使用两个 L",
+                           string.Join(",", locals));
+                var targets = crossIngress.Select(session => $"{session.ServerAddress}:{session.ServerPort}")
+                    .ToHashSet(StringComparer.Ordinal);
+                Check.True(targets.SetEquals(new[] { $"{remoteAddress}:{remotePort}",
+                                                     $"{externalRemoteAddress}:{remotePort}" }),
+                           "multi 跨入口回程记录两个原始目的", string.Join(",", targets));
+                var ingresses = crossIngress.Select(session => session.IngressIfIndex).ToHashSet();
+                Check.True(ingresses.SetEquals(new[] { internalIndex, externalIndex }), "multi 跨入口 ingress 正确",
+                           string.Join(",", ingresses));
+            }
+
+            if (sameIngress.Length == 2)
+            {
+                var locals = sameIngress.Select(session => session.Local.Address.ToString()).ToHashSet(StringComparer.Ordinal);
+                Check.True(locals.SetEquals(new[] { localIp, secondLocalIp }), "multi 同入口并发使用两个 L",
+                           string.Join(",", locals));
+                var ports = sameIngress.Select(session => session.ServerPort).ToHashSet();
+                Check.True(ports.SetEquals(new[] { remotePort, secondRemotePort }),
+                           "multi 同客户端端口两个目的并存", string.Join(",", ports));
+                Check.True(sameIngress.All(session => session.ServerAddress.ToString() == remoteAddress),
+                           "multi 同入口两个目的地址相同", remoteAddress);
+
+                Check.True(sameIngress.All(session => session.IngressIfIndex == internalIndex),
+                           "multi 同入口 ingress 相同", $"ifindex={internalIndex}");
+
+            }
+
+            Check.AtLeast(4, (long)stats.RedirectCreated, "multi 建表四次");
+            Check.AtLeast(4, (long)stats.RedirectReturn, "multi 回程 SNAT");
+            Check.AtLeast(1, (long)stats.RedirectMultiL, "multi 选中了非首个 L");
+            Check.Equal(0, (long)stats.RedirectReturnAmbiguous, "multi 没有回程歧义");
+            Check.Equal(0, (long)stats.RedirectNoIngress, "multi 没有未配置入口");
+
+            // legacy/24B 风格的“任意 L”查询：同一客户端端口在两个 L 上各有一条表项，候选不唯一。
+            // 控制查询必须返回 NOT_FOUND，但不能把 data-path 的 ambiguous 计数抬起来。
+            if (sameIngress.Length == 2)
+            {
+                try
+                {
+                    _ = device.QueryForwardedRedirect(QueryWithoutListener(listenerPort, sameIngress[0].Remote));
+                    Check.True(false, "multi 任意 L 查询应不唯一", $"client={sameIngress[0].Remote}");
+                }
+                catch (Win32Exception exception)
+                {
+                    Check.Equal(1168, exception.NativeErrorCode, "multi 任意 L 查询歧义返回 NOT_FOUND");
+                }
+
+                ProbeForwardedStats afterQuery = device.GetForwardedStats();
+                Check.Equal(0, (long)afterQuery.RedirectReturnAmbiguous,
+                            "multi 控制面查询不增加 data-path ambiguous");
+            }
+
+            CheckInvariants(stats, "multi");
+            return Check.Failures == 0 ? 0 : 6;
+        }
+        finally
+        {
+            foreach (TcpListener listener in listeners)
+            {
+                listener.Stop();
+            }
+        }
+    }
+    private static async Task<int> RunNoIngressAsync(WfpDevice device, Options options)
+    {
+        string localIp = options.Get("local-ip") ?? "192.168.100.2";
+        string externalLocalIp = options.Get("external-local-ip") ?? "192.168.77.2";
+        string externalRemoteAddress = options.Get("external-remote-address") ?? "192.168.77.99";
+        int listenerPort = options.GetInt("listener-port", 40430);
+        int remotePort = options.GetInt("remote-port", 40250);
+        int waitMs = options.GetInt("wait-ms", 8000);
+
+        uint internalIndex = FindAdapterIndex(localIp) ?? 0;
+        uint externalIndex = FindAdapterIndex(externalLocalIp) ?? 0;
+        Check.True(internalIndex != 0 && externalIndex != 0, "noingress 解析两个入口 ifIndex",
+                   $"internal={internalIndex} external={externalIndex}");
+
+        using OnLinkAlias externalTarget = OnLinkAlias.Ensure(
+            externalRemoteAddress, externalLocalIp, externalIndex, !options.Has("no-alias"));
+        if (!externalTarget.Ready)
+        {
+            Console.WriteLine($"[forwarded-tcp] noingress alias 不可用：{externalTarget.Error}");
+            return 7;
+        }
+
+        // 只配置 Internal 入口；规则只匹配 External 入口。External 帧必须 fail-closed，不能落 fallback permit。
+        ProbeForwardedIngress[] rows =
+        {
+            Ingress(internalIndex, IPAddress.Parse(localIp), (ushort)listenerPort),
+        };
+        byte[] blob = ForwardedBlobBuilder.Build(
+            new[]
+            {
+                RedirectRule(externalIndex, null, IPAddress.Parse(externalRemoteAddress), remotePort, remotePort, 0),
+            },
+            Protocol.RuleActionPermit);
+
+        device.SetForwardedIngressConfig(false, rows);
+        device.SetForwardedBlob(blob);
+        ProbeForwardedInfo info = device.GetForwardedInfo();
+        Check.Equal(1, info.Installed, "noingress blob installed=1");
+        Check.Equal(1, info.RuleCount, "noingress 规则数回读一致");
+        s_installedGeneration = info.Generation;
+        device.SetForwardedIngressConfig(true, rows);
+        device.ResetForwardedStats();
+
+        Console.WriteLine($"[forwarded-tcp] READY phase=noingress listener={listenerPort} " +
+                          $"target={externalRemoteAddress}:{remotePort} wait={waitMs}");
+        Console.Out.Flush();
+
+        await Task.Delay(waitMs);
+        ProbeForwardedStats stats = device.GetForwardedStats();
+        PrintStats("noingress", stats);
+
+        Check.AtLeast(1, (long)stats.RedirectNoIngress, "noingress 命中未配置入口");
+        Check.AtLeast(1, (long)stats.Blocked, "noingress 原帧被 block");
+        Check.Equal(0, (long)stats.RedirectCreated, "noingress 没有建表");
+        Check.Equal(0, (long)stats.RedirectIngress, "noingress 没有 DNAT 注入");
+        Check.Equal(0, (long)stats.RedirectReturnAmbiguous, "noingress 没有回程歧义");
+        CheckInvariants(stats, "noingress");
+
+        return Check.Failures == 0 ? 0 : 6;
+    }
+
+
+    private static async Task<int> RunHotSwapAsync(WfpDevice device, Options options)
+    {
+        string localIp = options.Get("local-ip") ?? "192.168.100.2";
+        string remoteAddress = options.Get("remote-address") ?? "192.168.100.99";
+        int listenerPort = options.GetInt("listener-port", 40421);
+        int remotePort = options.GetInt("remote-port", 40250);
+        IPEndPoint backend = ParseEndPoint(options.Get("backend") ?? DefaultBackend);
+        int waitMs = options.GetInt("wait-ms", 30000);
+        int timeoutMs = options.GetInt("timeout-ms", 15000);
+        int payloadBytes = options.GetInt("bytes", 2048);
+        int swapDelayMs = options.GetInt("swap-delay-ms", 1000);
+
+        uint ifIndex = options.Has("ifindex") ? options.GetUInt("ifindex", 0) : FindAdapterIndex(localIp) ?? 0;
+        IPAddress address = IPAddress.Parse(remoteAddress);
+        ProbeForwardedIngress ingress = Ingress(ifIndex, IPAddress.Parse(localIp), (ushort)listenerPort);
+        ForwardedTestRule rule = RedirectRule(ifIndex, null, address, remotePort, remotePort, 0);
+        byte[] blob0 = ForwardedBlobBuilder.Build(new[] { rule }, Protocol.RuleActionPermit);
+        device.SetForwardedIngressConfig(false, new[] { ingress });
+        device.SetForwardedBlob(blob0);
+        ProbeForwardedInfo before = device.GetForwardedInfo();
+        s_installedGeneration = before.Generation;
+        device.SetForwardedIngressConfig(true, new[] { ingress });
+        device.ResetForwardedStats();
+
+        await using var upstream0 = new Socks5FakeServer();
+        await using var upstream1 = new Socks5FakeServer();
+        var upstreams = new Dictionary<uint, Socks5FakeServer> { [0] = upstream0, [1] = upstream1 };
+
+        using var listener = new TcpListener(IPAddress.Parse(localIp), listenerPort);
+        listener.Start();
+        Console.WriteLine($"[forwarded-tcp] READY phase=hotswap listener={listenerPort} " +
+                          $"target={remoteAddress}:{remotePort} bytes={payloadBytes} swap_delay_ms={swapDelayMs}");
+        Console.Out.Flush();
+
+        using var window = new CancellationTokenSource(waitMs);
+        try
+        {
+            Socket first = await listener.AcceptSocketAsync(window.Token);
+            IPEndPoint firstLocal = (IPEndPoint)first.LocalEndPoint!;
+            IPEndPoint firstRemote = (IPEndPoint)first.RemoteEndPoint!;
+            ProbeForwardedRedirect firstEntry = device.QueryForwardedRedirect(QueryFor(firstLocal, firstRemote));
+            Check.Equal(0, firstEntry.UpstreamId, "hotswap 旧连接保持 upstream 0");
+            Check.Equal((long)before.Generation, firstEntry.Generation, "hotswap 旧表项 generation 不变");
+            Task<SessionResult> firstRelay =
+                RelaySessionAsync(first, device, backend, upstreams, window.Token, timeoutMs);
+
+            await Task.Delay(swapDelayMs);
+
+            byte[] blob1 = ForwardedBlobBuilder.Build(
+                new[] { RedirectRule(ifIndex, null, address, remotePort, remotePort, 1) },
+                Protocol.RuleActionPermit);
+            device.SetForwardedBlob(blob1);
+            ProbeForwardedInfo after = device.GetForwardedInfo();
+            Check.True(after.Generation > before.Generation, "hotswap 规则 generation 增加",
+                       $"{before.Generation} -> {after.Generation}");
+            // 换 blob 之后外层 finally/看门狗必须用新 generation 恢复，否则会误判“过期”而跳过。
+            s_installedGeneration = after.Generation;
+            s_watchdog?.Dispose();
+            s_watchdog = new WatchdogHandle();
+            ArmWatchdog(device, listenerPort);
+
+            Socket second = await listener.AcceptSocketAsync(window.Token);
+            IPEndPoint secondLocal = (IPEndPoint)second.LocalEndPoint!;
+            IPEndPoint secondRemote = (IPEndPoint)second.RemoteEndPoint!;
+            ProbeForwardedRedirect secondEntry = device.QueryForwardedRedirect(QueryFor(secondLocal, secondRemote));
+            Check.Equal(1, secondEntry.UpstreamId, "hotswap 新连接使用 upstream 1");
+            Check.Equal((long)after.Generation, secondEntry.Generation, "hotswap 新表项 generation 是新一代");
+
+            ProbeForwardedRedirect firstAgain = device.QueryForwardedRedirect(QueryFor(firstLocal, firstRemote));
+            Check.Equal(0, firstAgain.UpstreamId, "hotswap 换表后旧连接仍映射 upstream 0");
+            Check.Equal((long)before.Generation, firstAgain.Generation, "hotswap 换表后旧表项 generation 不变");
+
+            Task<SessionResult> secondRelay =
+                RelaySessionAsync(second, device, backend, upstreams, window.Token, timeoutMs);
+            SessionResult[] results = await Task.WhenAll(firstRelay, secondRelay);
+
+            Thread.Sleep(200);
+            ProbeForwardedStats stats = device.GetForwardedStats();
+            PrintStats("hotswap", stats);
+
+            Check.True(results[0].QueryOk, "hotswap redirect 查询命中", results[0].Detail);
+            Check.True(results[1].QueryOk, "hotswap redirect 查询命中", results[1].Detail);
+            // 旧连接在换表后又发了一轮；旧表项/旧 upstream 仍应完整回程。
+            Check.Equal(payloadBytes * 2, results[0].BytesClientToServer, "hotswap 旧连接换表后继续收发");
+            Check.Equal(payloadBytes * 2, results[0].BytesServerToClient, "hotswap 旧连接换表后回程完整");
+            Check.Equal(payloadBytes, results[1].BytesClientToServer, "hotswap 新连接字节数");
+            Check.Equal(payloadBytes, results[1].BytesServerToClient, "hotswap 新连接回程字节数");
+
+
+            Check.Equal(1, upstream0.Connections, "hotswap upstream 0 收到旧连接");
+            Check.Equal(1, upstream1.Connections, "hotswap upstream 1 收到新连接");
+            Check.AtLeast(1, (long)stats.TablesReplaced, "hotswap 至少替换一次规则表");
+            Check.Equal(0, (long)stats.RedirectNoState, "hotswap 两条连接都命中表项");
+            CheckInvariants(stats, "hotswap");
+            return Check.Failures == 0 ? 0 : 6;
+        }
+        catch (OperationCanceledException)
+        {
+            Check.True(false, "hotswap 在窗口内收到两条连接", $"timeout_ms={waitMs}");
+            return 6;
+        }
     }
 
     private static async Task<int> RunFailAsync(WfpDevice device,
@@ -556,8 +941,22 @@ internal static class ForwardedTcpSuite
         {
             query.ClientAddress[index] = clientBytes[index];
         }
+        if (!local.Address.Equals(IPAddress.Any) && !local.Address.Equals(IPAddress.IPv6Any))
+        {
+            byte[] listenerBytes = local.Address.GetAddressBytes();
+            for (int index = 0; index < listenerBytes.Length; index++)
+            {
+                query.ListenerAddress[index] = listenerBytes[index];
+            }
+        }
         return query;
+
     }
+
+    // 只带 (listener_port, client) 的 legacy 查询：ListenerAddress 留空，驱动按“任意 L”线性扫描。
+    private static ProbeForwardedRedirectQuery QueryWithoutListener(int listenerPort, IPEndPoint client) =>
+        QueryFor(new IPEndPoint(IPAddress.Any, listenerPort), client);
+
 
     private static unsafe void Install(WfpDevice device,
                                 byte[] blob,
@@ -566,37 +965,49 @@ internal static class ForwardedTcpSuite
                                 string localIp,
                                 byte family)
     {
-        device.SetForwardedConfig(DisabledConfig(listenerPort));
+        IPAddress address = IPAddress.Parse(localIp);
+        uint ifIndex = FindAdapterIndex(localIp) ?? 0;
+        Check.True(ifIndex != 0, "Install 解析入口 ifIndex", $"local-ip={localIp}");
+        ProbeForwardedIngress ingress = Ingress(ifIndex, address, (ushort)listenerPort, family);
+        device.SetForwardedIngressConfig(false, new[] { ingress });
         device.SetForwardedBlob(blob);
         ProbeForwardedInfo info = device.GetForwardedInfo();
         Check.Equal(1, info.Installed, "forwarded blob installed=1");
         Check.Equal(expectedRules, info.RuleCount, "forwarded 规则数回读一致");
         s_installedGeneration = info.Generation;
 
-        ProbeForwardedConfig disabled = device.GetForwardedConfig();
-        Check.Equal(0, disabled.Enabled, "启用前 config 回读 enabled=0");
+        device.SetForwardedIngressConfig(true, new[] { ingress });
+        (bool configEnabled, ProbeForwardedIngress[] ingresses) = device.GetForwardedIngressConfig();
+        Check.True(configEnabled, "config 回读 enabled=1", $"count={ingresses.Length}");
 
-        IPAddress address = IPAddress.Parse(localIp);
-        ProbeForwardedConfig enabled = default;
-        enabled.Enabled = 1;
-        enabled.ListenerPort = (ushort)listenerPort;
-        enabled.Family = family;
-        byte[] listenerBytes = address.GetAddressBytes();
-        for (int index = 0; index < listenerBytes.Length; index++)
-        {
-            enabled.ListenerAddress[index] = listenerBytes[index];
-        }
-        device.SetForwardedConfig(enabled);
-
-        ProbeForwardedConfig readback = device.GetForwardedConfig();
-        Check.Equal(1, readback.Enabled, "config 回读 enabled=1");
-        Check.Equal(listenerPort, readback.ListenerPort, "config 回读 listener_port");
-        Check.Equal(family, readback.Family, "config 回读 family");
+        Check.Equal(1, ingresses.Length, "config 回读一条入口记录");
+        Check.Equal((long)ifIndex, ingresses[0].IfIndex, "config 回读 ifindex");
+        Check.Equal((long)listenerPort, ingresses[0].ListenerPort, "config 回读 listener_port");
+        Check.Equal((long)family, ingresses[0].Family, "config 回读 family");
         ArmWatchdog(device, listenerPort);
     }
 
 
+    private static unsafe ProbeForwardedIngress Ingress(uint ifIndex, IPAddress address, ushort port, byte family)
+    {
+        ProbeForwardedIngress ingress = default;
+        ingress.IfIndex = ifIndex;
+        ingress.ListenerPort = port;
+        ingress.Family = family;
+        byte[] bytes = address.GetAddressBytes();
+        for (int index = 0; index < bytes.Length; index++)
+        {
+            ingress.ListenerAddress[index] = bytes[index];
+        }
+        return ingress;
+    }
+
+    private static unsafe ProbeForwardedIngress Ingress(uint ifIndex, IPAddress address, ushort port) =>
+        Ingress(ifIndex, address, port,
+                (byte)(address.AddressFamily == AddressFamily.InterNetwork ? 4 : 6));
+
     private static ProbeForwardedConfig DisabledConfig(int listenerPort) => new()
+
     {
         ListenerPort = (ushort)listenerPort,
     };
@@ -687,8 +1098,10 @@ internal static class ForwardedTcpSuite
                     $"{name}：permitted == matched_permit + fallback_permit + udp_return_miss");
         Check.Equal((long)stats.Blocked,
                     (long)(stats.MatchedBlock + stats.FallbackBlock + stats.RedirectBlocked +
-                           stats.RedirectReturnFailed + stats.UdpBlocked + stats.UdpReturnFailed),
-                    $"{name}：blocked == matched_block + fallback_block + redirect 失败 + udp 失败");
+                           stats.RedirectReturnFailed + stats.RedirectReturnAmbiguous + stats.UdpBlocked +
+                           stats.UdpReturnFailed + stats.UdpReturnAmbiguous),
+                    $"{name}：blocked == matched_block + fallback_block + redirect 失败 + 歧义 + udp 失败");
+
         Check.Equal((long)stats.Matched,
                     (long)(stats.MatchedPermit + stats.MatchedBlock + stats.MatchedRedirect),
                     $"{name}：matched == permit + block + redirect");
@@ -696,8 +1109,9 @@ internal static class ForwardedTcpSuite
                     (long)(stats.RedirectIngress + stats.RedirectBlocked),
                     $"{name}：matched_redirect + udp_fragmented == ingress + blocked");
         Check.Equal((long)stats.RedirectBlocked,
-                    (long)(stats.RedirectNoConfig + stats.RedirectNoState + stats.RedirectCapacity +
-                           stats.RedirectNonTcp + stats.RedirectInjectFailed),
+                    (long)(stats.RedirectNoConfig + stats.RedirectNoState + stats.RedirectNoIngress +
+                           stats.RedirectCapacity + stats.RedirectNonTcp + stats.RedirectInjectFailed),
+
                     $"{name}：redirect_blocked 拆分");
         Check.Equal((long)stats.Redirected, (long)(stats.RedirectIngress + stats.RedirectReturn),
                     $"{name}：redirected == ingress + return");

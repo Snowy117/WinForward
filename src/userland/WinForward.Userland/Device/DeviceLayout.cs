@@ -18,9 +18,12 @@ public static class DeviceLayout
     public const int ProbeRuleInfoSize = 32;
     public const int ProbeForwardedInfoSize = 32;
     public const int ProbeForwardedConfigSize = 28;
-    public const int ProbeForwardedRedirectQuerySize = 24;
-    public const int ProbeForwardedRedirectSize = 64;
-    public const int ProbeForwardedStatsSize = 400;
+    public const int ProbeForwardedIngressSize = 28;
+    public const int ProbeForwardedIngressConfigSize = 16;
+    public const int ProbeForwardedRedirectQuerySize = 40;
+    public const int ProbeForwardedRedirectSize = 88;
+    public const int ProbeForwardedStatsSize = 456;
+
     public const int ProbeEventSize = 64;
     public const int ProcessPathMeasurementSize = 520;
     public const int RedirectContextSize = 36;
@@ -179,6 +182,14 @@ public static class DeviceLayout
         CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectHighWater), 388);
         CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.LastStatus), 392);
         CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.AbiVersion), 396);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectReturnAmbiguous), 400);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpReturnAmbiguous), 408);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectNoIngress), 416);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpNoIngress), 424);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectMultiL), 432);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpMultiL), 440);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpReturnMissBlocked), 448);
+
     }
 
     private static void VerifyProbeForwardedRedirect()
@@ -191,6 +202,21 @@ public static class DeviceLayout
         CheckOffset<ProbeForwardedConfig>(nameof(ProbeForwardedConfig.ListenerAddress), 8);
         CheckOffset<ProbeForwardedConfig>(nameof(ProbeForwardedConfig.Reserved1), 24);
 
+        CheckSize<ProbeForwardedIngressConfigHeader>(ProbeForwardedIngressConfigSize);
+        CheckOffset<ProbeForwardedIngressConfigHeader>(nameof(ProbeForwardedIngressConfigHeader.AbiVersion), 0);
+        CheckOffset<ProbeForwardedIngressConfigHeader>(nameof(ProbeForwardedIngressConfigHeader.Enabled), 4);
+        CheckOffset<ProbeForwardedIngressConfigHeader>(nameof(ProbeForwardedIngressConfigHeader.IngressCount), 8);
+        CheckOffset<ProbeForwardedIngressConfigHeader>(nameof(ProbeForwardedIngressConfigHeader.Reserved0), 12);
+
+        CheckSize<ProbeForwardedIngress>(ProbeForwardedIngressSize);
+        CheckOffset<ProbeForwardedIngress>(nameof(ProbeForwardedIngress.IfIndex), 0);
+        CheckOffset<ProbeForwardedIngress>(nameof(ProbeForwardedIngress.ListenerPort), 4);
+        CheckOffset<ProbeForwardedIngress>(nameof(ProbeForwardedIngress.Family), 6);
+        CheckOffset<ProbeForwardedIngress>(nameof(ProbeForwardedIngress.Reserved0), 7);
+        CheckOffset<ProbeForwardedIngress>(nameof(ProbeForwardedIngress.ListenerAddress), 8);
+        CheckOffset<ProbeForwardedIngress>(nameof(ProbeForwardedIngress.Reserved1), 24);
+
+
         CheckSize<ProbeForwardedRedirectQuery>(ProbeForwardedRedirectQuerySize);
         CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.ListenerPort), 0);
         CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Family), 2);
@@ -199,6 +225,8 @@ public static class DeviceLayout
         CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.ClientPort), 20);
         CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Protocol), 22);
         CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Reserved1), 23);
+        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.ListenerAddress), 24);
+
 
         CheckSize<ProbeForwardedRedirect>(ProbeForwardedRedirectSize);
         CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.Magic), 0);
@@ -215,6 +243,10 @@ public static class DeviceLayout
         CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.UpstreamId), 52);
         CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.RuleIndex), 56);
         CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.State), 60);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.ListenerAddress), 64);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.Generation), 80);
+        CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.Reserved1), 84);
+
     }
 
     private static void VerifyProbeEvent()

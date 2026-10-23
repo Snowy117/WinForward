@@ -98,7 +98,22 @@ public sealed class WfpDeviceClient : IDisposable
     public ProbeForwardedConfig GetForwardedConfig() =>
         ReadStruct<ProbeForwardedConfig>(ProbeIoctl.GetForwardedConfigCode, "GetForwardedConfig");
 
-    /// <summary>按 (listener_port, client) 查 redirect 表；未命中时驱动返回 NOT_FOUND，这里抛 Win32Exception。</summary>
+
+    public void SetForwardedIngressConfig(ProbeForwardedIngressConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        Ioctl(ProbeIoctl.SetForwardedIngressConfigCode, config.ToBytes(), 0);
+    }
+
+    public ProbeForwardedIngressConfig GetForwardedIngressConfig()
+    {
+        byte[] data = Ioctl(ProbeIoctl.GetForwardedIngressConfigCode, Array.Empty<byte>(),
+                            ProbeForwardedIngressConfig.MaxBytes);
+        return ProbeForwardedIngressConfig.FromBytes(data);
+    }
+
+    /// <summary>按 (listener 本地端点, client) 查 redirect 表；未命中时驱动返回 NOT_FOUND，这里抛 Win32Exception。</summary>
+
     public ProbeForwardedRedirect QueryForwardedRedirect(ProbeForwardedRedirectQuery query)
     {
         byte[] input = MemoryMarshal.AsBytes(new ReadOnlySpan<ProbeForwardedRedirectQuery>(in query)).ToArray();
@@ -202,6 +217,16 @@ public sealed class WfpDeviceClient : IDisposable
         if (code == ProbeIoctl.GetForwardedConfigCode)
         {
             return "GetForwardedConfig";
+        }
+
+        if (code == ProbeIoctl.SetForwardedIngressConfigCode)
+        {
+            return "SetForwardedIngressConfig";
+        }
+
+        if (code == ProbeIoctl.GetForwardedIngressConfigCode)
+        {
+            return "GetForwardedIngressConfig";
         }
 
         if (code == ProbeIoctl.QueryForwardedRedirectCode)

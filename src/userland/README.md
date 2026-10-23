@@ -147,7 +147,7 @@ SOCKS5（VM loopback）→ 跨机 target」。
 用临时副本改头、改夹具、改产品常量来证明这一点。
 
 **范围**：`abi/*` 只锁**控制面 IOCTL**（`probe_ioctl.h` + `redirect_context.h` + 夹具），包括 v5 的
-`probe_forwarded_config` / `probe_forwarded_redirect*` 与 `0x80C`–`0x80E`，以及 v4 的
+`probe_forwarded_config` / `probe_forwarded_redirect*` 与 `0x80C`–`0x80E`、v7 的 `probe_forwarded_ingress[_config]` 与 `0x80F`/`0x810`，以及 v4 的
 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL。规则 blob 的
 `src/common/rule_blob.h` 不在这组测试里——它由 `tests/host` 的跨语言差分 ctest 锁（C# 产 blob、C++ 用
 同一份 `try_open_blob` + `match` 消费）。注意 `RuleBlobLayout`/`RuleBlobHeader` 里的字节数字是**手抄**
@@ -162,13 +162,17 @@ SOCKS5（VM loopback）→ 跨机 target」。
 1. 编译配置（含上面所有编译期检查）；配置非法时在打开设备前以退出码 2 失败，不会碰驱动；
 2. 打开 `\\.\WfProbe`（设备 DACL 只允许 SYSTEM/Administrators），校验 ABI 版本；
 3. 先把 `enabled` 置 0（清掉上一次异常退出可能留下的死端口配置）；
-4. 绑 `0.0.0.0:0` 与 `[::]:P`（v6 显式 `DualMode = false`，与 v4 共用系统分配的端口）；
+4. 解析 forwarded 规则里出现的 ingress → 本机 L（当前每个 ifindex 一个 L；显式 ForwardedListenerAddress
+   可覆盖），用 `ListenerSet` 在这些 L 上绑定同一个端口（每 L 一个 TCP/UDP socket，v6 显式
+   `DualMode = false`）；没有 forwarded 段时退回 `0.0.0.0` / `[::]` 通配绑定；
+
 5. 下发规则 blob，回读规则数/兜底动作/blob 长度并逐项核对；再下发 forwarded 表：配置里有
    `forwarded` 段就用编译出的 blob，没有就下发一张空 permit 表（清掉上一次异常退出留下的规则），
    两种情况都回读 `installed` / 规则数 / 兜底动作 / blob 长度 / generation；
 6. 下发 host 配置：`listener_process_id` = 本进程、`listener_port` = P、self-PID 集合 = 本进程；
-   有 forwarded 段时再下发 forwarded config：先 `enabled=0` 清 redirect 表，再 `enabled=1` 指向
-   listener 本地地址 L（L 解析失败则回滚为 disabled）；
+   有 forwarded 段时按 ingress 下发 `probe_forwarded_ingress_config`：先 `enabled=0` 清 redirect 表，
+   再 `enabled=1` 指向每个入口的 L（当前每个 ifindex 一个 L；L 解析失败则回滚为 disabled）；
+
 7. 接受连接 → 依次尝试 forwarded redirect 表与 `SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT` 读回原始
    目的地（forwarded 命中时按 `upstream_id` 从 `ForwardedUpstreams` 选 SOCKS5）→
    带 `SIO_QUERY_WFP_CONNECTION_REDIRECT_RECORDS`（有的话）建出站（直连，或按所选上游 CONNECT）→

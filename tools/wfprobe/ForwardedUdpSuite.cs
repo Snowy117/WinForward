@@ -158,7 +158,7 @@ internal static class ForwardedUdpSuite
                     continue;
                 }
 
-                DatagramRecord record = QueryRecord(device, listenerPort, client);
+                DatagramRecord record = QueryRecord(device, new IPEndPoint(IPAddress.Parse(localIp), listenerPort), client);
                 records.Add(record);
                 byte[] payload = buffer.AsSpan(0, received.ReceivedBytes).ToArray();
                 await backendSocket.SendToAsync(payload, SocketFlags.None, backend, window.Token);
@@ -202,6 +202,8 @@ internal static class ForwardedUdpSuite
         Check.Equal(0, (long)stats.UdpNoConfig, "配置齐全：没有 udp_no_config");
         Check.Equal(0, (long)stats.UdpCapacity, "没有容量失败");
         Check.Equal(0, (long)stats.UdpInjectFailed, "没有注入失败");
+        Check.Equal(0, (long)stats.UdpReturnMissBlocked, "没有混合 NBL 丢弃");
+
         CheckInvariants(stats, "core");
 
         Check.True(decoy is not null, "U7：decoy 绑定原始目的地",
@@ -465,7 +467,7 @@ internal static class ForwardedUdpSuite
                 }
 
                 ++received;
-                DatagramRecord record = QueryRecord(device, listenerPort, client);
+                DatagramRecord record = QueryRecord(device, new IPEndPoint(IPAddress.Parse(localIp), listenerPort), client);
                 Check.True(record.QueryOk, "reject：UDP redirect 查询命中", record.Detail);
                 try
                 {
@@ -534,7 +536,7 @@ internal static class ForwardedUdpSuite
                     continue;
                 }
 
-                DatagramRecord record = QueryRecord(device, listenerPort, client);
+                DatagramRecord record = QueryRecord(device, new IPEndPoint(IPAddress.Parse(localIp), listenerPort), client);
                 records.Add(record);
                 AssociationKey key = new(client, record.ServerAddress, record.ServerPort, record.UpstreamId);
                 if (!associations.TryGetValue(key, out Socks5UdpProbeClient? association))
@@ -645,10 +647,10 @@ internal static class ForwardedUdpSuite
         return Check.Failures == 0 ? 0 : 6;
     }
 
-    private static DatagramRecord QueryRecord(WfpDevice device, int listenerPort, IPEndPoint client)
+    private static DatagramRecord QueryRecord(WfpDevice device, IPEndPoint listener, IPEndPoint client)
     {
         DatagramRecord record = new() { Client = client, Detail = string.Empty };
-        ProbeForwardedRedirectQuery query = QueryFor(listenerPort, client);
+        ProbeForwardedRedirectQuery query = QueryFor(listener, client);
         try
         {
             ProbeForwardedRedirect redirect = device.QueryForwardedRedirect(query);
@@ -668,19 +670,26 @@ internal static class ForwardedUdpSuite
         return record;
     }
 
-    private static unsafe ProbeForwardedRedirectQuery QueryFor(int listenerPort, IPEndPoint client)
+    private static unsafe ProbeForwardedRedirectQuery QueryFor(IPEndPoint listener, IPEndPoint client)
     {
         ProbeForwardedRedirectQuery query = default;
-        query.ListenerPort = (ushort)listenerPort;
+        query.ListenerPort = (ushort)listener.Port;
         query.Family = (byte)(client.AddressFamily == AddressFamily.InterNetwork ? 4 : 6);
         query.Protocol = Protocol.RuleProtocolUdp;
         query.ClientPort = (ushort)client.Port;
-        byte[] bytes = client.Address.GetAddressBytes();
-        for (int index = 0; index < bytes.Length; index++)
+        byte[] clientBytes = client.Address.GetAddressBytes();
+        for (int index = 0; index < clientBytes.Length; index++)
         {
-            query.ClientAddress[index] = bytes[index];
+            query.ClientAddress[index] = clientBytes[index];
         }
-
+        if (!listener.Address.Equals(IPAddress.Any) && !listener.Address.Equals(IPAddress.IPv6Any))
+        {
+            byte[] listenerBytes = listener.Address.GetAddressBytes();
+            for (int index = 0; index < listenerBytes.Length; index++)
+            {
+                query.ListenerAddress[index] = listenerBytes[index];
+            }
+        }
         return query;
     }
 
@@ -776,33 +785,48 @@ internal static class ForwardedUdpSuite
     private static unsafe void Install(WfpDevice device, byte[] blob, uint expectedRules, int listenerPort,
                                        string localIp, byte family)
     {
-        device.SetForwardedConfig(DisabledConfig(listenerPort));
+        IPAddress address = IPAddress.Parse(localIp);
+        uint ifIndex = FindAdapterIndex(localIp) ?? 0;
+        Check.True(ifIndex != 0, "Install 解析入口 ifIndex", $"local-ip={localIp}");
+        ProbeForwardedIngress ingress = Ingress(ifIndex, address, (ushort)listenerPort, family);
+        device.SetForwardedIngressConfig(false, new[] { ingress });
         device.SetForwardedBlob(blob);
         ProbeForwardedInfo info = device.GetForwardedInfo();
         Check.Equal(1, info.Installed, "forwarded blob installed=1");
         Check.Equal(expectedRules, info.RuleCount, "forwarded 规则数回读一致");
         s_installedGeneration = info.Generation;
 
-        ProbeForwardedConfig enabled = default;
-        enabled.Enabled = 1;
-        enabled.ListenerPort = (ushort)listenerPort;
-        enabled.Family = family;
-        byte[] listenerBytes = IPAddress.Parse(localIp).GetAddressBytes();
-        for (int index = 0; index < listenerBytes.Length; index++)
-        {
-            enabled.ListenerAddress[index] = listenerBytes[index];
-        }
+        device.SetForwardedIngressConfig(true, new[] { ingress });
+        (bool enabled, ProbeForwardedIngress[] ingresses) = device.GetForwardedIngressConfig();
+        Check.True(enabled, "config 回读 enabled=1", $"count={ingresses.Length}");
 
-        device.SetForwardedConfig(enabled);
-        ProbeForwardedConfig readback = device.GetForwardedConfig();
-        Check.Equal(1, readback.Enabled, "config 回读 enabled=1");
-        Check.Equal(listenerPort, readback.ListenerPort, "config 回读 listener_port");
-        Check.Equal(family, readback.Family, "config 回读 family");
-        // 看门狗在 install 之后才拿到 generation：旧套件被 kill 后遗留的看门狗不能清掉新套件的表。
+        Check.Equal(1, ingresses.Length, "config 回读一条入口记录");
+        Check.Equal((long)ifIndex, ingresses[0].IfIndex, "config 回读 ifindex");
+        Check.Equal((long)listenerPort, ingresses[0].ListenerPort, "config 回读 listener_port");
+        Check.Equal((long)family, ingresses[0].Family, "config 回读 family");
         ArmWatchdog(device, listenerPort);
     }
 
+    private static unsafe ProbeForwardedIngress Ingress(uint ifIndex, IPAddress address, ushort port, byte family)
+    {
+        ProbeForwardedIngress ingress = default;
+        ingress.IfIndex = ifIndex;
+        ingress.ListenerPort = port;
+        ingress.Family = family;
+        byte[] bytes = address.GetAddressBytes();
+        for (int index = 0; index < bytes.Length; index++)
+        {
+            ingress.ListenerAddress[index] = bytes[index];
+        }
+        return ingress;
+    }
+
+    private static unsafe ProbeForwardedIngress Ingress(uint ifIndex, IPAddress address, ushort port) =>
+        Ingress(ifIndex, address, port,
+                (byte)(address.AddressFamily == AddressFamily.InterNetwork ? 4 : 6));
+
     private static ProbeForwardedConfig DisabledConfig(int listenerPort) => new() { ListenerPort = (ushort)listenerPort };
+
 
     private static bool Restore(WfpDevice device, int listenerPort, int expectedGeneration = -1)
     {
@@ -894,17 +918,20 @@ internal static class ForwardedUdpSuite
         Check.Equal((long)(stats.RedirectIngress + stats.RedirectBlocked + stats.UdpIngress + stats.UdpBlocked),
                     (long)(stats.MatchedRedirect + stats.UdpFragmented),
                     $"{name}：matched_redirect + udp_fragmented == tcp/udp ingress + blocked");
-        Check.Equal((long)(stats.MatchedBlock + stats.FallbackBlock + stats.RedirectBlocked + stats.RedirectReturnFailed +
-                           stats.UdpBlocked + stats.UdpReturnFailed),
-                    (long)stats.Blocked,
-                    $"{name}：blocked 拆分含 UDP");
+         Check.Equal((long)(stats.MatchedBlock + stats.FallbackBlock + stats.RedirectBlocked + stats.RedirectReturnFailed +
+                            stats.RedirectReturnAmbiguous + stats.UdpBlocked + stats.UdpReturnFailed +
+                            stats.UdpReturnAmbiguous),
+                     (long)stats.Blocked,
+                     $"{name}：blocked 拆分含 UDP 与歧义");
+
         Check.Equal((long)(stats.RedirectIngress + stats.RedirectReturn + stats.UdpIngress + stats.UdpReturn),
                     (long)stats.Redirected,
                     $"{name}：redirected == ingress + return（TCP+UDP）");
-        Check.Equal((long)(stats.UdpNoConfig + stats.UdpNoState + stats.UdpCapacity + stats.UdpFragmented +
-                           stats.UdpInjectFailed),
-                    (long)stats.UdpBlocked,
-                    $"{name}：udp_blocked 拆分");
+         Check.Equal((long)(stats.UdpNoConfig + stats.UdpNoState + stats.UdpNoIngress + stats.UdpCapacity +
+                            stats.UdpFragmented + stats.UdpInjectFailed),
+                     (long)stats.UdpBlocked,
+                     $"{name}：udp_blocked 拆分");
+
     }
 
     private static void PrintStats(string prefix, ProbeForwardedStats stats) =>
@@ -913,7 +940,7 @@ internal static class ForwardedUdpSuite
                           $"udp_created={stats.UdpCreated} udp_ingress={stats.UdpIngress} udp_return={stats.UdpReturn} " +
                           $"udp_blocked={stats.UdpBlocked} no_config={stats.UdpNoConfig} capacity={stats.UdpCapacity} " +
                           $"fragmented={stats.UdpFragmented} inject_failed={stats.UdpInjectFailed} " +
-                          $"return_failed={stats.UdpReturnFailed} return_miss={stats.UdpReturnMiss} " +
+                          $"return_failed={stats.UdpReturnFailed} return_miss={stats.UdpReturnMiss} miss_blocked={stats.UdpReturnMissBlocked} " +
                           $"expired={stats.UdpExpired} multi_nb={stats.UdpMultiNb} " +
                           $"complete={stats.InjectCompleteCalls}/{stats.InjectCompleteFailed}");
 

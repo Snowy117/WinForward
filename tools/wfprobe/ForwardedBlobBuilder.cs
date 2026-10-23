@@ -72,7 +72,7 @@ internal static class ForwardedBlobBuilder
         }
 
         int rulesOffset = HeaderSize;
-        int networkOffset = AlignUp(rulesOffset + entries.Length * RuleSize, 4);
+        int networkOffset = AlignUp(rulesOffset + entries.Length, 4);
         int networkSize = networks.Count * NetworkPrefixSize;
         int totalSize = networkOffset + networkSize;
         byte[] blob = new byte[totalSize];

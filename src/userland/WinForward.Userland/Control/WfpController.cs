@@ -25,18 +25,29 @@ public sealed class WfpController : IAsyncDisposable
     private readonly TextWriter _report;
     private readonly object _reportGate = new();
     private readonly ForwardedUdpRelay? _udpRelay;
+    private readonly IReadOnlyList<ProbeForwardedIngress> _forwardedIngresses;
+    private readonly bool _forwardedIngressMode;
     private bool _stopped;
+
 
     // 没有 forwarded 段时下发的空表：清掉上一次异常退出可能留下的规则。空表 = 全部走 fallback permit。
     private static readonly byte[] EmptyForwardedBlob =
         ForwardedBlobCompiler.Compile(new ForwardedPolicyTable([], RuleAction.Permit));
 
-    private WfpController(WfpDeviceClient device, RelayServer relay, ForwardedUdpRelay? udpRelay, TextWriter report)
+    private WfpController(WfpDeviceClient device,
+                          RelayServer relay,
+                          ForwardedUdpRelay? udpRelay,
+                          IReadOnlyList<ProbeForwardedIngress> forwardedIngresses,
+                          bool forwardedIngressMode,
+                          TextWriter report)
     {
         _device = device;
         _relay = relay;
         _udpRelay = udpRelay;
+        _forwardedIngresses = forwardedIngresses;
+        _forwardedIngressMode = forwardedIngressMode;
         _report = report;
+
     }
 
     public int ListenerPort => _relay.Port;
@@ -50,6 +61,9 @@ public sealed class WfpController : IAsyncDisposable
         WfpDeviceClient device = WfpDeviceClient.Open();
         RelayServer? relay = null;
         ForwardedUdpRelay? udpRelay = null;
+        IReadOnlyList<ProbeForwardedIngress> ingresses = Array.Empty<ProbeForwardedIngress>();
+        bool ingressMode = settings.Forwarded is not null;
+
         try
         {
             ProbeStats stats = device.GetStats();
@@ -61,7 +75,13 @@ public sealed class WfpController : IAsyncDisposable
 
             device.SetConfig(ProbeConfig.Disabled());
 
-            ListenerSet listeners = ListenerSet.Bind();
+            ForwardedListenerPlan plan = ResolveForwardedListenerPlan(settings);
+            ListenerSet listeners = ListenerSet.Bind(plan.Addresses);
+            ingresses = plan.Entries
+                            .Select(entry => ProbeForwardedIngress.For(entry.Address, (ushort)listeners.Port, entry.IfIndex))
+                            .ToArray();
+
+
             relay = RelayServer.Start(listeners,
                                        settings.Report,
                                        settings.AttachRedirectRecords,
@@ -75,7 +95,16 @@ public sealed class WfpController : IAsyncDisposable
 
             // 先关掉 forwarded 数据面（清 redirect 表），再换规则 blob：上一次进程异常退出留下的
             // enabled 配置不会在新 listener 就绪前把连接改道。
-            device.SetForwardedConfig(ProbeForwardedConfig.Disabled((ushort)relay.Port));
+            if (ingressMode)
+            {
+                device.SetForwardedIngressConfig(
+                    new ProbeForwardedIngressConfig { Enabled = false, Ingresses = ingresses });
+            }
+            else
+            {
+                device.SetForwardedConfig(ProbeForwardedConfig.Disabled((ushort)relay.Port));
+            }
+
             device.SetRuleBlob(settings.RuleBlob);
             VerifyRules(device, settings);
             ReportRules(device, settings);
@@ -97,7 +126,8 @@ public sealed class WfpController : IAsyncDisposable
                 VerifyForwarded(device, settings.Report, EmptyForwardedBlob, 0, RuleAction.Permit);
                 Report(settings.Report, "controller-forwarded-cleared rules=0 fallback=permit");
             }
-            ConfigureForwarded(device, settings, (ushort)relay.Port);
+            ConfigureForwarded(device, settings, (ushort)relay.Port, ingresses);
+
             if (settings.Forwarded is not null)
             {
                 udpRelay = ForwardedUdpRelay.Start(listeners.UdpSockets, device, settings.ForwardedUpstreams,
@@ -118,7 +148,7 @@ public sealed class WfpController : IAsyncDisposable
             Report(settings.Report, $"controller-ready pid={Environment.ProcessId} port={relay.Port} " +
                                     $"listener={DescribeListeners(listeners)}");
 
-            return new WfpController(device, relay, udpRelay, settings.Report);
+            return new WfpController(device, relay, udpRelay, ingresses, ingressMode, settings.Report);
         }
         catch
         {
@@ -134,7 +164,16 @@ public sealed class WfpController : IAsyncDisposable
 
             try
             {
-                device.SetForwardedConfig(ProbeForwardedConfig.Disabled((ushort)(relay?.Port ?? 0)));
+                if (ingressMode)
+                {
+                    device.SetForwardedIngressConfig(
+                        new ProbeForwardedIngressConfig { Enabled = false, Ingresses = ingresses });
+                }
+                else
+                {
+                    device.SetForwardedConfig(ProbeForwardedConfig.Disabled((ushort)(relay?.Port ?? 0)));
+                }
+
                 device.SetForwardedBlob(EmptyForwardedBlob);
                 VerifyForwarded(device, settings.Report, EmptyForwardedBlob, 0, RuleAction.Permit);
                 Report(settings.Report, "controller-forwarded-cleared rules=0 fallback=permit");
@@ -172,8 +211,19 @@ public sealed class WfpController : IAsyncDisposable
         {
             _device.SetConfig(ProbeConfig.Disabled());
             Report(_report, "controller-config-disabled enabled=0");
-            _device.SetForwardedConfig(ProbeForwardedConfig.Disabled((ushort)_relay.Port));
-            Report(_report, $"controller-forwarded-config-disabled enabled=0 port={_relay.Port}");
+            if (_forwardedIngressMode)
+            {
+                _device.SetForwardedIngressConfig(
+                    new ProbeForwardedIngressConfig { Enabled = false, Ingresses = _forwardedIngresses });
+                Report(_report, $"controller-forwarded-ingress-config-disabled enabled=0 " +
+                                $"count={_forwardedIngresses.Count} port={_relay.Port}");
+            }
+            else
+            {
+                _device.SetForwardedConfig(ProbeForwardedConfig.Disabled((ushort)_relay.Port));
+                Report(_report, $"controller-forwarded-config-disabled enabled=0 port={_relay.Port}");
+            }
+
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
@@ -301,11 +351,19 @@ public sealed class WfpController : IAsyncDisposable
         }
     }
 
+    private sealed record ForwardedListenerEntry(uint IfIndex, IPAddress Address);
+
+    private sealed record ForwardedListenerPlan(IReadOnlyList<IPAddress> Addresses,
+                                                IReadOnlyList<ForwardedListenerEntry> Entries);
+
     /// <summary>
     /// 下发 forwarded 数据面配置：先 disabled（清表），再 enabled。所有校验都在启用之前完成；
     /// 找不到 listener 地址 L 时抛异常，由 Start 的失败路径回滚成 disabled。
     /// </summary>
-    private static void ConfigureForwarded(WfpDeviceClient device, ControllerSettings settings, ushort listenerPort)
+    private static void ConfigureForwarded(WfpDeviceClient device,
+                                           ControllerSettings settings,
+                                           ushort listenerPort,
+                                           IReadOnlyList<ProbeForwardedIngress> ingresses)
     {
         if (settings.Forwarded is null)
         {
@@ -316,48 +374,87 @@ public sealed class WfpController : IAsyncDisposable
             return;
         }
 
-        IPAddress? listenerAddress = ResolveForwardedListenerAddress(settings);
-        if (listenerAddress is null)
+        if (ingresses.Count == 0)
         {
-            throw new InvalidOperationException(
-                "forwarded 已配置，但找不到 listener 本地地址 L；请设置 ForwardedListenerAddress 或检查入口适配器的 IPv4 地址");
+            throw new InvalidOperationException("forwarded 已配置，但入口 listener 映射为空");
         }
 
-        byte family = (byte)(listenerAddress.AddressFamily == AddressFamily.InterNetwork ? 4 : 6);
-        device.SetForwardedConfig(ProbeForwardedConfig.Disabled(listenerPort, family));
-        VerifyForwardedConfig(device, enabled: false, listenerPort, null);
+        device.SetForwardedIngressConfig(new ProbeForwardedIngressConfig { Enabled = false, Ingresses = ingresses });
+        VerifyForwardedIngressConfig(device, enabled: false, ingresses);
         Report(settings.Report,
-               $"controller-forwarded-config enabled=0 listener_port={listenerPort} (redirect table cleared)");
+               $"controller-forwarded-ingress-config enabled=0 count={ingresses.Count} " +
+               $"listener_port={listenerPort} (redirect table cleared)");
 
-        device.SetForwardedConfig(ProbeForwardedConfig.EnabledFor(listenerPort, listenerAddress));
-        VerifyForwardedConfig(device, enabled: true, listenerPort, listenerAddress);
-        Report(settings.Report,
-               $"controller-forwarded-config enabled=1 listener_port={listenerPort} " +
-               $"listener={listenerAddress} family={family}");
+        device.SetForwardedIngressConfig(ProbeForwardedIngressConfig.EnabledFor(ingresses));
+        VerifyForwardedIngressConfig(device, enabled: true, ingresses);
+        foreach (ProbeForwardedIngress ingress in ingresses)
+        {
+            string index = ingress.IfIndex == ProbeIoctl.ForwardedIngressAnyIfIndex
+                               ? "any"
+                               : ingress.IfIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Report(settings.Report,
+                   $"controller-forwarded-ingress ifindex={index} listener={ingress.ListenerIP}:{ingress.ListenerPort} " +
+                   $"family={ingress.Family}");
+        }
     }
 
-    private static IPAddress? ResolveForwardedListenerAddress(ControllerSettings settings)
+    private static ForwardedListenerPlan ResolveForwardedListenerPlan(ControllerSettings settings)
     {
-        if (settings.ForwardedListenerAddress is not null)
-        {
-            return settings.ForwardedListenerAddress;
-        }
-
         if (settings.Forwarded is null)
         {
-            return null;
+            return new ForwardedListenerPlan(Array.Empty<IPAddress>(), Array.Empty<ForwardedListenerEntry>());
         }
 
-        uint? adapterId = null;
+        var entries = new List<ForwardedListenerEntry>();
+        var addresses = new List<IPAddress>();
+        bool wildcard = false;
         foreach (ForwardedPolicyRule rule in settings.Forwarded.Rules)
         {
-            if (rule.IngressAdapterId.HasValue)
+            if (rule.IngressAdapterId is not uint ifIndex)
             {
-                adapterId = rule.IngressAdapterId;
-                break;
+                wildcard = true;
+                continue;
             }
+
+            // 产品策略：每个 ifindex 只解析一个 L。同一 ifindex 多 L 是驱动/夹具能力，
+            // 产品配置没有“按规则选 L”的字段，不把不确定的映射暴露给用户。
+            if (entries.Any(entry => entry.IfIndex == ifIndex))
+
+            {
+                continue;
+            }
+
+            IPAddress address = settings.ForwardedListenerAddress ?? FindAdapterAddress(ifIndex)
+                ?? throw new InvalidOperationException(
+                    $"入口 ifIndex={ifIndex} 没有可用的 IPv4 地址做 forwarded listener L；" +
+                    "请设置 ForwardedListenerAddress 或检查入口适配器");
+            entries.Add(new ForwardedListenerEntry(ifIndex, address));
+            AddAddress(addresses, address);
         }
 
+        if (wildcard || entries.Count == 0)
+        {
+            IPAddress address = settings.ForwardedListenerAddress
+                ?? (entries.Count > 0 ? entries[0].Address : FindFirstAdapterAddress())
+                ?? throw new InvalidOperationException(
+                    "forwarded 已配置，但找不到 listener 本地地址 L；请设置 ForwardedListenerAddress 或检查入口适配器的 IPv4 地址");
+            entries.Add(new ForwardedListenerEntry(ProbeIoctl.ForwardedIngressAnyIfIndex, address));
+            AddAddress(addresses, address);
+        }
+
+        return new ForwardedListenerPlan(addresses, entries);
+    }
+
+    private static void AddAddress(List<IPAddress> addresses, IPAddress address)
+    {
+        if (!addresses.Contains(address))
+        {
+            addresses.Add(address);
+        }
+    }
+
+    private static IPAddress? FindAdapterAddress(uint ifIndex)
+    {
         foreach (NetworkInterface adapter in NetworkInterface.GetAllNetworkInterfaces())
         {
             if (adapter.OperationalStatus != OperationalStatus.Up)
@@ -367,7 +464,7 @@ public sealed class WfpController : IAsyncDisposable
 
             IPInterfaceProperties properties = adapter.GetIPProperties();
             int? index = properties.GetIPv4Properties()?.Index;
-            if (adapterId.HasValue && (index is null || (uint)index.Value != adapterId.Value))
+            if (index is null || (uint)index.Value != ifIndex)
             {
                 continue;
             }
@@ -385,22 +482,82 @@ public sealed class WfpController : IAsyncDisposable
         return null;
     }
 
+    private static IPAddress? FindFirstAdapterAddress()
+    {
+        foreach (NetworkInterface adapter in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (adapter.OperationalStatus != OperationalStatus.Up)
+            {
+                continue;
+            }
+
+            foreach (UnicastIPAddressInformation unicast in adapter.GetIPProperties().UnicastAddresses)
+            {
+                if (unicast.Address.AddressFamily == AddressFamily.InterNetwork &&
+                    !IPAddress.IsLoopback(unicast.Address))
+                {
+                    return unicast.Address;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static void VerifyForwardedIngressConfig(WfpDeviceClient device,
+                                                     bool enabled,
+                                                     IReadOnlyList<ProbeForwardedIngress> expected)
+    {
+        ProbeForwardedIngressConfig config = device.GetForwardedIngressConfig();
+        if (config.AbiVersion != ProbeIoctl.AbiVersion)
+        {
+            throw new InvalidOperationException(
+                $"forwarded 入口配置 ABI 版本 {config.AbiVersion} 与产品侧 {ProbeIoctl.AbiVersion} 不一致");
+        }
+
+        if (config.Enabled != enabled || config.Ingresses.Count != expected.Count)
+        {
+            throw new InvalidOperationException(
+                $"驱动回读 forwarded 入口配置与下发的不同：enabled={config.Enabled} count={config.Ingresses.Count} " +
+                $"期望 enabled={enabled} count={expected.Count}");
+        }
+
+        for (int index = 0; index < expected.Count; index++)
+        {
+            ProbeForwardedIngress actual = config.Ingresses[index];
+            ProbeForwardedIngress wanted = expected[index];
+            if (actual.IfIndex != wanted.IfIndex || actual.ListenerPort != wanted.ListenerPort ||
+                actual.Family != wanted.Family || actual.ListenerIP is null ||
+                !actual.ListenerIP.Equals(wanted.ListenerIP) || actual.Reserved1 != 0)
+            {
+                throw new InvalidOperationException(
+                    $"驱动回读 forwarded 入口记录不一致：index={index} " +
+                    $"actual=(ifindex={actual.IfIndex}, {actual.ListenerIP}:{actual.ListenerPort}) " +
+                    $"wanted=(ifindex={wanted.IfIndex}, {wanted.ListenerIP}:{wanted.ListenerPort})");
+            }
+        }
+    }
+
     private static void VerifyForwardedConfig(WfpDeviceClient device,
                                               bool enabled,
                                               ushort listenerPort,
                                               IPAddress? listenerAddress)
     {
         ProbeForwardedConfig config = device.GetForwardedConfig();
-        if ((config.Enabled != 0) != enabled || config.ListenerPort != listenerPort)
+        if ((config.Enabled != 0) != enabled)
         {
             throw new InvalidOperationException(
-                $"驱动回读 forwarded 配置与下发的不同：enabled={config.Enabled} port={config.ListenerPort} " +
-                $"期望 enabled={(enabled ? 1 : 0)} port={listenerPort}");
+                $"驱动回读 forwarded 配置与下发的不同：enabled={config.Enabled} 期望 enabled={(enabled ? 1 : 0)}");
         }
 
         if (!enabled)
         {
             return;
+        }
+        if (config.ListenerPort != listenerPort)
+        {
+            throw new InvalidOperationException(
+                $"驱动回读 forwarded listener 端口 {config.ListenerPort} 与下发的 {listenerPort} 不一致");
         }
 
         if (listenerAddress is null || config.ListenerIP is null || !config.ListenerIP.Equals(listenerAddress))
@@ -410,8 +567,9 @@ public sealed class WfpController : IAsyncDisposable
         }
     }
 
+
     private static string DescribeListeners(ListenerSet listeners) =>
-        string.Join(",", listeners.Listeners.Select(listener => listener.LocalEndpoint?.ToString() ?? "?"));
+        string.Join(",", listeners.Endpoints.Select(endpoint => endpoint.EndPoint.ToString()));
 
     private void Report(string line)
     {

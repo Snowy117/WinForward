@@ -33,13 +33,15 @@ public sealed class ForwardedRedirectContextSource : IRedirectContextSource
             return false;
         }
 
-        return TryQuery(ProbeForwardedRedirectQuery.ForClient((ushort)local.Port, remote), out destination, out error);
+        return TryQuery(ProbeForwardedRedirectQuery.ForClient(local, remote), out destination, out error);
+
     }
 
-    public bool TryReadUdp(EndPoint client, int listenerPort, [NotNullWhen(true)] out RedirectDestination? destination,
-                           out string error)
+    public bool TryReadUdp(EndPoint client, IPEndPoint listener,
+                           [NotNullWhen(true)] out RedirectDestination? destination, out string error)
     {
         ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(listener);
         destination = null;
 
         if (client is not IPEndPoint remote)
@@ -48,14 +50,15 @@ public sealed class ForwardedRedirectContextSource : IRedirectContextSource
             return false;
         }
 
-        if (listenerPort is <= 0 or > 65535)
+        if (listener.Port is <= 0 or > 65535)
         {
-            error = $"listener 端口 {listenerPort} 越界";
+            error = $"listener 端口 {listener.Port} 越界";
             return false;
         }
 
-        return TryQuery(ProbeForwardedRedirectQuery.ForClientUdp((ushort)listenerPort, remote), out destination, out error);
+        return TryQuery(ProbeForwardedRedirectQuery.ForClientUdp(listener, remote), out destination, out error);
     }
+
 
     private bool TryQuery(ProbeForwardedRedirectQuery query, out RedirectDestination? destination, out string error)
     {

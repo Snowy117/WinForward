@@ -3,12 +3,15 @@ using System.Runtime.InteropServices;
 namespace WinForward.Userland.Device;
 
 /// <summary>
-/// <c>probe_forwarded_stats</c> 的逐字段镜像：400 字节，Pack = 8。
+/// <c>probe_forwarded_stats</c> 的逐字段镜像：456 字节，Pack = 8；v6 的 400 字节前缀不变，
+/// v7 在尾部追加 7 个 u64（回程歧义 / 未配置入口 / 多 L 选择 / UDP 混合 NBL 丢弃）。
 /// 恒等式（对任意 reset 之后的增量成立）：
 /// <c>classify_calls == no_write_right + inbound_frames + outbound_frames</c>；
 /// 帧去向 = self_injected + no_table + malformed + non_ip + permitted + blocked + redirected；
 /// <c>matched == matched_permit + matched_block + matched_redirect</c>；
-/// <c>matched_redirect == redirect_ingress + redirect_blocked</c>。
+/// <c>matched_redirect + udp_fragmented == redirect_ingress + redirect_blocked + udp_ingress + udp_blocked</c>；
+/// <c>permitted == matched_permit + fallback_permit + udp_return_miss</c>；
+/// <c>blocked</c> 另含 <c>redirect_return_ambiguous</c> / <c>udp_return_ambiguous</c>。
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
 public struct ProbeForwardedStats
@@ -69,4 +72,15 @@ public struct ProbeForwardedStats
     public uint RedirectHighWater;
     public uint LastStatus;
     public uint AbiVersion;
+
+    // v7 追加（v6 的 400 字节前缀不变）：per-ingress/多 L 的失败与歧义计数。
+    public ulong RedirectReturnAmbiguous;
+    public ulong UdpReturnAmbiguous;
+    public ulong RedirectNoIngress;
+    public ulong UdpNoIngress;
+    public ulong RedirectMultiL;
+    public ulong UdpMultiL;
+
+    // v7 追加诊断：UDP 回程混合 NBL 中未命中的候选帧（随原 NBL 一起 block，不能单帧 permit）。
+    public ulong UdpReturnMissBlocked;
 }

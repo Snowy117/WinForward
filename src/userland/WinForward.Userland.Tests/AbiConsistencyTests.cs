@@ -24,6 +24,9 @@ internal static class AbiConsistencyTests
         "probe_forwarded_info",
         "probe_forwarded_stats",
         "probe_forwarded_config",
+        "probe_forwarded_ingress",
+        "probe_forwarded_ingress_config",
+
         "probe_forwarded_redirect_query",
         "probe_forwarded_redirect",
         "process_path_measurement",
@@ -39,6 +42,9 @@ internal static class AbiConsistencyTests
         "probe_forwarded_info",
         "probe_forwarded_stats",
         "probe_forwarded_config",
+        "probe_forwarded_ingress",
+        "probe_forwarded_ingress_config",
+
         "probe_forwarded_redirect_query",
         "probe_forwarded_redirect",
         "redirect_context",
@@ -160,6 +166,9 @@ internal static class AbiConsistencyTests
             ("probe_forwarded_info", "ProbeForwardedInfoSize"),
             ("probe_forwarded_stats", "ProbeForwardedStatsSize"),
             ("probe_forwarded_config", "ProbeForwardedConfigSize"),
+            ("probe_forwarded_ingress", "ProbeForwardedIngressSize"),
+            ("probe_forwarded_ingress_config", "ProbeForwardedIngressConfigSize"),
+
             ("probe_forwarded_redirect_query", "ProbeForwardedRedirectQuerySize"),
             ("probe_forwarded_redirect", "ProbeForwardedRedirectSize"),
         };

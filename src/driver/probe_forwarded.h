@@ -53,7 +53,11 @@ void probe_forwarded_release_all() noexcept;
 // ioctl_set_forwarded_blob。非法整块拒绝、旧表与 generation 不变。
 [[nodiscard]] NTSTATUS probe_forwarded_apply_blob(const void* buffer, ULONG input_length) noexcept;
 [[nodiscard]] NTSTATUS probe_forwarded_apply_config(const void* buffer, ULONG input_length) noexcept;
+// v7：per-ingress listener 映射。两种下发方式互斥：后下发的替换前一种的有效映射。
+[[nodiscard]] NTSTATUS probe_forwarded_apply_ingress_config(const void* buffer, ULONG input_length) noexcept;
 [[nodiscard]] NTSTATUS probe_forwarded_get_config(void* buffer, ULONG output_length) noexcept;
+// 输出 16 字节头 + ingress_count 条记录；written 是实际写回的字节数。
+[[nodiscard]] NTSTATUS probe_forwarded_get_ingress_config(void* buffer, ULONG output_length, ULONG& written) noexcept;
 [[nodiscard]] NTSTATUS
 probe_forwarded_query_redirect(const void* buffer, ULONG input_length, void* output, ULONG output_length) noexcept;
 void probe_forwarded_info_snapshot(probe_forwarded_info& info) noexcept;

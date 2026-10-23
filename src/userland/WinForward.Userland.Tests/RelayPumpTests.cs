@@ -18,6 +18,32 @@ internal static class RelayPumpTests
     {
         TestRunner.Add("relay/单方向 RST 后兄弟泵 1 秒内退出", RstCancelsSiblingPump);
         TestRunner.Add("relay/双向 EOF 保留半关闭且数据完整", HalfCloseKeepsDataFlowing);
+        TestRunner.Add("relay/ListenerSet 同一端口绑定多个 L", ListenerSetBindsMultipleLocalAddresses);
+
+    }
+
+    private static void ListenerSetBindsMultipleLocalAddresses()
+    {
+        IPAddress[] addresses = { IPAddress.Loopback, IPAddress.IPv6Loopback };
+        using (ListenerSet set = ListenerSet.Bind(addresses))
+        {
+            Check.Equal(2, set.Endpoints.Count, "两个 L 各一个 endpoint");
+            Check.Equal(2, set.Listeners.Count, "两个 L 各一个 TCP listener");
+            Check.Equal(2, set.UdpSockets.Count, "两个 L 各一个 UDP socket");
+            Check.True(set.Endpoints.All(endpoint => endpoint.EndPoint.Port == set.Port),
+                       "所有 L 共用同一个端口");
+
+            Check.True(set.Endpoints.Select(endpoint => endpoint.EndPoint.Address).ToHashSet().SetEquals(addresses),
+                       "endpoint 地址集合完整");
+
+            foreach (UdpListener udp in set.UdpSockets)
+            {
+                Check.Equal(set.Port, ((IPEndPoint)udp.Socket.LocalEndPoint!).Port, "UDP 绑定到同一端口");
+            }
+        }
+
+        using ListenerSet wildcard = ListenerSet.Bind();
+        Check.Equal(2, wildcard.Endpoints.Count, "空地址列表退回 v4/v6 通配绑定");
     }
 
     private static void RstCancelsSiblingPump()

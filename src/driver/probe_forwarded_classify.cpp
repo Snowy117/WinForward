@@ -178,15 +178,15 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
 
     if (inbound && facts.protocol == ip_protocol_udp && facts.fragmented)
     {
-        probe_forwarded_config config{};
+        std::uint32_t enabled = 0;
         {
             KIRQL old_irql{};
             const bool raised = forwarded_lock(old_irql);
-            config = state.config;
+            enabled = state.config.enabled;
             forwarded_unlock(raised, old_irql);
         }
 
-        if (config.enabled != 0)
+        if (enabled != 0)
         {
             bool block_fragment = false;
             if (facts.first_fragment)
@@ -288,10 +288,18 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
                     if (facts.protocol == ip_protocol_udp)
                     {
                         delta.udp_created = 1;
+                        if (plan.multi_l)
+                        {
+                            delta.udp_multi_l = 1;
+                        }
                     }
                     else
                     {
                         delta.redirect_created = 1;
+                        if (plan.multi_l)
+                        {
+                            delta.redirect_multi_l = 1;
+                        }
                     }
                 }
 
@@ -388,7 +396,9 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
                         mark_forwarded_redirect_closing(state,
                                                         closing_facts.family,
                                                         ip_protocol_tcp,
+                                                        plan.listener_address,
                                                         plan.listener_port,
+
                                                         closing_facts.source_address,
                                                         closing_facts.source_port);
                     }
@@ -411,12 +421,21 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
             else
             {
                 delta.blocked = 1;
+                if (facts.protocol != ip_protocol_udp)
+                {
+                    delta.redirect_blocked = 1;
+                }
+
                 if (facts.protocol == ip_protocol_udp)
                 {
                     delta.udp_blocked = 1;
                     if (plan.no_config)
                     {
                         delta.udp_no_config = 1;
+                    }
+                    else if (plan.no_ingress)
+                    {
+                        delta.udp_no_ingress = 1;
                     }
                     else if (plan.capacity)
                     {
@@ -430,6 +449,10 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
                 else if (plan.no_config)
                 {
                     delta.redirect_no_config = 1;
+                }
+                else if (plan.no_ingress)
+                {
+                    delta.redirect_no_ingress = 1;
                 }
                 else if (plan.capacity)
                 {

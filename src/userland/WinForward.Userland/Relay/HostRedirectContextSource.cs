@@ -29,12 +29,14 @@ public sealed class HostRedirectContextSource : IRedirectContextSource
     }
 
     /// <summary>host UDP 的回程由 listener 用同一个 socket 完成，不使用 forwarded redirect 表。</summary>
-    public bool TryReadUdp(EndPoint client, int listenerPort, [NotNullWhen(true)] out RedirectDestination? destination,
-                           out string error)
+    public bool TryReadUdp(EndPoint client, IPEndPoint listener,
+                           [NotNullWhen(true)] out RedirectDestination? destination, out string error)
     {
         ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(listener);
         destination = null;
         error = "host UDP 中继不在本仓库";
         return false;
     }
+
 }

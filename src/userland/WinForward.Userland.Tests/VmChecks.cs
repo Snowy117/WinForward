@@ -41,6 +41,8 @@ internal static class VmChecks
             {
                 CheckAbiHandshake(device);
                 CheckStructureSizes(device);
+                CheckForwardedLegacySizes(device);
+
                 CheckProcessPathBoundary(device);
                 CheckConfigRoundTrip(device);
                 CheckRuleOrderDifferential(device);
@@ -101,6 +103,40 @@ internal static class VmChecks
         Assert("probe_event 每个 64 字节", events.Length % DeviceLayout.ProbeEventSize == 0,
                $"返回 {events.Length} 字节");
     }
+    private static void CheckForwardedLegacySizes(WfpDeviceClient device)
+    {
+        ProbeForwardedRedirectQuery query = default;
+        query.ListenerPort = 40000;
+        query.Family = 4;
+        query.ClientPort = 43210;
+        query.Protocol = 6;
+        byte[] full = MemoryMarshal.AsBytes(new ReadOnlySpan<ProbeForwardedRedirectQuery>(in query)).ToArray();
+        full[4] = 127;
+        full[5] = 0;
+        full[6] = 0;
+        full[7] = 1;
+
+        ExpectError("forwarded query 20 字节被拒绝", 87,
+                    () => device.RawIoctl(ProbeIoctl.QueryForwardedRedirectCode, full[..20], 64));
+        ExpectError("forwarded query 24 字节（legacy）被接受，无表项返回 NOT_FOUND", 1168,
+                    () => device.RawIoctl(ProbeIoctl.QueryForwardedRedirectCode, full[..24], 64));
+        ExpectError("forwarded query 输出 56 字节被拒绝", 87,
+                    () => device.RawIoctl(ProbeIoctl.QueryForwardedRedirectCode, full[..24], 56));
+        ExpectError("forwarded query 40 字节（v7）被接受，无表项返回 NOT_FOUND", 1168,
+                    () => device.RawIoctl(ProbeIoctl.QueryForwardedRedirectCode, full, 88));
+
+        byte[] stats400 = device.RawIoctl(ProbeIoctl.GetForwardedStatsCode, Array.Empty<byte>(), 400);
+        Assert("forwarded stats 400 字节（v6）兼容", stats400.Length == 400, $"实际 {stats400.Length} 字节");
+        byte[] stats448 = device.RawIoctl(ProbeIoctl.GetForwardedStatsCode, Array.Empty<byte>(), 448);
+        Assert("forwarded stats 448 字节（v7）兼容", stats448.Length == 448, $"实际 {stats448.Length} 字节");
+        byte[] stats456 = device.RawIoctl(ProbeIoctl.GetForwardedStatsCode, Array.Empty<byte>(),
+                                          DeviceLayout.ProbeForwardedStatsSize);
+        Assert("forwarded stats 456 字节（v7+）", stats456.Length == DeviceLayout.ProbeForwardedStatsSize,
+               $"实际 {stats456.Length} 字节");
+        ExpectError("forwarded stats 392 字节被拒绝", 122,
+                    () => device.RawIoctl(ProbeIoctl.GetForwardedStatsCode, Array.Empty<byte>(), 392));
+    }
+
 
     private static void CheckProcessPathBoundary(WfpDeviceClient device)
     {

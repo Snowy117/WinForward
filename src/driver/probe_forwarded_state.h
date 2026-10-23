@@ -17,6 +17,27 @@
 namespace winforward::wfp::probe
 {
 
+struct forwarded_runtime_endpoint
+{
+    std::uint32_t ifindex;
+    std::uint16_t listener_port;
+    std::uint8_t family;
+    std::uint8_t reserved0;
+    std::uint8_t listener_address[16];
+    std::uint32_t reserved1;
+};
+
+// 有效映射只有一张表：legacy 28 字节 config 编译成一条 ifindex=0xFFFFFFFF 的通配记录；
+// per-ingress config 原样保存。enabled=0 时记录仍保留用于回读，但不参与 DNAT。
+struct forwarded_runtime_config
+{
+    std::uint32_t enabled;
+    std::uint32_t ingress_count;
+    forwarded_runtime_endpoint ingresses[forwarded_ingress_capacity];
+};
+
+static_assert(sizeof(forwarded_runtime_endpoint) == sizeof(probe_forwarded_ingress));
+
 struct forwarded_state
 {
     forwarded_table* table;
@@ -31,7 +52,7 @@ struct forwarded_state
     std::uint64_t delayed_completions;
     layer_state inbound;
     layer_state outbound;
-    probe_forwarded_config config;
+    forwarded_runtime_config config;
     forwarded_redirect_table redirects;
     forwarded_fragment_slot fragment_blocks[forwarded_fragment_capacity];
     std::uint32_t fragment_block_cursor;
@@ -66,6 +87,58 @@ _IRQL_requires_(DISPATCH_LEVEL)
     {
         KeReleaseSpinLockFromDpcLevel(&g_forwarded_state.lock);
     }
+}
+
+// 入口 DNAT 的 listener 记录：先精确 ifindex，找不到再退回 0xFFFFFFFF 通配记录。
+[[nodiscard]] inline const forwarded_runtime_endpoint*
+find_forwarded_endpoint(const forwarded_runtime_config& config, std::uint32_t ifindex, std::uint8_t family) noexcept
+{
+    const forwarded_runtime_endpoint* wildcard = nullptr;
+    for (std::uint32_t index = 0; index < config.ingress_count; ++index)
+    {
+        const forwarded_runtime_endpoint& endpoint = config.ingresses[index];
+        if (endpoint.family != family)
+        {
+            continue;
+        }
+        if (endpoint.ifindex == ifindex)
+        {
+            return &endpoint;
+        }
+        if (endpoint.ifindex == forwarded_ingress_any_ifindex)
+        {
+            wildcard = &endpoint;
+        }
+    }
+    return wildcard;
+}
+
+// 出向帧是否可能是一条 listener 回包：端口必须匹配某条启用记录；精确记录还要求源地址等于 L。
+// 通配记录（legacy 或显式 any）只按端口匹配，与 v5/v6 行为一致。
+[[nodiscard]] inline bool forwarded_return_endpoint_matches(const forwarded_runtime_config& config,
+                                                            std::uint8_t family,
+                                                            const std::uint8_t* source_address,
+                                                            std::uint16_t source_port) noexcept
+{
+    if (config.enabled == 0)
+    {
+        return false;
+    }
+
+    for (std::uint32_t index = 0; index < config.ingress_count; ++index)
+    {
+        const forwarded_runtime_endpoint& endpoint = config.ingresses[index];
+        if (endpoint.family != family || endpoint.listener_port != source_port)
+        {
+            continue;
+        }
+        if (endpoint.ifindex == forwarded_ingress_any_ifindex ||
+            RtlEqualMemory(endpoint.listener_address, source_address, 16))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline forwarded_fragment_key make_forwarded_fragment_key(const forwarded_frame_facts& facts,
@@ -274,6 +347,14 @@ inline void publish_forwarded_counters(forwarded_state& state, const probe_forwa
     state.stats.udp_inject_failed += delta.udp_inject_failed;
     state.stats.udp_expired += delta.udp_expired;
     state.stats.udp_multi_nb += delta.udp_multi_nb;
+    state.stats.redirect_return_ambiguous += delta.redirect_return_ambiguous;
+    state.stats.udp_return_ambiguous += delta.udp_return_ambiguous;
+    state.stats.redirect_no_ingress += delta.redirect_no_ingress;
+    state.stats.udp_no_ingress += delta.udp_no_ingress;
+    state.stats.redirect_multi_l += delta.redirect_multi_l;
+    state.stats.udp_multi_l += delta.udp_multi_l;
+    state.stats.udp_return_miss_blocked += delta.udp_return_miss_blocked;
+
     forwarded_unlock(raised, old_irql);
 }
 

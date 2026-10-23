@@ -3,10 +3,11 @@ using System.Runtime.InteropServices;
 
 namespace WinForward.Probe;
 
-// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v6）。
+// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v7）。
 internal static class Protocol
 {
-    public const uint AbiVersion = 6;
+    public const uint AbiVersion = 7;
+
 
     // CTL_CODE(FILE_DEVICE_UNKNOWN, function, METHOD_BUFFERED, FILE_ANY_ACCESS)
     private static uint MakeIoctl(uint function) => (0x22u << 16) | (function << 2);
@@ -30,8 +31,16 @@ internal static class Protocol
     public const uint IoctlSetForwardedConfig = 0x80C;
     public const uint IoctlGetForwardedConfig = 0x80D;
     public const uint IoctlQueryForwardedRedirect = 0x80E;
+
+    // v7：per-ingress listener 映射（16 字节头 + 0..16 条 28 字节记录）。
+    public const uint IoctlSetForwardedIngressConfig = 0x80F;
+    public const uint IoctlGetForwardedIngressConfig = 0x810;
+    public const uint ForwardedIngressCapacity = 16;
+    public const uint ForwardedIngressAnyIfIndex = 0xFFFFFFFF;
+
     public static uint SetConfigCode => MakeIoctl(IoctlSetConfig);
     public static uint GetConfigCode => MakeIoctl(IoctlGetConfig);
+
     public static uint GetStatsCode => MakeIoctl(IoctlGetStats);
     public static uint ResetStatsCode => MakeIoctl(IoctlResetStats);
     public static uint GetEventsCode => MakeIoctl(IoctlGetEvents);
@@ -45,6 +54,9 @@ internal static class Protocol
     public static uint SetForwardedConfigCode => MakeIoctl(IoctlSetForwardedConfig);
     public static uint GetForwardedConfigCode => MakeIoctl(IoctlGetForwardedConfig);
     public static uint QueryForwardedRedirectCode => MakeIoctl(IoctlQueryForwardedRedirect);
+    public static uint SetForwardedIngressConfigCode => MakeIoctl(IoctlSetForwardedIngressConfig);
+    public static uint GetForwardedIngressConfigCode => MakeIoctl(IoctlGetForwardedIngressConfig);
+
     public const uint MaxSelfProcessIds = 8;
     public const uint RuleBlobMaxSize = 64 * 1024;
 
@@ -223,6 +235,14 @@ internal struct ProbeForwardedStats
     public uint RedirectHighWater;
     public uint LastStatus;
     public uint AbiVersion;
+    public ulong RedirectReturnAmbiguous;
+    public ulong UdpReturnAmbiguous;
+    public ulong RedirectNoIngress;
+    public ulong UdpNoIngress;
+    public ulong RedirectMultiL;
+    public ulong UdpMultiL;
+    public ulong UdpReturnMissBlocked;
+
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -237,6 +257,45 @@ internal unsafe struct ProbeForwardedConfig
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal unsafe struct ProbeForwardedIngressConfig
+{
+    public uint AbiVersion;
+    public uint Enabled;
+    public uint IngressCount;
+    public uint Reserved0;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal unsafe struct ProbeForwardedIngress
+{
+    public uint IfIndex;
+    public ushort ListenerPort;
+    public byte Family;
+    public byte Reserved0;
+    public fixed byte ListenerAddress[16];
+     public uint Reserved1;
+
+     public readonly IPAddress? ListenerIP
+     {
+         get
+         {
+             if (Family != 4 && Family != 6)
+             {
+                 return null;
+             }
+
+             fixed (byte* pointer = ListenerAddress)
+             {
+                 return Family == 4
+                            ? new IPAddress(new ReadOnlySpan<byte>(pointer, 4))
+                            : new IPAddress(new ReadOnlySpan<byte>(pointer, 16));
+             }
+         }
+     }
+}
+
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal unsafe struct ProbeForwardedRedirectQuery
 {
     public ushort ListenerPort;
@@ -246,13 +305,15 @@ internal unsafe struct ProbeForwardedRedirectQuery
     public ushort ClientPort;
     public byte Protocol; // 0/6 = TCP，17 = UDP
     public byte Reserved1;
+    public fixed byte ListenerAddress[16];
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal unsafe struct ProbeForwardedRedirect
 {
     public const uint MagicValue = 0x31524657; // "WFR1"
-    public const ushort VersionValue = 1;
+    public const ushort VersionValue = 2;
+    public const ushort LegacyVersionValue = 1;
 
     public uint Magic;
     public ushort Version;
@@ -268,6 +329,9 @@ internal unsafe struct ProbeForwardedRedirect
     public uint UpstreamId;
     public uint RuleIndex;
     public uint State;
+    public fixed byte ListenerAddress[16];
+    public uint Generation;
+    public uint Reserved1;
 
     public IPAddress ClientIP
     {
@@ -291,9 +355,26 @@ internal unsafe struct ProbeForwardedRedirect
         }
     }
 
+    public IPAddress? ListenerIP
+    {
+        get
+        {
+            if (Version < VersionValue)
+            {
+                return null;
+            }
+
+            fixed (byte* pointer = ListenerAddress)
+            {
+                return AddressOf(pointer, Family);
+            }
+        }
+    }
+
     private static IPAddress AddressOf(byte* address, byte family) =>
         family == 4 ? new IPAddress(new ReadOnlySpan<byte>(address, 4)) : new IPAddress(new ReadOnlySpan<byte>(address, 16));
 }
+
 
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
 internal unsafe struct ProbeEvent
@@ -338,10 +419,13 @@ internal static class ProtocolLayout
         Check<ProbeStats>(264, "ProbeStats");
         Check<ProbeRuleInfo>(32, "ProbeRuleInfo");
         Check<ProbeForwardedInfo>(32, "ProbeForwardedInfo");
-        Check<ProbeForwardedStats>(400, "ProbeForwardedStats");
+        Check<ProbeForwardedStats>(456, "ProbeForwardedStats");
         Check<ProbeForwardedConfig>(28, "ProbeForwardedConfig");
-        Check<ProbeForwardedRedirectQuery>(24, "ProbeForwardedRedirectQuery");
-        Check<ProbeForwardedRedirect>(64, "ProbeForwardedRedirect");
+        Check<ProbeForwardedIngressConfig>(16, "ProbeForwardedIngressConfig");
+        Check<ProbeForwardedIngress>(28, "ProbeForwardedIngress");
+        Check<ProbeForwardedRedirectQuery>(40, "ProbeForwardedRedirectQuery");
+        Check<ProbeForwardedRedirect>(88, "ProbeForwardedRedirect");
+
         Check<ProbeEvent>(64, "ProbeEvent");
         Check<RedirectContext>(36, "RedirectContext");
     }

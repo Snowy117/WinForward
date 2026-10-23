@@ -16,7 +16,7 @@ internal static class LayoutTests
         TestRunner.Add("layout/网段记录 20 字节", NetworkSize);
         TestRunner.Add("layout/网段逐字段偏移", NetworkOffsets);
         TestRunner.Add("layout/托管尺寸与 Marshal 尺寸一致", ManagedSizes);
-        TestRunner.Add("layout/ABI v6 事件、统计与 forwarded 结构", AbiVersionSix);
+        TestRunner.Add("layout/ABI v7 事件、统计与 forwarded 结构", AbiVersionSeven);
         TestRunner.Add("layout/头部黄金字节序列", HeaderGoldenBytes);
         TestRunner.Add("layout/blob 头部魔数在内存中是 WRB1", MagicBytes);
         TestRunner.Add("layout/部署目标是主机小端", LittleEndianHost);
@@ -157,9 +157,9 @@ internal static class LayoutTests
         Check.True(BitConverter.IsLittleEndian, "blob 是主机字节序的 ABI，部署目标只有 Windows x64 小端");
     }
 
-    private static void AbiVersionSix()
+    private static void AbiVersionSeven()
     {
-        Check.Equal(6U, ProbeIoctl.AbiVersion, "控制面 ABI 版本");
+        Check.Equal(7U, ProbeIoctl.AbiVersion, "控制面 ABI 版本");
         Check.Equal(64, DeviceLayout.ProbeEventSize, "probe_event 尺寸");
         Check.Equal(264, DeviceLayout.ProbeStatsSize, "probe_stats 尺寸");
         Check.Equal(58L, (long)Marshal.OffsetOf<ProbeEvent>(nameof(ProbeEvent.Protocol)), "probe_event.protocol 偏移");
@@ -172,7 +172,7 @@ internal static class LayoutTests
         Check.Equal(256L, (long)Marshal.OffsetOf<ProbeStats>(nameof(ProbeStats.LastStatus)), "probe_stats.last_status 偏移");
         Check.Equal(260L, (long)Marshal.OffsetOf<ProbeStats>(nameof(ProbeStats.AbiVersion)), "probe_stats.abi_version 偏移");
         Check.Equal(32, DeviceLayout.ProbeForwardedInfoSize, "probe_forwarded_info 尺寸");
-        Check.Equal(400, DeviceLayout.ProbeForwardedStatsSize, "probe_forwarded_stats 尺寸");
+        Check.Equal(456, DeviceLayout.ProbeForwardedStatsSize, "probe_forwarded_stats 尺寸");
         Check.Equal(28L,
                     (long)Marshal.OffsetOf<ProbeForwardedInfo>(nameof(ProbeForwardedInfo.Reserved0)),
                     "probe_forwarded_info.reserved0 偏移");
@@ -195,8 +195,11 @@ internal static class LayoutTests
                     (long)Marshal.OffsetOf<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpMultiNb)),
                     "probe_forwarded_stats.udp_multi_nb 偏移");
         Check.Equal(28, DeviceLayout.ProbeForwardedConfigSize, "probe_forwarded_config 尺寸");
-        Check.Equal(24, DeviceLayout.ProbeForwardedRedirectQuerySize, "probe_forwarded_redirect_query 尺寸");
-        Check.Equal(64, DeviceLayout.ProbeForwardedRedirectSize, "probe_forwarded_redirect 尺寸");
+        Check.Equal(40, DeviceLayout.ProbeForwardedRedirectQuerySize, "probe_forwarded_redirect_query 尺寸");
+        Check.Equal(88, DeviceLayout.ProbeForwardedRedirectSize, "probe_forwarded_redirect 尺寸");
+        Check.Equal(28, DeviceLayout.ProbeForwardedIngressSize, "probe_forwarded_ingress 尺寸");
+        Check.Equal(16, DeviceLayout.ProbeForwardedIngressConfigSize, "probe_forwarded_ingress_config 尺寸");
+
         Check.Equal(26L,
                     (long)Marshal.OffsetOf<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.ServerAddress)),
                     "probe_forwarded_redirect.server_address 偏移");

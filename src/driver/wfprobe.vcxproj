@@ -50,6 +50,8 @@
 
     <ClCompile Include="probe_driver.cpp" />
     <ClCompile Include="probe_forwarded.cpp" />
+    <ClCompile Include="probe_forwarded_config.cpp" />
+
     <ClCompile Include="probe_forwarded_classify.cpp" />
     <ClCompile Include="probe_forwarded_frame.cpp" />
     <ClCompile Include="probe_forwarded_redirect.cpp" />

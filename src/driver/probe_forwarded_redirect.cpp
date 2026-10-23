@@ -1,283 +1,11 @@
 #include "probe_forwarded_redirect.h"
 
 #include "probe_driver.h"
+#include "probe_forwarded_redirect_internal.h"
 
 namespace winforward::wfp::probe
 {
-namespace
-{
-
-// FNV-1a：短 key、无分配、DISPATCH 安全。两条索引各自带「域分隔」字节，避免跨 key 碰撞。
-constexpr std::uint32_t hash_offset_basis = 2166136261U;
-constexpr std::uint32_t hash_prime = 16777619U;
-
-void hash_bytes(std::uint32_t& hash, const std::uint8_t* data, std::uint32_t size) noexcept
-{
-    for (std::uint32_t index = 0; index < size; ++index)
-    {
-        hash ^= data[index];
-        hash *= hash_prime;
-    }
-}
-
-void hash_byte(std::uint32_t& hash, std::uint8_t value) noexcept
-{
-    hash ^= value;
-    hash *= hash_prime;
-}
-
-void hash_u16(std::uint32_t& hash, std::uint16_t value) noexcept
-{
-    hash_byte(hash, static_cast<std::uint8_t>(value & 0xFFU));
-    hash_byte(hash, static_cast<std::uint8_t>((value >> 8) & 0xFFU));
-}
-
-void hash_u32(std::uint32_t& hash, std::uint32_t value) noexcept
-{
-    hash_byte(hash, static_cast<std::uint8_t>(value & 0xFFU));
-    hash_byte(hash, static_cast<std::uint8_t>((value >> 8) & 0xFFU));
-    hash_byte(hash, static_cast<std::uint8_t>((value >> 16) & 0xFFU));
-    hash_byte(hash, static_cast<std::uint8_t>((value >> 24) & 0xFFU));
-}
-
-std::uint32_t ingress_hash(std::uint32_t ingress_ifindex,
-                           std::uint8_t family,
-                           std::uint8_t protocol,
-                           const std::uint8_t* client_address,
-                           std::uint16_t client_port,
-                           const std::uint8_t* server_address,
-                           std::uint16_t server_port) noexcept
-{
-    std::uint32_t hash = hash_offset_basis;
-    hash_byte(hash, 0x49); // 'I'
-    hash_u32(hash, ingress_ifindex);
-    hash_byte(hash, family);
-    hash_byte(hash, protocol);
-    hash_bytes(hash, client_address, 16);
-    hash_u16(hash, client_port);
-    hash_bytes(hash, server_address, 16);
-    hash_u16(hash, server_port);
-    return hash;
-}
-
-std::uint32_t return_hash(std::uint8_t family,
-                          std::uint8_t protocol,
-                          std::uint16_t listener_port,
-                          const std::uint8_t* client_address,
-                          std::uint16_t client_port) noexcept
-{
-    std::uint32_t hash = hash_offset_basis;
-    hash_byte(hash, 0x52); // 'R'
-    hash_byte(hash, family);
-    hash_byte(hash, protocol);
-    hash_u16(hash, listener_port);
-    hash_bytes(hash, client_address, 16);
-    hash_u16(hash, client_port);
-    return hash;
-}
-
-bool same_ingress_key(const forwarded_redirect_entry& entry,
-                      std::uint32_t ingress_ifindex,
-                      std::uint8_t family,
-                      std::uint8_t protocol,
-                      const std::uint8_t* client_address,
-                      std::uint16_t client_port,
-                      const std::uint8_t* server_address,
-                      std::uint16_t server_port) noexcept
-{
-    return entry.ingress_ifindex == ingress_ifindex && entry.family == family && entry.protocol == protocol &&
-           entry.client_port == client_port && entry.server_port == server_port &&
-           RtlEqualMemory(entry.client_address, client_address, 16) &&
-           RtlEqualMemory(entry.server_address, server_address, 16);
-}
-
-bool same_return_key(const forwarded_redirect_entry& entry,
-                     std::uint8_t family,
-                     std::uint8_t protocol,
-                     std::uint16_t listener_port,
-                     const std::uint8_t* client_address,
-                     std::uint16_t client_port) noexcept
-{
-    return entry.family == family && entry.protocol == protocol && entry.listener_port == listener_port &&
-           entry.client_port == client_port && RtlEqualMemory(entry.client_address, client_address, 16);
-}
-
-std::uint64_t now_100ns() noexcept
-{
-    return static_cast<std::uint64_t>(KeQueryInterruptTime());
-}
-
-bool expired(const forwarded_redirect_entry& entry, std::uint64_t now) noexcept
-{
-    if (entry.state == 0)
-    {
-        return false;
-    }
-
-    std::uint64_t timeout = forwarded_redirect_established_timeout;
-    if (entry.protocol == 17)
-    {
-        // UDP 没有连接状态：首个 datagram 建表后 60s 无活动即回收。
-        timeout = forwarded_redirect_udp_timeout;
-    }
-    else if (entry.state == forwarded_redirect_state_syn)
-    {
-        timeout = forwarded_redirect_syn_timeout;
-    }
-    else if (entry.state == forwarded_redirect_state_closing)
-    {
-        timeout = forwarded_redirect_closing_timeout;
-    }
-    return now > entry.last_activity && (now - entry.last_activity) > timeout;
-}
-
-void fill_snapshot(const forwarded_redirect_entry& entry, forwarded_redirect_snapshot& snapshot) noexcept
-{
-    snapshot.ingress_ifindex = entry.ingress_ifindex;
-    snapshot.ndis_port = entry.ndis_port;
-    snapshot.upstream_id = entry.upstream_id;
-    snapshot.rule_index = entry.rule_index;
-    snapshot.generation = entry.generation;
-    snapshot.state = entry.state;
-    snapshot.family = entry.family;
-    snapshot.protocol = entry.protocol;
-    snapshot.client_port = entry.client_port;
-    snapshot.server_port = entry.server_port;
-    snapshot.listener_port = entry.listener_port;
-    RtlCopyMemory(snapshot.client_mac, entry.client_mac, 6);
-    RtlCopyMemory(snapshot.local_mac, entry.local_mac, 6);
-    RtlCopyMemory(snapshot.client_address, entry.client_address, 16);
-    RtlCopyMemory(snapshot.server_address, entry.server_address, 16);
-}
-
-void rebuild_free_list(forwarded_redirect_table& table) noexcept
-{
-    table.free_head = table.entries != nullptr ? 1 : 0;
-    if (table.entries == nullptr)
-    {
-        return;
-    }
-
-    for (std::uint32_t index = 0; index < forwarded_redirect_capacity; ++index)
-    {
-        forwarded_redirect_entry& entry = table.entries[index];
-        entry.state = 0;
-        entry.next_ingress = 0;
-        entry.next_return = 0;
-        entry.next_free = (index + 1 < forwarded_redirect_capacity) ? index + 2 : 0;
-    }
-    table.active = 0;
-}
-
-void remove_entry(forwarded_redirect_table& table, std::uint32_t index) noexcept
-{
-    forwarded_redirect_entry& entry = table.entries[index];
-    if (entry.state == 0)
-    {
-        return;
-    }
-
-    const std::uint32_t ingress_bucket = ingress_hash(entry.ingress_ifindex,
-                                                      entry.family,
-                                                      entry.protocol,
-                                                      entry.client_address,
-                                                      entry.client_port,
-                                                      entry.server_address,
-                                                      entry.server_port) &
-                                         forwarded_redirect_bucket_mask;
-    std::uint32_t* link = &table.ingress_buckets[ingress_bucket];
-    while (*link != 0)
-    {
-        const std::uint32_t current = *link - 1;
-        if (current == index)
-        {
-            *link = table.entries[current].next_ingress;
-            break;
-        }
-        link = &table.entries[current].next_ingress;
-    }
-
-    const std::uint32_t return_bucket =
-        return_hash(entry.family, entry.protocol, entry.listener_port, entry.client_address, entry.client_port) &
-        forwarded_redirect_bucket_mask;
-    link = &table.return_buckets[return_bucket];
-    while (*link != 0)
-    {
-        const std::uint32_t current = *link - 1;
-        if (current == index)
-        {
-            *link = table.entries[current].next_return;
-            break;
-        }
-        link = &table.entries[current].next_return;
-    }
-
-    entry.state = 0;
-    entry.next_ingress = 0;
-    entry.next_return = 0;
-    entry.next_free = table.free_head;
-    table.free_head = index + 1;
-    if (table.active > 0)
-    {
-        --table.active;
-    }
-}
-
-forwarded_redirect_entry* find_ingress_entry(forwarded_redirect_table& table,
-                                             std::uint32_t ingress_ifindex,
-                                             std::uint8_t family,
-                                             std::uint8_t protocol,
-                                             const std::uint8_t* client_address,
-                                             std::uint16_t client_port,
-                                             const std::uint8_t* server_address,
-                                             std::uint16_t server_port,
-                                             std::uint32_t& index) noexcept
-{
-    const std::uint32_t bucket =
-        ingress_hash(ingress_ifindex, family, protocol, client_address, client_port, server_address, server_port) &
-        forwarded_redirect_bucket_mask;
-    std::uint32_t link = table.ingress_buckets[bucket];
-    while (link != 0)
-    {
-        const std::uint32_t current = link - 1;
-        forwarded_redirect_entry& entry = table.entries[current];
-        if (same_ingress_key(
-                entry, ingress_ifindex, family, protocol, client_address, client_port, server_address, server_port))
-        {
-            index = current;
-            return &entry;
-        }
-        link = entry.next_ingress;
-    }
-    return nullptr;
-}
-
-forwarded_redirect_entry* find_return_entry(forwarded_redirect_table& table,
-                                            std::uint8_t family,
-                                            std::uint8_t protocol,
-                                            std::uint16_t listener_port,
-                                            const std::uint8_t* client_address,
-                                            std::uint16_t client_port,
-                                            std::uint32_t& index) noexcept
-{
-    const std::uint32_t bucket =
-        return_hash(family, protocol, listener_port, client_address, client_port) & forwarded_redirect_bucket_mask;
-    std::uint32_t link = table.return_buckets[bucket];
-    while (link != 0)
-    {
-        const std::uint32_t current = link - 1;
-        forwarded_redirect_entry& entry = table.entries[current];
-        if (same_return_key(entry, family, protocol, listener_port, client_address, client_port))
-        {
-            index = current;
-            return &entry;
-        }
-        link = entry.next_return;
-    }
-    return nullptr;
-}
-
-} // namespace
+using namespace detail;
 
 bool forwarded_redirect_init(forwarded_redirect_table& table) noexcept
 {
@@ -288,7 +16,10 @@ bool forwarded_redirect_init(forwarded_redirect_table& table) noexcept
         ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(std::uint32_t) * forwarded_redirect_bucket_count, rule_pool_tag));
     table.return_buckets = static_cast<std::uint32_t*>(
         ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(std::uint32_t) * forwarded_redirect_bucket_count, rule_pool_tag));
-    if (table.entries == nullptr || table.ingress_buckets == nullptr || table.return_buckets == nullptr)
+    table.candidate_buckets = static_cast<std::uint32_t*>(
+        ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(std::uint32_t) * forwarded_redirect_bucket_count, rule_pool_tag));
+    if (table.entries == nullptr || table.ingress_buckets == nullptr || table.return_buckets == nullptr ||
+        table.candidate_buckets == nullptr)
     {
         forwarded_redirect_free(table);
         return false;
@@ -297,6 +28,7 @@ bool forwarded_redirect_init(forwarded_redirect_table& table) noexcept
     RtlZeroMemory(table.entries, sizeof(forwarded_redirect_entry) * forwarded_redirect_capacity);
     RtlZeroMemory(table.ingress_buckets, sizeof(std::uint32_t) * forwarded_redirect_bucket_count);
     RtlZeroMemory(table.return_buckets, sizeof(std::uint32_t) * forwarded_redirect_bucket_count);
+    RtlZeroMemory(table.candidate_buckets, sizeof(std::uint32_t) * forwarded_redirect_bucket_count);
     rebuild_free_list(table);
     return true;
 }
@@ -318,6 +50,11 @@ void forwarded_redirect_free(forwarded_redirect_table& table) noexcept
         ExFreePoolWithTag(table.return_buckets, rule_pool_tag);
         table.return_buckets = nullptr;
     }
+    if (table.candidate_buckets != nullptr)
+    {
+        ExFreePoolWithTag(table.candidate_buckets, rule_pool_tag);
+        table.candidate_buckets = nullptr;
+    }
     table.active = 0;
     table.high_water = 0;
     table.free_head = 0;
@@ -334,6 +71,7 @@ void forwarded_redirect_clear(forwarded_redirect_table& table) noexcept
     rebuild_free_list(table);
     RtlZeroMemory(table.ingress_buckets, sizeof(std::uint32_t) * forwarded_redirect_bucket_count);
     RtlZeroMemory(table.return_buckets, sizeof(std::uint32_t) * forwarded_redirect_bucket_count);
+    RtlZeroMemory(table.candidate_buckets, sizeof(std::uint32_t) * forwarded_redirect_bucket_count);
 }
 
 forwarded_redirect_lookup forwarded_redirect_find_ingress(forwarded_redirect_table& table,
@@ -393,21 +131,23 @@ bool forwarded_redirect_create(forwarded_redirect_table& table,
         return false;
     }
 
-    // 客户端端口复用：回程 key 是唯一的，旧表项必须先删掉，否则回程会命中旧连接。
-    std::uint32_t conflict = 0;
-    if (find_return_entry(table,
-                          create.family,
-                          create.protocol,
-                          create.listener_port,
-                          create.client_address,
-                          create.client_port,
-                          conflict) != nullptr)
+    // 客户端端口复用：同一个 (L, listener_port, client) 上只能有一条存活表项，否则回程无法
+    // 区分 server。多 L 选择会优先挑空闲 L；只有所有 L 都占用时才会走到这里的替换路径。
+    for (;;)
     {
-        remove_entry(table, conflict);
-        if (table.free_head == 0)
+        std::uint32_t conflict = 0;
+        if (find_candidate_entry(table,
+                                 create.family,
+                                 create.protocol,
+                                 create.listener_address,
+                                 create.listener_port,
+                                 create.client_address,
+                                 create.client_port,
+                                 conflict) == nullptr)
         {
-            return false;
+            break;
         }
+        remove_entry(table, conflict);
     }
 
     const std::uint32_t index = table.free_head - 1;
@@ -431,6 +171,7 @@ bool forwarded_redirect_create(forwarded_redirect_table& table,
     RtlCopyMemory(entry.local_mac, create.local_mac, 6);
     RtlCopyMemory(entry.client_address, create.client_address, 16);
     RtlCopyMemory(entry.server_address, create.server_address, 16);
+    RtlCopyMemory(entry.listener_address, create.listener_address, 16);
 
     const std::uint32_t ingress_bucket = ingress_hash(create.ingress_ifindex,
                                                       create.family,
@@ -443,11 +184,27 @@ bool forwarded_redirect_create(forwarded_redirect_table& table,
     entry.next_ingress = table.ingress_buckets[ingress_bucket];
     table.ingress_buckets[ingress_bucket] = index + 1;
 
-    const std::uint32_t return_bucket =
-        return_hash(create.family, create.protocol, create.listener_port, create.client_address, create.client_port) &
-        forwarded_redirect_bucket_mask;
+    const std::uint32_t return_bucket = return_hash(create.family,
+                                                    create.protocol,
+                                                    create.listener_address,
+                                                    create.listener_port,
+                                                    create.client_address,
+                                                    create.client_port,
+                                                    create.server_address,
+                                                    create.server_port) &
+                                        forwarded_redirect_bucket_mask;
     entry.next_return = table.return_buckets[return_bucket];
     table.return_buckets[return_bucket] = index + 1;
+
+    const std::uint32_t candidate_bucket = candidate_hash(create.family,
+                                                          create.protocol,
+                                                          create.listener_address,
+                                                          create.listener_port,
+                                                          create.client_address,
+                                                          create.client_port) &
+                                           forwarded_redirect_bucket_mask;
+    entry.next_candidate = table.candidate_buckets[candidate_bucket];
+    table.candidate_buckets[candidate_bucket] = index + 1;
 
     ++table.active;
     if (table.active > table.high_water)
@@ -462,6 +219,7 @@ bool forwarded_redirect_create(forwarded_redirect_table& table,
 forwarded_redirect_lookup forwarded_redirect_find_return(forwarded_redirect_table& table,
                                                          std::uint8_t family,
                                                          std::uint8_t protocol,
+                                                         const std::uint8_t* listener_address,
                                                          std::uint16_t listener_port,
                                                          const std::uint8_t* client_address,
                                                          std::uint16_t client_port,
@@ -472,29 +230,111 @@ forwarded_redirect_lookup forwarded_redirect_find_return(forwarded_redirect_tabl
         return forwarded_redirect_lookup::missing;
     }
 
-    std::uint32_t index = 0;
-    forwarded_redirect_entry* entry =
-        find_return_entry(table, family, protocol, listener_port, client_address, client_port, index);
-    if (entry == nullptr)
-    {
-        return forwarded_redirect_lookup::missing;
-    }
-
     const std::uint64_t now = now_100ns();
-    if (expired(*entry, now))
+    if (listener_address == nullptr)
     {
-        remove_entry(table, index);
-        return forwarded_redirect_lookup::expired;
+        // v6 查询没有 L：控制面线性扫描。帧路径永远带 L，不走这里。
+        std::uint32_t match = 0;
+        std::uint32_t matches = 0;
+        for (std::uint32_t index = 0; index < forwarded_redirect_capacity; ++index)
+        {
+            const forwarded_redirect_entry& entry = table.entries[index];
+            if (entry.state == 0 || entry.family != family || entry.protocol != protocol ||
+                entry.listener_port != listener_port || entry.client_port != client_port ||
+                !RtlEqualMemory(entry.client_address, client_address, 16) || expired(entry, now))
+            {
+                continue;
+            }
+
+            match = index;
+            if (++matches > 1)
+            {
+                return forwarded_redirect_lookup::ambiguous;
+            }
+        }
+
+        if (matches == 0)
+        {
+            return forwarded_redirect_lookup::missing;
+        }
+
+        table.entries[match].last_activity = now;
+        fill_snapshot(table.entries[match], snapshot);
+        return forwarded_redirect_lookup::found;
     }
 
-    entry->last_activity = now;
-    fill_snapshot(*entry, snapshot);
+    const std::uint32_t expired_removed = prune_expired_candidates(
+        table, family, protocol, listener_address, listener_port, client_address, client_port, now);
+
+    std::uint32_t match = 0;
+    std::uint32_t matches = 0;
+    const std::uint32_t bucket =
+        candidate_hash(family, protocol, listener_address, listener_port, client_address, client_port) &
+        forwarded_redirect_bucket_mask;
+    std::uint32_t link = table.candidate_buckets[bucket];
+    while (link != 0)
+    {
+        const std::uint32_t index = link - 1;
+        forwarded_redirect_entry& entry = table.entries[index];
+        if (same_candidate_key(entry, family, protocol, listener_address, listener_port, client_address, client_port))
+        {
+            match = index;
+            ++matches;
+        }
+        link = entry.next_candidate;
+    }
+
+    if (matches == 0)
+    {
+        return expired_removed > 0 ? forwarded_redirect_lookup::expired : forwarded_redirect_lookup::missing;
+    }
+    if (matches > 1)
+    {
+        return forwarded_redirect_lookup::ambiguous;
+    }
+
+    table.entries[match].last_activity = now;
+    fill_snapshot(table.entries[match], snapshot);
     return forwarded_redirect_lookup::found;
 }
 
+bool forwarded_redirect_has_return(forwarded_redirect_table& table,
+                                   std::uint8_t family,
+                                   std::uint8_t protocol,
+                                   const std::uint8_t* listener_address,
+                                   std::uint16_t listener_port,
+                                   const std::uint8_t* client_address,
+                                   std::uint16_t client_port) noexcept
+{
+    if (table.entries == nullptr)
+    {
+        return false;
+    }
+
+    const std::uint64_t now = now_100ns();
+    const std::uint32_t bucket =
+        candidate_hash(family, protocol, listener_address, listener_port, client_address, client_port) &
+        forwarded_redirect_bucket_mask;
+    std::uint32_t link = table.candidate_buckets[bucket];
+    while (link != 0)
+    {
+        const std::uint32_t index = link - 1;
+        const forwarded_redirect_entry& entry = table.entries[index];
+        if (same_candidate_key(entry, family, protocol, listener_address, listener_port, client_address, client_port) &&
+            !expired(entry, now))
+        {
+            return true;
+        }
+        link = entry.next_candidate;
+    }
+    return false;
+}
+
 bool forwarded_redirect_mark_closing(forwarded_redirect_table& table,
+
                                      std::uint8_t family,
                                      std::uint8_t protocol,
+                                     const std::uint8_t* listener_address,
                                      std::uint16_t listener_port,
                                      const std::uint8_t* client_address,
                                      std::uint16_t client_port) noexcept
@@ -504,17 +344,31 @@ bool forwarded_redirect_mark_closing(forwarded_redirect_table& table,
         return false;
     }
 
-    std::uint32_t index = 0;
-    forwarded_redirect_entry* entry =
-        find_return_entry(table, family, protocol, listener_port, client_address, client_port, index);
-    if (entry == nullptr)
+    forwarded_redirect_snapshot snapshot{};
+    if (forwarded_redirect_find_return(
+            table, family, protocol, listener_address, listener_port, client_address, client_port, snapshot) !=
+        forwarded_redirect_lookup::found)
     {
         return false;
     }
 
-    entry->state = forwarded_redirect_state_closing;
-    entry->last_activity = now_100ns();
-    return true;
+    // find_return 已经刷新 last_activity；这里只需要把状态推进到 closing。
+    const std::uint32_t bucket =
+        candidate_hash(family, protocol, listener_address, listener_port, client_address, client_port) &
+        forwarded_redirect_bucket_mask;
+    std::uint32_t link = table.candidate_buckets[bucket];
+    while (link != 0)
+    {
+        const std::uint32_t index = link - 1;
+        forwarded_redirect_entry& entry = table.entries[index];
+        if (same_candidate_key(entry, family, protocol, listener_address, listener_port, client_address, client_port))
+        {
+            entry.state = forwarded_redirect_state_closing;
+            return true;
+        }
+        link = entry.next_candidate;
+    }
+    return false;
 }
 
 std::uint32_t forwarded_redirect_sweep(forwarded_redirect_table& table) noexcept

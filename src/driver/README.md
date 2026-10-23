@@ -53,13 +53,27 @@ filter 执行。host TCP 与 host UDP 共用同一套 callout、四道闸与规�
 - `ioctl_get_forwarded_stats`（0x80A）与 `ioctl_reset_forwarded_stats`（0x80B）：MAC 帧层的计数与
   清零，与 host 的 `probe_stats` 完全独立（`ioctl_reset_stats` 只清 host 计数）。
 
-控制面 ABI 版本是 **6**。host 侧结构不变：`probe_config` / `probe_rule_info` / `probe_event` /
+控制面 ABI 版本是 **7**。host 侧结构不变：`probe_config` / `probe_rule_info` / `probe_event` /
 `probe_stats` / `redirect_context` 的布局与语义与 v3/v4 一致。v4 新增四个 forwarded IOCTL 与
 `probe_forwarded_info`（32 字节）；v5 新增 `probe_forwarded_config`、`probe_forwarded_redirect_query`
 与 `probe_forwarded_redirect`（28 / 24 / 64 字节）以及 0x80C–0x80E，并在 `probe_forwarded_stats`
 尾部追加 redirect 计数。B5 继续在尾部追加 UDP 计数，`probe_forwarded_stats` 从 296 扩到 **400** 字节：
 0–279 字段偏移不变，UDP 计数位于 280–383，`redirect_active/high_water/last_status/abi_version`
-整体后移到 384/388/392/396。驱动与用户态、`wfprobe` 必须同批升级；旧夹具读 296 字节会在长度断言处失败。
+整体后移到 384/388/392/396。
+
+v7 在同一控制面上追加（旧尺寸前缀仍可读）：
+
+- `probe_forwarded_ingress`（28 字节）与 `probe_forwarded_ingress_config`（16 字节头 + N 条记录），
+  IOCTL 为 0x80F / 0x810；legacy 28 字节 config 继续可用，等价于一条 ifindex=0xFFFFFFFF 的通配记录。
+- `probe_forwarded_redirect_query` 追加 `listener_address`（24 → 40 字节）；只发 24 字节的旧客户端
+  仍按“任意 L”查询。
+- `probe_forwarded_redirect` 追加 `listener_address` 与表项 `generation`（64 → 88 字节，version=2）；
+  输出缓冲区只给 64 字节时驱动仍写 v1。
+- `probe_forwarded_stats` 在 400 字节前缀后追加 7 个 u64（456 字节）：回程歧义、未配置入口、
+  多 L 选择与 UDP 混合 NBL 丢弃的计数；只给 448 字节输出时驱动仍写 v7 前缀。
+
+
+驱动与用户态、`wfprobe` 必须同批升级；旧夹具读 v6 尺寸会在长度断言处失败。
 
 `wfprobe events` 会打印 `protocol=`，`wfprobe stats` 与控制器 `state` 会输出四个 UDP 计数器。
 
@@ -283,7 +297,7 @@ B4b 在 B4a 的 L2 callout 之上执行 TCP 的入口 DNAT、redirect 表与回�
 
 ### 配置与 ABI
 
-probe_forwarded_config（ABI v5 引入、v6 沿用，28 字节）：
+probe_forwarded_config（ABI v5 引入，v7 保留为 legacy，28 字节）：
 
 | 字段 | 说明 |
 |---|---|
@@ -292,28 +306,49 @@ probe_forwarded_config（ABI v5 引入、v6 沿用，28 字节）：
 | family | 4 / 6；必须与入口帧地址族一致 |
 | listener_address[16] | DNAT 目标地址 L（listener 所在的本机地址） |
 
+v7 新用户态优先使用 `probe_forwarded_ingress_config`：16 字节头 + 0..16 条
+`probe_forwarded_ingress { ifindex, listener_port, family, listener_address }`。同一 ifindex 可以
+有多条记录（同一端口绑定多个 L；这是驱动/夹具能力，产品 WfpController 目前每个 ifindex 只取一个 L）。
+驱动为新表项优先挑回程候选空闲的 L，全部占用时替换第一条。
+
+没有精确 ifindex 记录时退回 `0xFFFFFFFF` 通配记录；两者都没有、且 config enabled 时命中 redirect
+规则会 fail-closed（`redirect_no_ingress` / `udp_no_ingress`）。
+
 - ioctl_set_forwarded_config / ioctl_get_forwarded_config（0x80C / 0x80D）。
+- ioctl_set_forwarded_ingress_config / ioctl_get_forwarded_ingress_config（0x80F / 0x810）：下发/回读
+  per-ingress listener 映射。config 变化或关闭会清空 redirect 表；只换规则 blob 不清表。
 - ioctl_query_forwarded_redirect（0x80E）：输入 probe_forwarded_redirect_query
-  （listener_port + client 地址/端口 + protocol；B5 起 protocol=0/6 为 TCP、17 为 UDP），
-  输出 probe_forwarded_redirect（原始服务器、upstream_id、
-  rule_index、ingress、state）。查不到返回 STATUS_NOT_FOUND。
-- 关闭配置或在 listener 端口/地址/族变化时清空 redirect 表；只换规则 blob 不清表，旧流继续用旧表项
+  （listener_port + listener 地址 L + client 地址/端口 + protocol；protocol=0/6 为 TCP、17 为 UDP），
+  输出 probe_forwarded_redirect（原始服务器、upstream_id、rule_index、ingress、state、L、generation）。
+  查不到或候选不唯一（同一 (L, listener_port, client) 有多条存活表项）返回 STATUS_NOT_FOUND，后者
+  同时计 redirect_return_ambiguous / udp_return_ambiguous。
+- 关闭配置或在 listener 映射变化时清空 redirect 表；只换规则 blob 不清表，旧流继续用旧表项
   与旧 upstream（表项带建表时的 generation / upstream_id）。
-- probe_forwarded_stats 在尾部追加 redirect 计数（matched_redirect、redirected、
-  redirect_created/ingress/return/blocked/...、redirect_active/high_water），并追加诊断计数
-  redirect_multi_nb、inject_complete_calls、inject_complete_failed；B4b 时结构 296 字节。B5 在同一
-  尾部继续追加 13 个 UDP 计数（udp_created/ingress/return/blocked/return_failed/return_miss/
-  no_config/no_state/capacity/fragmented/inject_failed/expired/multi_nb），结构 400 字节；v6 只提升
-  ABI 版本，不改变 400 字节布局；v4 的 0–143、B4b 的 144–279 字段偏移不变，末四个 u32 后移。
+- probe_forwarded_stats 尾部：v5 的 redirect 计数（matched_redirect、redirected、
+  redirect_created/ingress/return/blocked/...、redirect_active/high_water）、B4b 诊断计数
+  redirect_multi_nb、inject_complete_calls、inject_complete_failed，B5 的 13 个 UDP 计数
+  （udp_created/ingress/return/blocked/return_failed/return_miss/no_config/no_state/capacity/
+  fragmented/inject_failed/expired/multi_nb），v7 再追加 7 个 u64：
+  redirect_return_ambiguous、udp_return_ambiguous、redirect_no_ingress、udp_no_ingress、
+  redirect_multi_l、udp_multi_l、udp_return_miss_blocked（456 字节）。v6 的 400 字节前缀偏移不变；
+  只给 448 字节输出时写 v7 前缀。
+
+
 
 ### redirect 表
 
-- 入口 key：(ingress_ifindex, family, client_ip, client_port, server_ip, server_port)；
-  回程 key：(family, listener_port, client_ip, client_port)。两条索引指向同一批表项（哈希桶 + 链）。
+- 入口 key：`(ingress_ifindex, family, protocol, client, server)`；
+  回程精确 key：`(family, protocol, L, listener_port, client, server)`；
+  回程候选 key：`(family, protocol, L, listener_port, client)`。三条索引指向同一批表项。
+- 回程 key 含原始 server：同一客户端端口经不同 L 并发访问多个目的时表项可以并存；同一 L 上先后访问时后一个替换前一个，
+  回程按表项里的 server 还原。帧只带 `(L, listener_port, client)`，所以帧路径查候选索引；候选
+  必须唯一，出现多条时整帧 block（fail closed）并计 `redirect_return_ambiguous`。
+- 新表项优先选择同入口下候选回程 key 空闲的 L；全部占用时替换第一条（客户端端口复用）。
+  未配置入口（且无通配记录）→ block + `redirect_no_ingress`。
 - 容量 4096。SYN-only 帧建表；数据帧命中后把状态从 syn 提升到 established。
 - FIN/RST 标记 closing，保留 5s grace；syn 30s、established 300s 无活动后回收。
   超时回收是惰性的：查表时判定过期，槽位在下一次建表失败扫描时释放。
-- 客户端端口复用时，回程 key 冲突的旧表项先被删除，再插入新表项。
+
 - 表项记录入口帧的源 MAC（client_mac）与目的 MAC（local_mac），回程注入用它们还原以太网头。
 
 ### 入口 DNAT
@@ -332,8 +367,10 @@ probe_forwarded_config（ABI v5 引入、v6 沿用，28 字节）：
 
 ### 回程 SNAT
 
-出向 TCP 帧的源端口等于 listener_port 时按回程 key 查表。MAC 层一个 NBL 可以携带多个 NET_BUFFER
-（每个 NET_BUFFER 是一帧），必须逐 NET_BUFFER 查询/改写/注入；这是 B4b 返工修掉的真实丢包根因：
+出向 TCP 帧的源 `(L, listener_port)` 命中某条启用中的入口映射时，按回程候选 key
+`(family, protocol, L, listener_port, client)` 查表。候选必须唯一；多条→整帧 block +
+`redirect_return_ambiguous`，绝不猜 server。MAC 层一个 NBL 可以携带多个 NET_BUFFER
+
 只处理首个 NET_BUFFER 时，同一 NBL 里后续的 1448B/376B 段被 block 后没有副本，接收端出现 1824B 空洞，
 TCP 停在 ISN+1 或只收到 60–63KiB。
 
@@ -383,6 +420,10 @@ VM 侧（套件会打印 [forwarded-tcp] READY 后等待外部客户端）：
         --remote-address 10.99.0.1 --remote-port 40250 --backend 192.168.100.4:40250
     wfprobe forwarded-tcp --phase upstreams ...   # 两条规则 → 两个 SOCKS5 测试上游
     wfprobe forwarded-tcp --phase fail ...        # 只有规则、没有 config：连接超时、redirect_no_config 增加
+    wfprobe forwarded-tcp --phase multi ...       # Internal+External 两入口、同入口两 L；客户端同源端口并发
+    wfprobe forwarded-tcp --phase noingress ...   # 只配置 Internal；External 命中 redirect_no_ingress
+    wfprobe forwarded-tcp --phase hotswap ...     # 换 blob 后旧连接继续收发，旧表项保持旧 upstream
+
     wfprobe forwarded-tcp --restore-only          # 兜底：disabled config + 空 permit 表
 
 core 断言：listener accept、IOCTL 查回 server/upstream/ingress、直连或 SOCKS5 中继字节一致、
@@ -411,8 +452,9 @@ B4b 实测证据（2026-10-23）：
 - host 回归：rules 10 轮、selftest、gates、udp-rules、forwarded-rules（F1/F2/F3/F6）全 PASS。
 ### 边界
 
-- 第一版只支持单入口、单 listener 端口、单 L；多入口/多 L 留 B6。
-- Forwarded UDP 自 B5 起由本驱动执行 DNAT/回程 SNAT，见下一节；多入口/多 L 仍留 B6。
+- B4b 本身只支持单入口、单 listener 端口、单 L；多入口/多 L 的 B6b 扩展见上文与
+  `wfp-architecture.md` §7.15。
+- Forwarded UDP 自 B5 起由本驱动执行 DNAT/回程 SNAT，见下一节；多入口/多 L 的 UDP 复用同一套表。
 - 启用 forwarded 时，分片闸只 block forwarded **redirect 规则地址空间**内的 UDP 分片：首片按完整
   规则（含端口）匹配，命中 redirect 就记录 (入口, 族, 协议, 源/目的地址, IP ID) 并 block；非首片没有端口，查同一张
   跟随表 block。host/其他端口的分片按原路径，不再被误伤。TCP 分片与出向分片不在闸内。
@@ -426,13 +468,18 @@ datagram 建表，后续 datagram 查表**；原帧同样必须被消费（`FWP_
 
 ### 表与生命周期
 
-- 入口 key：`(ingress_ifindex, family, protocol, client_ip, client_port, server_ip, server_port)`；
-  回程 key：`(family, protocol, listener_port, client_ip, client_port)`。protocol 进入 key 是 B5 的
-  必要扩展：TCP 与 UDP 可以共用同一个 listener 端口与客户端端口，不能互相串表。
+- 入口 key：`(ingress_ifindex, family, protocol, client, server)`；
+  回程精确 key：`(family, protocol, L, listener_port, client, server)`；
+  回程候选 key：`(family, protocol, L, listener_port, client)`。protocol 让 TCP 与 UDP 共用同一
+  listener 端口/客户端端口而不串表；L 让同一端口上的多个 listener 地址可区分。
+- 回程 key 含 server，与 TCP 共用同一套「候选唯一、否则 fail-closed」规则。
+- 新表项优先选择同入口下候选空闲的 L；未配置入口（且无通配记录）→ block + `udp_no_ingress`。
 - TCP 与 UDP 共用容量 4096；UDP 的建表时机是首个 datagram（没有 SYN），表项状态直接是 established。
 - 超时：UDP 60s 无活动回收；TCP 仍是 syn 30s / established 300s / closing 5s。回收是惰性的：
   查表时判定过期，槽位在下一次建表失败扫描时释放。过期后下一个同 key datagram 会重新建表。
-- 表项记录入口帧的 client_mac / local_mac、upstream_id、rule_index、ingress/ndis_port 与 generation。
+- 表项记录入口帧的 client_mac / local_mac、upstream_id、rule_index、ingress/ndis_port、generation
+  与 listener L。
+
 
 ### 入口 DNAT
 
@@ -451,29 +498,35 @@ forwarded config enabled 时，入向 UDP 帧先做分片检查，再做规则�
 
 ### 回程 SNAT
 
-出向 UDP 帧的源端口等于 listener_port 时按回程 key 查表（protocol=udp）：
-
+出向 UDP 帧的源 `(L, listener_port)` 命中某条启用中的入口映射时，按回程候选 key 查表（protocol=udp）：
 - 命中：逐 NET_BUFFER 复制，源地址/端口改回原始服务器 (server_ip, server_port)，目的 MAC =
   client_mac，源 MAC = local_mac，重算 UDP 校验和，`FwpsInjectMacSendAsync0` 注入入口网卡；
   整个原 NBL block。成功计 `udp_return`，注入失败计 `udp_inject_failed` 并 block。
 - 候选帧全部没命中：`udp_return_miss` + **permit**（listener 回给客户端的流量按普通本机流量走，
   不参与 forwarded 规则匹配）。
 - 命中表项但注入失败：block + `udp_return_failed`；不做 fail-open。
+- 候选不唯一：block + `udp_return_ambiguous`，不猜 server。
 - 未配置 forwarded 数据面时回程分支不接管，按普通规则匹配。
+
 
 ### 失败关闭与计数
 
 `probe_forwarded_stats` 的 UDP 字段是 B5 新增的尾部块；恒等式：
 
-    udp_blocked == udp_no_config + udp_no_state + udp_capacity + udp_fragmented + udp_inject_failed
+    udp_blocked == udp_no_config + udp_no_state + udp_no_ingress + udp_capacity + udp_fragmented
+                   + udp_inject_failed
     matched_redirect + udp_fragmented == redirect_ingress + redirect_blocked + udp_ingress + udp_blocked
     redirected == redirect_ingress + redirect_return + udp_ingress + udp_return
     blocked == matched_block + fallback_block + redirect_blocked + redirect_return_failed
-               + udp_blocked + udp_return_failed
+               + redirect_return_ambiguous + udp_blocked + udp_return_failed + udp_return_ambiguous
+
 
 UDP 没有 RST；失败一律静默丢包。`udp_no_state` 为保留字段（非分片 UDP 未命中总会尝试建表，
 容量失败走 capacity）。`udp_expired` 在查表命中过期表项时增长，`udp_created` 记录真正新建的表项数。
 `udp_return_miss` 的帧按 permit 计，恒等式为 `permitted == matched_permit + fallback_permit + udp_return_miss`。
+混合 NBL（同一 NBL 里既有命中又有未命中候选）不能逐帧 permit：整块按命中帧消费，未命中帧随原 NBL
+丢弃，单独进 `udp_return_miss_blocked`，不参与 permitted 恒等式；单 NB 的常见路径不会产生该计数。
+
 
 ### 控制面与验证
 
@@ -494,8 +547,12 @@ UDP 没有 RST；失败一律静默丢包。`udp_no_state` 为保留字段（非
 
 ### 边界
 
-- 单入口 / 单 listener 端口 / 单 L；IPv6 的分片路径 fail closed，native IPv6 的 UDP 数据面代码已实现
-  但本环境没有在入口网卡上完成 E2E（Linux 侧的 fd00 地址在另一张网卡）。
+- 两个入口（Internal ifIndex=5、External ifIndex=14）与同一入口两个 L（192.168.100.2 / .98）已 E2E；
+  同一客户端端口可跨入口或经不同 L 并发访问多个目的。L 用尽后同一 `(L, listener_port, client)`
+  的新表项会替换旧表项：单 L 时退化为“一个客户端端口一个目的”，这是可复现的边界。
+- IPv6 的分片路径 fail closed，native IPv6 的 UDP 数据面代码已实现但本环境没有在入口网卡上完成
+  E2E（Linux 侧的 fd00 地址在另一张网卡）；多入口/多 L 的 IPv6 未验证。
+
 - 分片闸只覆盖 forwarded redirect 规则地址空间；非首片先于首片到达时按普通流量放行，TCP 分片与
   出向分片不在闸内。一个 NBL 里的多个 NET_BUFFER 按同一入口流处理，混合流不在本版支持范围。
 - 用户态 UDP listener 与 TCP listener 共用端口；host UDP 的 listener/中继不在本仓库，未命中

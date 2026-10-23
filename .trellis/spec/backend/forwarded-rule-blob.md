@@ -277,7 +277,9 @@ classify 建 redirect 表并做 DNAT；B4a 的 `STATUS_NOT_SUPPORTED` 整块拒�
 - **控制器**：`WfpController.Start` 在 `ForwardedBlob` 非空时下发并回读校验（installed / 规则数 /
   fallback / total_size / generation），再输出 `controller-forwarded count=<rules> upstreams=<n> blob=<bytes>`
   与 `controller-forwarded-installed ...`；随后按「bind listener → forwarded config(disabled) →
-  blob → 回读 → config(enabled)」启用数据面。没有 forwarded 段时下发空 permit 表并同样回读。
+  blob → 回读 → config(enabled)」启用数据面。v7 起 listener 映射按规则里出现的 ingress 逐个解析 L，
+  用 `probe_forwarded_ingress_config` 下发。驱动接口支持同一 ifindex 多条记录（同端口多 L）；当前控制器每个 ifindex 只解析一个 L，`ListenerSet` 为解析出的每个 L 绑 TCP/UDP socket。没有 forwarded 段时下发空 permit 表并同样回读。
+
   退出/回滚时 disabled config（清 redirect 表）+ 空 permit 表并回读，异常退出不保证恢复。
   `CheckCommand` 只编译与报告，不再因 redirect 提前拒绝。
 - **上限**：配置层不做规则数/网段池上限的重复判断，最终仍由 `ForwardedBlobCompiler`
@@ -288,17 +290,23 @@ classify 建 redirect 表并做 DNAT；B4a 的 `STATUS_NOT_SUPPORTED` 整块拒�
 redirect 规则的 `upstream_id` 是用户态选 SOCKS5 的唯一依据；驱动不解释 upstream 的名字或端点。
 
 - 驱动按 `upstream_id` 原样写进 redirect 表，`ioctl_query_forwarded_redirect` 回读；
-- 用户态 `ForwardedRedirectContextSource` 用 accepted socket 的 (listener_port, client) 查询；
+- 用户态 `ForwardedRedirectContextSource` 用 accepted socket 的 (L, listener_port, client) 查询；
+
 - `RelayServer` 按 `ForwardedUpstreams[upstream_id]` 取 endpoint，再走 SOCKS5 CONNECT；
   表项缺失时拒绝连接，不直连；
-- ABI v6 的 `probe_forwarded_stats` 在 B4b 时为 296 字节，尾部追加 redirect 计数（`matched_redirect`、
-  `redirected`、`redirect_created/ingress/return/blocked` 等）与 `redirect_multi_nb`、
-  `inject_complete_calls`、`inject_complete_failed` 诊断计数；v4 的 0–143 字段偏移不变，
-  `last_status`/`abi_version` 后移。B5 在同一尾部追加 13 个 UDP 计数后扩到 400 字节，并把
-  `probe_abi_version` 从 5 升到 6；`probe_forwarded_redirect_query` 偏移 22 的字节改为 `protocol`（0/6 = TCP，17 = UDP），见 §10；
+- ABI v7 的 `probe_forwarded_stats` 在 v6 400 字节前缀后追加 7 个 u64（回程歧义、未配置入口、
+  多 L 选择、UDP 混合 NBL 丢弃），结构 456 字节；只给 448 字节输出时写 v7 前缀。
+  `probe_forwarded_redirect_query` 追加 listener_address（24 → 40 字节），
+
+  查询输出追加 listener_address/generation（64 → 88 字节，version=2）。v4 的 0–143 字段偏移不变，
+  `last_status`/`abi_version` 仍在 392/396。B5 的 protocol 字段（偏移 22，0/6 = TCP、17 = UDP）不变，
+  见 §10。
+
 - `forwarded-rules` 的 F6 不再把 redirect 当作非法 blob；数据面验证入口是
-  `wfprobe forwarded-tcp --phase core|upstreams|fail`；套件默认用 verify 端口（listener+1000）
-  断言外部客户端实收字节/SHA-256/ACK，缺回报或内容不一致即 FAIL。
+  `wfprobe forwarded-tcp --phase core|upstreams|fail|multi|hotswap`；套件默认用 verify 端口
+  （listener+1000）断言外部客户端实收字节/SHA-256/ACK，缺回报或内容不一致即 FAIL。multi 覆盖
+  Internal + External 两个入口与同一入口两个 L；hotswap 覆盖旧表项保持旧 upstream/generation。
+
 
 ## 10. B5 UDP 映射与接缝
 

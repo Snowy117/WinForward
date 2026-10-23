@@ -1,6 +1,6 @@
 #pragma once
 
-// 驱动与测试程序之间的控制面 ABI（v6）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
+// 驱动与测试程序之间的控制面 ABI（v7）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
 // 两侧都有布局断言。任何字段调整都必须同时提升 probe_abi_version。
 //
 // 与 src/common/redirect_context.h 的分工：那个头定义的是“用途数据”（随连接走、用户态用
@@ -13,7 +13,7 @@
 namespace winforward::wfp::probe
 {
 
-inline constexpr std::uint32_t probe_abi_version = 6;
+inline constexpr std::uint32_t probe_abi_version = 7;
 
 // 单块规则 blob 的上限。METHOD_BUFFERED 会替我们复制一份输入，这个上限只用于拒绝明显
 // 异常的下发（正常策略是几百字节到几 KB）。
@@ -64,10 +64,64 @@ inline constexpr std::uint32_t ioctl_set_forwarded_config = make_ioctl(0x80C);
 inline constexpr std::uint32_t ioctl_get_forwarded_config = make_ioctl(0x80D);
 inline constexpr std::uint32_t ioctl_query_forwarded_redirect = make_ioctl(0x80E);
 
-// 一次 redirect 查询的输入：用户态用 listener 端口与对端（client）填。TCP 是 accepted socket 的
-// 对端，UDP 是收到 datagram 的源地址。protocol 区分同一 listener 端口上的 TCP 与 UDP 表项：
-// 0 表示 TCP（B4b 兼容值），6 = TCP，17 = UDP；其他值拒绝。family 与 client_address 必须与
-// 驱动表项的地址族一致。
+// v7：per-ingress listener 映射。v5/v6 的单 listener config（28 字节）保留为 legacy 兼容路径
+// （ingress_count == 0，任意入口都 DNAT 到同一个 L）；新路径下发一组 (ifindex, L, listener_port)
+// 记录，未配置的入口在命中 redirect 规则时 fail-closed。
+//
+// 0xFFFFFFFF 是"任意入口"的通配记录：只有找不到精确 ifindex 记录时才使用它。它与规则里的
+// ingress_adapter_id 是同一约定；具体 ifindex 0 仍是一个合法入口。
+inline constexpr std::uint32_t forwarded_ingress_capacity = 16;
+inline constexpr std::uint32_t forwarded_ingress_any_ifindex = 0xFFFFFFFFU;
+
+// 一条入口映射（28 字节）。ifindex 与 listener 地址/端口共同决定 DNAT 目标；同一 ifindex 可以
+// 出现多条记录（同一端口绑定多个 L），驱动为新 redirect 表项挑选一个当前回程 key 空闲的 L。
+struct probe_forwarded_ingress
+{
+    std::uint32_t ifindex;
+    std::uint16_t listener_port;
+    std::uint8_t family; // 4 / 6
+    std::uint8_t reserved0;
+    std::uint8_t listener_address[16];
+    std::uint32_t reserved1;
+};
+
+static_assert(sizeof(probe_forwarded_ingress) == 28, "probe_forwarded_ingress 是对外 ABI");
+static_assert(offsetof(probe_forwarded_ingress, ifindex) == 0);
+static_assert(offsetof(probe_forwarded_ingress, listener_port) == 4);
+static_assert(offsetof(probe_forwarded_ingress, family) == 6);
+static_assert(offsetof(probe_forwarded_ingress, reserved0) == 7);
+static_assert(offsetof(probe_forwarded_ingress, listener_address) == 8);
+static_assert(offsetof(probe_forwarded_ingress, reserved1) == 24);
+
+// ioctl_set/get_forwarded_ingress_config 的输入/输出：这个 16 字节头，紧跟 ingress_count 条
+// probe_forwarded_ingress（每条 28 字节，从偏移 16 开始连续存放）。记录不是 C++ 数组字段，
+// 这样 ABI 扫描器与 C# 侧都能用同一份显式序列化。
+struct probe_forwarded_ingress_config
+{
+    std::uint32_t abi_version;
+    std::uint32_t enabled;
+    std::uint32_t ingress_count; // <= forwarded_ingress_capacity
+    std::uint32_t reserved0;
+};
+
+static_assert(sizeof(probe_forwarded_ingress_config) == 16, "probe_forwarded_ingress_config 是对外 ABI");
+static_assert(offsetof(probe_forwarded_ingress_config, abi_version) == 0);
+static_assert(offsetof(probe_forwarded_ingress_config, enabled) == 4);
+static_assert(offsetof(probe_forwarded_ingress_config, ingress_count) == 8);
+static_assert(offsetof(probe_forwarded_ingress_config, reserved0) == 12);
+
+inline constexpr std::uint32_t ioctl_set_forwarded_ingress_config = make_ioctl(0x80F);
+inline constexpr std::uint32_t ioctl_get_forwarded_ingress_config = make_ioctl(0x810);
+inline constexpr std::uint32_t forwarded_ingress_config_size =
+    sizeof(probe_forwarded_ingress_config) + forwarded_ingress_capacity * sizeof(probe_forwarded_ingress);
+
+// 一次 redirect 查询的输入：用户态用 listener 端口、本地 listener 地址 L 与对端（client）填。
+// TCP 是 accepted socket 的本地/对端，UDP 是收到 datagram 的本地地址与源地址。protocol 区分同一
+// listener 端口上的 TCP 与 UDP 表项：0 表示 TCP（B4b 兼容值），6 = TCP，17 = UDP；其他值拒绝。
+// family 与 client_address 必须与驱动表项的地址族一致。
+//
+// v7 在 24 字节 v6 结构后追加 listener_address：查询旧客户端仍可只发 24 字节，驱动按"任意 L"
+// 处理；新客户端发 40 字节，L 必须与表项一致（同一端口绑多个 L 时这是唯一的区分键）。
 struct probe_forwarded_redirect_query
 {
     std::uint16_t listener_port;
@@ -77,30 +131,37 @@ struct probe_forwarded_redirect_query
     std::uint16_t client_port;
     std::uint8_t protocol; // 0/6 = TCP（0 是 B4b 兼容值），17 = UDP
     std::uint8_t reserved1;
+    std::uint8_t listener_address[16];
 };
 
-static_assert(sizeof(probe_forwarded_redirect_query) == 24, "probe_forwarded_redirect_query 是对外 ABI");
+inline constexpr std::uint32_t probe_forwarded_redirect_query_v1_size = 24;
+static_assert(sizeof(probe_forwarded_redirect_query) == 40, "probe_forwarded_redirect_query 是对外 ABI");
 static_assert(offsetof(probe_forwarded_redirect_query, listener_port) == 0);
 static_assert(offsetof(probe_forwarded_redirect_query, family) == 2);
 static_assert(offsetof(probe_forwarded_redirect_query, client_address) == 4);
 static_assert(offsetof(probe_forwarded_redirect_query, client_port) == 20);
 static_assert(offsetof(probe_forwarded_redirect_query, protocol) == 22);
 static_assert(offsetof(probe_forwarded_redirect_query, reserved1) == 23);
+static_assert(offsetof(probe_forwarded_redirect_query, listener_address) == 24);
+
 // redirect 表项的生命周期状态。数值是对外 ABI，只追加。
 inline constexpr std::uint32_t forwarded_redirect_state_syn = 1;
 inline constexpr std::uint32_t forwarded_redirect_state_established = 2;
 inline constexpr std::uint32_t forwarded_redirect_state_closing = 3;
 
 // 查询输出。magic/version 让用户态在解析字段前先认版本；地址按原样保存（IPv4 只用前 4 字节）。
+// v1（64 字节）只有 v5 字段；v2 在尾部追加 listener_address 与表项 generation（建表时的规则
+// generation），旧客户端只给 64 字节输出时驱动仍写 v1。
 inline constexpr std::uint32_t forwarded_redirect_magic = 0x31524657U; // 内存中为 "WFR1"
 inline constexpr std::uint16_t forwarded_redirect_version = 1;
+inline constexpr std::uint16_t forwarded_redirect_version_with_listener = 2;
 
 struct probe_forwarded_redirect
 {
     std::uint32_t magic;
     std::uint16_t version;
     std::uint8_t family; // 4 / 6
-    std::uint8_t protocol; // IPPROTO_TCP（B4b 只有 TCP）
+    std::uint8_t protocol; // IPPROTO_TCP / IPPROTO_UDP
     std::uint8_t client_address[16];
     std::uint16_t client_port;
     std::uint8_t server_address[16];
@@ -111,9 +172,13 @@ struct probe_forwarded_redirect
     std::uint32_t upstream_id;
     std::uint32_t rule_index;
     std::uint32_t state; // forwarded_redirect_state_*
+    std::uint8_t listener_address[16]; // v2：DNAT 目标 L（回程 key 的一部分）
+    std::uint32_t generation; // v2：表项建表时的 forwarded 规则 generation
+    std::uint32_t reserved1; // v2：必须为 0
 };
 
-static_assert(sizeof(probe_forwarded_redirect) == 64, "probe_forwarded_redirect 是对外 ABI");
+inline constexpr std::uint32_t probe_forwarded_redirect_v1_size = 64;
+static_assert(sizeof(probe_forwarded_redirect) == 88, "probe_forwarded_redirect 是对外 ABI");
 static_assert(offsetof(probe_forwarded_redirect, magic) == 0);
 static_assert(offsetof(probe_forwarded_redirect, version) == 4);
 static_assert(offsetof(probe_forwarded_redirect, family) == 6);
@@ -128,10 +193,19 @@ static_assert(offsetof(probe_forwarded_redirect, ingress_ifindex) == 48);
 static_assert(offsetof(probe_forwarded_redirect, upstream_id) == 52);
 static_assert(offsetof(probe_forwarded_redirect, rule_index) == 56);
 static_assert(offsetof(probe_forwarded_redirect, state) == 60);
+static_assert(offsetof(probe_forwarded_redirect, listener_address) == 64);
+static_assert(offsetof(probe_forwarded_redirect, generation) == 80);
+static_assert(offsetof(probe_forwarded_redirect, reserved1) == 84);
 
-// forwarded 数据面配置。enabled=1 时 listener_address/listener_port 是 DNAT 目标：
-// 入口帧的目的地址与端口改写为 (listener_address, listener_port)，再由 Windows 栈投递给
-// 绑定在 listener_port 上的进程。family 只允许 4 / 6；关闭时 driver 会清空 redirect 表。
+// forwarded 数据面配置（v5/v6 的单 listener 形式，保留为 legacy 兼容路径）。enabled=1 时
+// listener_address/listener_port 是 DNAT 目标：入口帧的目的地址与端口改写为
+// (listener_address, listener_port)，再由 Windows 栈投递给绑定在 listener_port 上的进程。
+// family 只允许 4 / 6；关闭时 driver 会清空 redirect 表。
+//
+// v7 起新用户态优先使用 probe_forwarded_ingress_config：它按 ingress ifindex 给出各自的
+// L/listener_port。这个 28 字节结构继续可用，语义是"任意入口都 DNAT 到同一个 L"（等价于一条
+// ifindex=0xFFFFFFFF 的记录）；两种下发方式互斥，后下发的会替换前一种的运行时映射。
+
 struct probe_forwarded_config
 {
     std::uint32_t enabled;
@@ -312,11 +386,13 @@ static_assert(offsetof(probe_forwarded_info, reserved0) == 28);
 //       self_injected + no_table + malformed + non_ip + permitted + blocked + redirected
 //   permitted == matched_permit + fallback_permit + udp_return_miss
 //   blocked == matched_block + fallback_block + redirect_blocked + redirect_return_failed
-//              + udp_blocked + udp_return_failed
+//              + redirect_return_ambiguous + udp_blocked + udp_return_failed
+//              + udp_return_ambiguous
 //   matched == matched_permit + matched_block + matched_redirect
 //   matched_redirect + udp_fragmented == redirect_ingress + redirect_blocked + udp_ingress + udp_blocked
-//   redirect_blocked == no_config + no_state + capacity + non_tcp + inject_failed
-//   udp_blocked == udp_no_config + udp_no_state + udp_capacity + udp_fragmented + udp_inject_failed
+//   redirect_blocked == no_config + no_state + no_ingress + capacity + non_tcp + inject_failed
+//   udp_blocked == udp_no_config + udp_no_state + udp_no_ingress + udp_capacity + udp_fragmented
+//                  + udp_inject_failed
 //   redirected == redirect_ingress + redirect_return + udp_ingress + udp_return
 //   fallback == fallback_permit + fallback_block
 struct probe_forwarded_stats
@@ -387,9 +463,29 @@ struct probe_forwarded_stats
     std::uint32_t redirect_high_water;
     std::uint32_t last_status;
     std::uint32_t abi_version;
+    // v7 追加：per-ingress / 多 L 的失败、歧义与混合 NBL 丢弃计数（7 个 u64，448→456 字节）。
+    // v6 的 0–399 字节前缀不变；旧客户端取 400/448 字节仍可用，新客户端用
+    // sizeof(probe_forwarded_stats) 判断是否包含全部字段。
+    //   redirect_return_ambiguous / udp_return_ambiguous：同一个 (L, listener_port, client) 下
+    //     出现两条以上表项时，回程帧无法唯一确定原始 server；整帧 block（fail closed），不猜。
+    //   redirect_no_ingress / udp_no_ingress：config enabled 但该入口没有 listener 映射。
+    //   redirect_multi_l / udp_multi_l：新表项选中了同入口的非首个 L（多 L 分布计数）。
+    std::uint64_t redirect_return_ambiguous;
+    std::uint64_t udp_return_ambiguous;
+    std::uint64_t redirect_no_ingress;
+    std::uint64_t udp_no_ingress;
+    std::uint64_t redirect_multi_l;
+    std::uint64_t udp_multi_l;
+    //   udp_return_miss_blocked：UDP 回程 NBL 里既有命中又有候选未命中时，未命中的帧无法单独
+    //     permit（整块 NBL 已因命中帧被消费），只能随原 NBL 丢弃；单独计数，不参与
+    //     udp_return_miss 的 “permit” 恒等式。单 NB（常见路径）不会产生该计数。
+    std::uint64_t udp_return_miss_blocked;
 };
 
-static_assert(sizeof(probe_forwarded_stats) == 400, "probe_forwarded_stats 是对外 ABI");
+inline constexpr std::uint32_t probe_forwarded_stats_v6_size = 400;
+inline constexpr std::uint32_t probe_forwarded_stats_v7_size = 448;
+static_assert(sizeof(probe_forwarded_stats) == 456, "probe_forwarded_stats 是对外 ABI");
+
 static_assert(offsetof(probe_forwarded_stats, permitted) == 24);
 static_assert(offsetof(probe_forwarded_stats, self_injected) == 88);
 static_assert(offsetof(probe_forwarded_stats, rejected_blobs) == 128);
@@ -417,6 +513,13 @@ static_assert(offsetof(probe_forwarded_stats, redirect_active) == 384);
 static_assert(offsetof(probe_forwarded_stats, redirect_high_water) == 388);
 static_assert(offsetof(probe_forwarded_stats, last_status) == 392);
 static_assert(offsetof(probe_forwarded_stats, abi_version) == 396);
+static_assert(offsetof(probe_forwarded_stats, redirect_return_ambiguous) == 400);
+static_assert(offsetof(probe_forwarded_stats, udp_return_ambiguous) == 408);
+static_assert(offsetof(probe_forwarded_stats, redirect_no_ingress) == 416);
+static_assert(offsetof(probe_forwarded_stats, udp_no_ingress) == 424);
+static_assert(offsetof(probe_forwarded_stats, redirect_multi_l) == 432);
+static_assert(offsetof(probe_forwarded_stats, udp_multi_l) == 440);
+static_assert(offsetof(probe_forwarded_stats, udp_return_miss_blocked) == 448);
 
 // 环形事件日志。时间戳是 KeQueryInterruptTime() 的 100ns 计数，仅用于排序与相对比较；
 // 地址按原样保存（IPv4 只用前 4 字节），端口为主机字节序。

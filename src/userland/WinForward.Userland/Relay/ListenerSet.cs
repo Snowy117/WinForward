@@ -3,43 +3,124 @@ using System.Net.Sockets;
 
 namespace WinForward.Userland.Relay;
 
+/// <summary>一个 (L, 端口) 上的 UDP 监听 socket；ForwardedUdpRelay 用它把回程从收到 datagram 的 L 发出。</summary>
+public readonly record struct UdpListener(IPEndPoint EndPoint, Socket Socket);
+
+/// <summary>一个 (L, 端口) 上的 TCP + UDP 监听 endpoint。</summary>
+public sealed class ListenerEndpoint
+{
+    public required IPEndPoint EndPoint { get; init; }
+
+    public required TcpListener Tcp { get; init; }
+
+    public required Socket Udp { get; init; }
+}
+
 /// <summary>
-/// 同时绑定 <c>0.0.0.0</c> 与 <c>::</c> 的 TCP + UDP 监听套接字，端口由系统分配后两族、两协议共用。
+/// 在一个端口上绑定一组本机地址（L）的 TCP + UDP 监听套接字。地址列表为空时退回
+/// <c>0.0.0.0</c> + <c>::</c> 的通配绑定（B6a 的单 listener 行为）。
 /// </summary>
 /// <remarks>
-/// 只绑 <c>127.0.0.1</c> 收不到指向网卡地址的连接（D6 实测），所以 v4 用 ANY；
-/// v6 显式关掉 DualMode：v4 已经单独绑了 ANY，双栈套接字会与它抢同一个端口。
-/// 端口取 0 由系统分配，再把实际端口通过 IOCTL 告诉驱动，避免固定端口冲突。
-/// TCP 与 UDP 的端口空间彼此独立，同一个编号可以同时绑定；任一绑定失败就换端口重来。
+/// 端口取 0 由系统分配，再把实际端口通过 IOCTL 告诉驱动。多个 L 共用同一个端口，驱动按
+/// 入口映射选择 DNAT 目标 L；回程帧的源地址就是 L，因此每个 L 一个 UDP socket 才能把
+/// 回程关联回正确的表项。任一绑定失败就换端口重来。
 /// </remarks>
 public sealed class ListenerSet : IDisposable
 {
     private const int BindAttempts = 5;
 
-    private readonly TcpListener _ipv4;
-    private readonly TcpListener _ipv6;
-    private readonly Socket _udp4;
-    private readonly Socket _udp6;
+    private readonly List<ListenerEndpoint> _endpoints;
 
-    private ListenerSet(TcpListener ipv4, TcpListener ipv6, Socket udp4, Socket udp6, int port)
+    private ListenerSet(List<ListenerEndpoint> endpoints, int port)
     {
-        _ipv4 = ipv4;
-        _ipv6 = ipv6;
-        _udp4 = udp4;
-        _udp6 = udp6;
+        _endpoints = endpoints;
         Port = port;
     }
 
     public int Port { get; }
 
-    public IReadOnlyList<TcpListener> Listeners => new[] { _ipv4, _ipv6 };
+    public IReadOnlyList<ListenerEndpoint> Endpoints => _endpoints;
 
-    public IReadOnlyList<Socket> UdpSockets => new[] { _udp4, _udp6 };
+    public IReadOnlyList<TcpListener> Listeners => _endpoints.Select(endpoint => endpoint.Tcp).ToArray();
 
-    public static ListenerSet Bind()
+    public IReadOnlyList<UdpListener> UdpSockets =>
+        _endpoints.Select(endpoint => new UdpListener(endpoint.EndPoint, endpoint.Udp)).ToArray();
+
+    public static ListenerSet Bind() => Bind(Array.Empty<IPAddress>());
+
+    public static ListenerSet Bind(IReadOnlyList<IPAddress> addresses)
+    {
+        ArgumentNullException.ThrowIfNull(addresses);
+        if (addresses.Count == 0)
+        {
+            return BindWildcard();
+        }
+
+        IPAddress[] targets = addresses.Distinct().ToArray();
+        SocketException? lastError = null;
+        for (int attempt = 0; attempt < BindAttempts; attempt++)
+        {
+            var endpoints = new List<ListenerEndpoint>(targets.Length);
+            int port = 0;
+            try
+            {
+                foreach (IPAddress address in targets)
+                {
+                    var tcp = new TcpListener(address, port);
+                    if (address.AddressFamily == AddressFamily.InterNetworkV6)
+                    {
+                        tcp.Server.DualMode = false;
+                    }
+                    tcp.Start();
+                    if (port == 0)
+                    {
+                        port = ((IPEndPoint)tcp.LocalEndpoint).Port;
+                    }
+
+                    var udp = new Socket(address.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
+                    if (address.AddressFamily == AddressFamily.InterNetworkV6)
+                    {
+                        udp.DualMode = false;
+                    }
+                    udp.Bind(new IPEndPoint(address, port));
+                    endpoints.Add(new ListenerEndpoint
+                    {
+                        EndPoint = new IPEndPoint(address, port),
+                        Tcp = tcp,
+                        Udp = udp,
+                    });
+                }
+
+                return new ListenerSet(endpoints, port);
+            }
+            catch (SocketException exception)
+            {
+                // 系统刚分配的端口可能已被别的进程在另一个地址/协议上占用；换一个端口重试。
+                lastError = exception;
+                foreach (ListenerEndpoint endpoint in endpoints)
+                {
+                    endpoint.Udp.Dispose();
+                    endpoint.Tcp.Stop();
+                }
+            }
+            catch
+            {
+                foreach (ListenerEndpoint endpoint in endpoints)
+                {
+                    endpoint.Udp.Dispose();
+                    endpoint.Tcp.Stop();
+                }
+                throw;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"连续 {BindAttempts} 次都无法在同一端口上绑定 {targets.Length} 个 listener 地址", lastError);
+    }
+
+    private static ListenerSet BindWildcard()
     {
         SocketException? lastError = null;
-
         for (int attempt = 0; attempt < BindAttempts; attempt++)
         {
             var ipv4 = new TcpListener(IPAddress.Any, 0);
@@ -61,11 +142,25 @@ public sealed class ListenerSet : IDisposable
                 udp6 = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp) { DualMode = false };
                 udp6.Bind(new IPEndPoint(IPAddress.IPv6Any, port));
 
-                return new ListenerSet(ipv4, ipv6, udp4, udp6, port);
+                var endpoints = new List<ListenerEndpoint>(2)
+                {
+                    new()
+                    {
+                        EndPoint = new IPEndPoint(IPAddress.Any, port),
+                        Tcp = ipv4,
+                        Udp = udp4,
+                    },
+                    new()
+                    {
+                        EndPoint = new IPEndPoint(IPAddress.IPv6Any, port),
+                        Tcp = ipv6,
+                        Udp = udp6,
+                    },
+                };
+                return new ListenerSet(endpoints, port);
             }
             catch (SocketException exception)
             {
-                // 系统刚分配给 v4 的端口可能已被别的进程在 v6 或 UDP 上占用；换一个端口重试。
                 lastError = exception;
                 udp6?.Dispose();
                 udp4?.Dispose();
@@ -88,9 +183,10 @@ public sealed class ListenerSet : IDisposable
 
     public void Dispose()
     {
-        _ipv4.Stop();
-        _ipv6.Stop();
-        _udp4.Dispose();
-        _udp6.Dispose();
+        foreach (ListenerEndpoint endpoint in _endpoints)
+        {
+            endpoint.Tcp.Stop();
+            endpoint.Udp.Dispose();
+        }
     }
 }

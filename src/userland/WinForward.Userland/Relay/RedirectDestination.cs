@@ -117,7 +117,8 @@ public sealed class RedirectDestination
     {
         destination = null;
         if (redirect.Magic != ProbeForwardedRedirect.MagicValue ||
-            redirect.Version != ProbeForwardedRedirect.VersionValue)
+            (redirect.Version != ProbeForwardedRedirect.VersionValue &&
+             redirect.Version != ProbeForwardedRedirect.LegacyVersionValue))
         {
             error = $"forwarded redirect 魔数/版本不匹配（0x{redirect.Magic:X8}/{redirect.Version}）";
             return false;

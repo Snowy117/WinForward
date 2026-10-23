@@ -22,7 +22,7 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
     private static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan EstablishTimeout = TimeSpan.FromSeconds(10);
 
-    private readonly IReadOnlyList<Socket> _listeners;
+    private readonly IReadOnlyList<UdpListener> _listeners;
     private readonly IReadOnlyDictionary<uint, ForwardedUpstream> _upstreams;
     private readonly IReadOnlyList<IRedirectContextSource> _sources;
     private readonly int _listenerPort;
@@ -41,7 +41,7 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
     private long _drops;
     private int _dropReports;
 
-    private ForwardedUdpRelay(Socket[] listeners,
+    private ForwardedUdpRelay(UdpListener[] listeners,
                               WfpDeviceClient device,
                               IReadOnlyList<ForwardedUpstream> upstreams,
                               int listenerPort,
@@ -56,15 +56,19 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
         };
         _listenerPort = listenerPort;
         _report = report;
-        _receiveLoops = listeners.Select(socket => Task.Run(() => ReceiveLoopAsync(socket, _stop.Token))).ToArray();
+        _receiveLoops = listeners
+                            .Select(listener => Task.Run(() => ReceiveLoopAsync(listener, _stop.Token)))
+                            .ToArray();
         _sweepLoop = Task.Run(() => SweepLoopAsync(_stop.Token));
+
     }
 
-    public static ForwardedUdpRelay Start(IReadOnlyList<Socket> listeners,
+    public static ForwardedUdpRelay Start(IReadOnlyList<UdpListener> listeners,
                                           WfpDeviceClient device,
                                           IReadOnlyList<ForwardedUpstream> upstreams,
                                           int listenerPort,
                                           TextWriter report)
+
     {
         ArgumentNullException.ThrowIfNull(listeners);
         ArgumentNullException.ThrowIfNull(device);
@@ -98,10 +102,10 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
 
     public long Drops => Interlocked.Read(ref _drops);
 
-    private async Task ReceiveLoopAsync(Socket listener, CancellationToken token)
+    private async Task ReceiveLoopAsync(UdpListener listener, CancellationToken token)
     {
         byte[] buffer = new byte[65535];
-        EndPoint remote = listener.AddressFamily == AddressFamily.InterNetwork
+        EndPoint remote = listener.Socket.AddressFamily == AddressFamily.InterNetwork
                               ? new IPEndPoint(IPAddress.Any, 0)
                               : new IPEndPoint(IPAddress.IPv6Any, 0);
 
@@ -110,7 +114,7 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
             SocketReceiveFromResult result;
             try
             {
-                result = await listener.ReceiveFromAsync(buffer, SocketFlags.None, remote, token);
+                result = await listener.Socket.ReceiveFromAsync(buffer, SocketFlags.None, remote, token);
             }
             catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException)
             {
@@ -134,7 +138,7 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
                 continue;
             }
 
-            if (!TryResolve(client, out RedirectDestination? destination, out string error) || destination is null)
+            if (!TryResolve(client, listener.EndPoint, out RedirectDestination? destination, out string error) || destination is null)
             {
                 Drop($"no-redirect {error}");
                 continue;
@@ -154,7 +158,9 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
             }
 
             AssociationKey key = new(client.Address, client.Port, destination.EndPoint.Address,
-                                     destination.EndPoint.Port, upstreamId);
+                                     destination.EndPoint.Port, upstreamId, listener.EndPoint.Address,
+                                     listener.EndPoint.Port);
+
             if (_slots.Count >= MaxAssociations && !_slots.ContainsKey(key))
             {
                 Drop($"association-capacity active={_slots.Count}");
@@ -164,7 +170,7 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
             Lazy<AssociationSlot> lazy = _slots.GetOrAdd(
                 key,
                 _ => new Lazy<AssociationSlot>(
-                    () => CreateSlot(key, client, destination.EndPoint, upstream, listener, token),
+                    () => CreateSlot(key, client, destination.EndPoint, upstream, listener.Socket, token),
                     LazyThreadSafetyMode.ExecutionAndPublication));
             AssociationSlot slot = lazy.Value;
             slot.Touch();
@@ -328,13 +334,13 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
         }
     }
 
-    private bool TryResolve(IPEndPoint client, out RedirectDestination? destination, out string error)
+    private bool TryResolve(IPEndPoint client, IPEndPoint listener, out RedirectDestination? destination, out string error)
     {
         destination = null;
         error = string.Empty;
         foreach (IRedirectContextSource source in _sources)
         {
-            if (source.TryReadUdp(client, _listenerPort, out destination, out string readError))
+            if (source.TryReadUdp(client, listener, out destination, out string readError))
             {
                 return true;
             }
@@ -445,7 +451,10 @@ public sealed class ForwardedUdpRelay : IAsyncDisposable
                                                  int ClientPort,
                                                  IPAddress ServerAddress,
                                                  int ServerPort,
-                                                 uint UpstreamId);
+                                                 uint UpstreamId,
+                                                 IPAddress ListenerAddress,
+                                                 int ListenerPort);
+
 
     private sealed class AssociationSlot
     {
