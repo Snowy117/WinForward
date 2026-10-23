@@ -1,0 +1,27 @@
+time=2026-10-23T09:49:30+08:00
+== ip -br -4 addr
+lo               UNKNOWN        127.0.0.1/8 
+eth0             UP             192.168.100.4/24 
+eth1             UP             192.168.77.4/24 
+nebula.vpn       UNKNOWN        192.168.101.4/24 
+br-pg            UP             10.89.2.1/24 
+br-axonhub       UP             10.89.1.1/24 
+br-deeix         UP             10.89.0.1/24 
+== .99 local?
+not-local
+== route get
+192.168.100.99 dev eth0 src 192.168.100.4 uid 1000 
+    cache 
+== route from .4
+192.168.100.99 from 192.168.100.4 dev eth0 uid 1000 
+    cache 
+== neigh
+192.168.100.99 dev eth0 lladdr 00:15:5d:03:72:8d STALE 
+== ping
+PING 192.168.100.99 (192.168.100.99) 56(84) bytes of data.
+64 bytes from 192.168.100.99: icmp_seq=1 ttl=128 time=0.814 ms
+64 bytes from 192.168.100.99: icmp_seq=2 ttl=128 time=0.752 ms
+
+--- 192.168.100.99 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1003ms
+rtt min/avg/max/mdev = 0.752/0.783/0.814/0.031 ms
