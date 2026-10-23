@@ -38,11 +38,25 @@
 
 ## B6b：多入口/多 L/多目的/热替换/观测
 
-- [ ] per-ingress L/listener：config/表项/用户态 listener；两个入口验证。
-- [ ] 回程 key 含 server；同一客户端端口多目的不串。
-- [ ] 热替换 generation：旧流旧 upstream，新流新规则。
-- [ ] StateCommand 输出 forwarded info/stats（installed/generation/count/fallback/计数）。
-- [ ] 事件/计数器按 ingress/upstream（至少可读）。
+- [x] per-ingress L/listener：ABI v7 新增 `probe_forwarded_ingress[_config]` 与 0x80F/0x810；
+      legacy 28 字节 config 等价于通配记录。驱动按 ingress 选 L，未配置入口 fail-closed；
+      用户态 ListenerSet 按 L 绑同一端口，WfpController 按规则 ingress 解析并回读。
+      实测 Internal(5) + External(14) 两入口与同一入口两个 L。证据 `verification.md` §13。
+- [x] 回程 key 含 server：入口/回程精确/回程候选三条索引；L 与 server 进入回程 key，
+      候选唯一才放行，歧义 fail-closed。同一客户端端口并发访问两个目的（跨入口与同入口多 L）
+      回程不串。§13。
+- [x] 热替换 generation：只换 blob 不清表；旧表项 generation/upstream 不变，新表项新一代。
+      实测 32→33（复核复跑 57→58），旧连接 upstream 0、新连接 upstream 1。§13。
+- [x] StateCommand：输出 `forwarded`、`forwarded-ingress`、`forwarded-stats/stat`（含 v7 计数）。
+      `b6b-state.log`。
+- [x] 事件/计数器按 ingress/upstream：查询/状态按入口与 upstream 可读；新增
+      redirect/udp_return_ambiguous、*_no_ingress、*_multi_l 计数。§13。
+- [x] 复核收口：产品路径明确每 ifindex 一个 L（同 ifindex 多 L 仅驱动/夹具）；新增
+      `noingress` 正测与“任意 L 查询歧义”正测；控制查询不再污染 data-path ambiguous；
+      UDP 混合 NBL miss 独立计数；旧尺寸 IOCTL 由 `vm-check` 实测；防火墙/临时件清理并加
+      `prepare-b6b-forwarded.ps1`；hotswap 旧连接换表后继续收发。证据 §13.4。
+
+
 
 ## B6c：门禁/性能/文档/验收
 

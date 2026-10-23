@@ -1,0 +1,88 @@
+[vm-check] OK   ABI 握手
+[vm-check] OK   配置 ABI 版本
+[vm-check] OK   规则信息 ABI 版本
+[vm-check] OK   probe_config 60 字节被驱动拒绝
+[vm-check] OK   probe_config 64 字节被驱动接受
+[vm-check] OK   probe_stats 输出 264 字节
+[vm-check] OK   probe_stats 输出短 8 字节被驱动拒绝
+[vm-check] OK   probe_rule_info 输出 32 字节
+[vm-check] OK   probe_event 每个 64 字节
+[vm-check] OK   forwarded query 20 字节被拒绝
+[vm-check] OK   forwarded query 24 字节（legacy）被接受，无表项返回 NOT_FOUND
+[vm-check] OK   forwarded query 输出 56 字节被拒绝
+[vm-check] OK   forwarded query 40 字节（v7）被接受，无表项返回 NOT_FOUND
+[vm-check] OK   forwarded stats 400 字节（v6）兼容
+[vm-check] OK   forwarded stats 448 字节（v7）兼容
+[vm-check] OK   forwarded stats 456 字节（v7+）
+[vm-check] OK   forwarded stats 392 字节被拒绝
+[vm-check] OK   PolicyLimits 与内核共用 511 上限
+[vm-check] OK   UTF-8 511 字节通过
+[vm-check] OK   511 字节内容一致
+[vm-check] OK   UTF-8 512 字节整条不匹配
+[vm-check] OK   中文路径按 UTF-8 返回
+[vm-check] OK   配置往返
+[vm-check] OK   rule-order 只有 block 规则：产品与驱动结论一致
+[vm-check] OK   rule-order 只有 block 规则：换表 generation +1
+[vm-check] OK   rule-order permit 全重叠后跟 block：产品与驱动结论一致
+[vm-check] OK   rule-order permit 全重叠后跟 block：拒绝时 generation 不变
+[vm-check] OK   rule-order permit 全重叠后跟 block：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order permit 全重叠后跟 block：报错可诊断
+[vm-check] OK   rule-order 端口区间相交：产品与驱动结论一致
+[vm-check] OK   rule-order 端口区间相交：拒绝时 generation 不变
+[vm-check] OK   rule-order 端口区间相交：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 端口区间相交：报错可诊断
+[vm-check] OK   rule-order 端口不相交：产品与驱动结论一致
+[vm-check] OK   rule-order 端口不相交：换表 generation +1
+[vm-check] OK   rule-order 地址族不相交：产品与驱动结论一致
+[vm-check] OK   rule-order 地址族不相交：换表 generation +1
+[vm-check] OK   rule-order 地址族任一侧任意：产品与驱动结论一致
+[vm-check] OK   rule-order 地址族任一侧任意：拒绝时 generation 不变
+[vm-check] OK   rule-order 地址族任一侧任意：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 地址族任一侧任意：报错可诊断
+[vm-check] OK   rule-order 网段不相交：产品与驱动结论一致
+[vm-check] OK   rule-order 网段不相交：换表 generation +1
+[vm-check] OK   rule-order 网段嵌套：产品与驱动结论一致
+[vm-check] OK   rule-order 网段嵌套：拒绝时 generation 不变
+[vm-check] OK   rule-order 网段嵌套：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 网段嵌套：报错可诊断
+[vm-check] OK   rule-order 网段任一侧任意：产品与驱动结论一致
+[vm-check] OK   rule-order 网段任一侧任意：拒绝时 generation 不变
+[vm-check] OK   rule-order 网段任一侧任意：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 网段任一侧任意：报错可诊断
+[vm-check] OK   rule-order 进程选择器不同：产品与驱动结论一致
+[vm-check] OK   rule-order 进程选择器不同：换表 generation +1
+[vm-check] OK   rule-order 进程选择器不同（含非 ASCII 路径）：产品与驱动结论一致
+[vm-check] OK   rule-order 进程选择器不同（含非 ASCII 路径）：换表 generation +1
+[vm-check] OK   rule-order 进程选择器同一条路径：产品与驱动结论一致
+[vm-check] OK   rule-order 进程选择器同一条路径：拒绝时 generation 不变
+[vm-check] OK   rule-order 进程选择器同一条路径：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 进程选择器同一条路径：报错可诊断
+[vm-check] OK   rule-order 进程任一侧任意：产品与驱动结论一致
+[vm-check] OK   rule-order 进程任一侧任意：拒绝时 generation 不变
+[vm-check] OK   rule-order 进程任一侧任意：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 进程任一侧任意：报错可诊断
+[vm-check] OK   rule-order 两条 block 规则：产品与驱动结论一致
+[vm-check] OK   rule-order 两条 block 规则：换表 generation +1
+[vm-check] OK   rule-order block 在前 permit 在后：产品与驱动结论一致
+[vm-check] OK   rule-order block 在前 permit 在后：换表 generation +1
+[vm-check] OK   rule-order redirect 遮蔽 block：产品与驱动结论一致
+[vm-check] OK   rule-order redirect 遮蔽 block：拒绝时 generation 不变
+[vm-check] OK   rule-order redirect 遮蔽 block：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order redirect 遮蔽 block：报错可诊断
+[vm-check] OK   rule-order IPv6 网段推出地址族：产品与驱动结论一致
+[vm-check] OK   rule-order IPv6 网段推出地址族：拒绝时 generation 不变
+[vm-check] OK   rule-order IPv6 网段推出地址族：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order IPv6 网段推出地址族：报错可诊断
+[vm-check] OK   rule-order IPv6 与 IPv4 网段不相交：产品与驱动结论一致
+[vm-check] OK   rule-order IPv6 与 IPv4 网段不相交：换表 generation +1
+[vm-check] OK   rule-order 兜底动作为 block（无规则）：产品与驱动结论一致
+[vm-check] OK   rule-order 兜底动作为 block（无规则）：换表 generation +1
+[vm-check] OK   rule-order 兜底 block 与 permit 规则：产品与驱动结论一致
+[vm-check] OK   rule-order 兜底 block 与 permit 规则：拒绝时 generation 不变
+[vm-check] OK   rule-order 兜底 block 与 permit 规则：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 兜底 block 与 permit 规则：报错可诊断
+[vm-check] OK   rule-order 兜底 block 与全部 block 规则：产品与驱动结论一致
+[vm-check] OK   rule-order 兜底 block 与全部 block 规则：换表 generation +1
+[vm-check] OK   rejected_blobs 精确增加
+[vm-check] 已恢复：enabled=0、空规则表、fallback=permit
+[vm-check] checks=86 failures=0 verdict=PASS

@@ -1,0 +1,27 @@
+ASSERT PASS: 解析入口 ifIndex (ifindex=5 local-ip=192.168.100.2)
+ASSERT PASS: 驱动 ABI 版本与夹具一致 (expected=7 actual=7)
+[alias] 已添加 10.99.0.1/24 到 Internal（测试后删除）
+[alias] 清理 watchdog 已启动：异常退出时最多 10 分钟后删除 10.99.0.1
+ASSERT PASS: noingress 解析两个入口 ifIndex (internal=5 external=14)
+[alias] 已添加 192.168.77.99/24 到 External（测试后删除）
+[alias] 清理 watchdog 已启动：异常退出时最多 10 分钟后删除 192.168.77.99
+ASSERT PASS: noingress blob installed=1 (expected=1 actual=1)
+ASSERT PASS: noingress 规则数回读一致 (expected=1 actual=1)
+[forwarded-tcp] READY phase=noingress listener=40430 target=192.168.77.99:40250 wait=15000
+[forwarded-tcp] noingress stats: calls=232 in=93 out=139 redirected=0 (ingress=0 return=0) created=0 active=0/0 blocked=1 redirect_blocked=1 no_config=0 no_state=0 capacity=0 non_tcp=0 inject_failed=0 return_failed=0 return_miss=0 expired=0 multi_nb=3 complete=0/failed=0 self_injected=0
+ASSERT PASS: noingress 命中未配置入口 (expected>=1 actual=1)
+ASSERT PASS: noingress 原帧被 block (expected>=1 actual=1)
+ASSERT PASS: noingress 没有建表 (expected=0 actual=0)
+ASSERT PASS: noingress 没有 DNAT 注入 (expected=0 actual=0)
+ASSERT PASS: noingress 没有回程歧义 (expected=0 actual=0)
+ASSERT PASS: noingress：classify_calls == no_write_right + in + out (expected=232 actual=232)
+ASSERT PASS: noingress：帧去向守恒（含 redirected） (expected=232 actual=232)
+ASSERT PASS: noingress：permitted == matched_permit + fallback_permit + udp_return_miss (expected=223 actual=223)
+ASSERT PASS: noingress：blocked == matched_block + fallback_block + redirect 失败 + 歧义 + udp 失败 (expected=1 actual=1)
+ASSERT PASS: noingress：matched == permit + block + redirect (expected=1 actual=1)
+ASSERT PASS: noingress：matched_redirect + udp_fragmented == ingress + blocked (expected=1 actual=1)
+ASSERT PASS: noingress：redirect_blocked 拆分 (expected=1 actual=1)
+ASSERT PASS: noingress：redirected == ingress + return (expected=0 actual=0)
+[alias] 已删除 192.168.77.99（External）
+[forwarded-tcp] 已恢复 rules=0 fallback=permit config=disabled
+[alias] 已删除 10.99.0.1（Internal）

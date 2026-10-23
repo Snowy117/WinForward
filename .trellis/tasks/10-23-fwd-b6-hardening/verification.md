@@ -1,6 +1,6 @@
-# B6a 验证记录：Forwarded 正确性收口（2026-10-23）
+# B6a/B6b 验证记录：Forwarded 正确性收口、多入口与热替换（2026-10-23）
 
-环境：WinLTSC `192.168.100.2`（Internal ifIndex=5），Linux `192.168.100.4`；驱动 ABI v6、
+B6a 环境（§1–§12）：WinLTSC `192.168.100.2`（Internal ifIndex=5），Linux `192.168.100.4`；驱动 ABI v6、
 `forwarded_redirect_capacity=4096`。本轮最终源码包含：分片跟随表、TCP 回程部分注入一致性、
 stop 排水（完成例程最后 decrement）、看门狗 generation 所有权、分片 permit-first 与
 host 同 remote 不同端口测试、reject 产品脚本。原始日志在 `verification/`。`final-*` 是第二轮跟随表构建，`final2-*` 是第三轮前的重构构建（未单独记录
@@ -226,3 +226,83 @@ WinpkFilter 用户态 API/工具，注入副本在 LWF 内的可见性**未直�
 | LWF 注入可见性 | 未验证。 |
 | IPv6 分片构造 | 跟随表版本已 E2E（9 片 + permit-first + host 同 remote）；仍用 1280 MTU 内核分片，非逐片 raw；raw HDRINCL 交替 EPERM。 |
 | 环境 | IPv6 保持启用、防火墙/别名保留；测试进程见 §10。 |
+## 13. B6b：多入口 / 多 L / 回程 key / 热替换 / 观测（2026-10-23）
+
+驱动 ABI **7**，安装在 WinLTSC：`C:\Windows\System32\drivers\wfprobe.sys` SHA-256
+`EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`（复核收口构建），服务 RUNNING；
+上一版 DACF 回滚文件保留在 `C:\workspace\wfprobe-final.sys`（91024B，未删除）；
+`C:\workspace\rollback\` 另有 abi3/abi4/abi5/abi5-b5 四份历史版本。
+
+### 13.1 实现
+
+- 新增 `probe_forwarded_ingress`（28B）与 `probe_forwarded_ingress_config`（16B 头 + N 条记录），
+  IOCTL 0x80F/0x810；legacy 28B config 等价于 ifindex=0xFFFFFFFF 通配记录。
+- `forwarded_state.config` 改为运行时 endpoint 表；`plan_forwarded_inbound` 按 ingress/family 选 L，
+  优先选候选回程 key 空闲的 L；未配置入口 fail-closed（`*_no_ingress`）。
+- redirect 表三条索引：入口、回程精确 (L, listener_port, client, server)、回程候选
+  (L, listener_port, client)；候选不唯一时 block + `*_return_ambiguous`。
+- 查询结构 24→40B（追加 L），输出 64→88B（追加 L/generation，version=2，旧 64B 输出仍写 v1）；
+  stats 400→456B（追加 7 个 u64，含 `udp_return_miss_blocked`）；448B 输出兼容。
+- 用户态：ListenerSet 按 L 在同一端口绑 TCP/UDP；context source 查询带 L；UDP relay 关联 key 含
+  listener 端点；WfpController 按规则 ingress 解析 L 并回读；StateCommand 输出 forwarded 行。
+- 夹具新增 `multi` / `hotswap` / `noingress` phase 与 `tools/linux/forwarded_tcp_b6b.py`。
+
+### 13.2 证据（原始日志在 `verification/`）
+
+| 项 | 结果 | 日志 |
+|---|---|---|
+| Linux check.sh --full | 8 PASS / 0 FAIL | `b6b-linux-check.log` |
+| verify-gates.sh | 23/23 PASS（19 变异全红）；dotnet 单测 227/227；ABI 23/23 | `b6b-verify-gates.log`、`b6b-dotnet-test.log`、`b6b-abi.log` |
+| forwarded-tcp core | 41 PASS / 0 FAIL（65536B，ACK=65537） | `b6b-tcp-core.log` |
+| forwarded-tcp multi | 40 PASS / 0 FAIL；4 条并发连接，两入口 + 同入口两 L，回程不串 | `b6b-tcp-multi.log` |
+| forwarded-tcp hotswap | 27 PASS / 0 FAIL；旧表项保持旧 generation/旧 upstream，新表项新一代（日志 32→33；复核复跑 57→58） | `b6b-tcp-hotswap.log`、`review/review-hotswap.log` |
+| forwarded-udp core | 84 PASS / 0 FAIL（10/10，源地址恢复） | `b6b-udp-core.log` |
+| host rules / forwarded-rules / selftest / gates / udp-rules | 全 PASS（EXIT 全 0） | `b6b-host-suites.log` |
+| 产品 UDP reject E2E（Controller + 真实 relay） | `REJECT-E2E-RESULT=PASS`；`controller-forwarded-ingress ifindex=5 listener=192.168.100.2:54298`；relayed=0 back=0 associations=2 failures=2 | `b6b-product-udp-reject.log`、`b6b-product-controller.log` |
+| StateCommand | `forwarded abi=7 installed=1 generation=48 rules=0 fallback=0 enabled=0 ingresses=1`；`forwarded-ingress` 与 `forwarded-stat` 行（`b6b-state.log` 采集时缺 `no_write_right`/`redirect_non_tcp`，已补代码，复核见 `review/`） | `b6b-state.log` |
+说明：§13.2 为首轮证据；收口后的最终数字为 core 44、multi 42、hotswap 27（旧连接换表后继续收发 4096B）、
+noingress 18、UDP core 85、vm-check 86、产品 reject PASS，见 §13.4 与 `review2/`。
+multi 关键断言：跨入口 locals=192.168.100.2/192.168.77.2、ingress=5/14、回程记录
+192.168.100.99:40250 与 192.168.77.99:40250；同入口 locals=192.168.100.2/192.168.100.98、
+server ports=40250/40251，`redirect_multi_l=1`、`return_ambiguous=0`、`no_ingress=0`。
+hotswap 关键断言：旧连接 upstream 0 / generation 32，新连接 upstream 1 / generation 33，
+换表后旧连接仍为 0/32，两个假 SOCKS5 各 1 次 CONNECT（复核复跑为 57/58）。
+
+### 13.3 边界与风险
+
+- 同一 (L, listener_port, client) 的并发多目的受 L 数量限制；L 用尽后新表项替换旧表项，
+  单 L 时仍是“一个客户端端口一个目的”（可复现，不伪装为已支持）；替换后旧目的在途回程会命中新表项
+  并被还原成新 server，因此单 L 的并发多目的不是 fail-closed。
+- UDP 多 L 并发多目的与 UDP 热替换未单独 E2E；UDP 复用 TCP 已测的同一套 redirect 表/回程逻辑，UDP core 单 L 回归通过。
+- IPv6 多入口/多 L 未验证；IPv6 分片仍用 1280 MTU 内核分片。产品控制器（WfpController）的两入口映射未做 E2E：`forwarded-tcp --phase multi` 由 wfprobe 直接下发 ingress 配置；同一 ifindex 多 L 也只由夹具产生（产品每个 ifindex 只解析一个 L）。
+- 测试用防火墙规则（40400–40430、40999）与 `C:\workspace` 临时件已清理；需要复跑时用
+  `tools/windows/prepare-b6b-forwarded.ps1` 重建端口放行，`-Remove` 删除。`.98`/`.77.99` 别名由套件
+  运行时添加和清理，当前均为 0。
+
+### 13.4 复核条件收口（2026-10-23 第二轮）
+
+| 条件 | 处理 | 证据 |
+|---|---|---|
+| 产品多入口/同 ifindex 多 L | 选 (b)：产品 `WfpController` 每个 ifindex 只解析一个 L；同 ifindex 多 L 是驱动/夹具能力，产品配置没有“按规则选 L”的字段。README/architecture/userland 文档已写清。 | `WfpController.ResolveForwardedListenerPlan` 注释；`src/driver/README.md`、`wfp-architecture.md` §7.13/§7.15。 |
+| `no_ingress` 正测 | 新增 `forwarded-tcp --phase noingress`：只配置 Internal，规则匹配 External。 | 18 PASS / 0 FAIL；本次 `redirect_no_ingress=2`（>=1）、`blocked=2`、`redirect_blocked=2`、`redirect_created=0`，表为空（`b6b-recheck-noingress.log`）。 |
+| 候选歧义正测 | multi 阶段在同一客户端端口、两个 L 上建两条表项，再做 24B/任意 L 查询：返回 NOT_FOUND，且查询不增加 data-path ambiguous。 | 42 PASS / 0 FAIL；`Win32=1168`、`redirect_return_ambiguous=0`（`b6b-recheck-multi.log`）。真正的 data-path 歧义是防御性路径（create 会先移除同候选），不通过公开 API 构造；已明确记录。 |
+| 控制查询污染 data-path 计数 | 删除 `probe_forwarded_query_redirect` 里的 ambiguous 计数；查询只返回 NOT_FOUND。 | 代码 + multi 查询断言 0；`probe_forwarded_config.cpp` 注释。 |
+| UDP 混合 hit+miss 计数 | 新增 `udp_return_miss_blocked`（stats 400→456B，v7 追加第 7 个 u64）；成功/失败/歧义分支都记录本 NBL 内未命中的候选帧，不参与 permitted 恒等式。 | `probe_forwarded_stats` 偏移 448；StateCommand 输出该行；UDP core `miss_blocked=0`。混合 NBL 未构造 E2E，属代码审查+计数路径。 |
+| 旧尺寸 IOCTL | 24B query / 64B redirect / 400B/448B stats 用真实设备测；同时修正 448B 输出被错报 400B、以及只写 400B 的问题。v6 查询的 64B 输出用 core 阶段的真实表项验证 v1 回读。 | `vm-check` 86 checks / 0 failures：20B query 拒绝、24B 接受并 NOT_FOUND、56B 输出拒绝、40B 接受；stats 400/448/456 兼容、392 拒绝（`b6b-recheck-vm-check.log`）。core 44 PASS：`legacy query version=1`、无 L、server 回读正确（`b6b-recheck-core.log`）。 |
+| 清理/准备 | 新增 `tools/windows/prepare-b6b-forwarded.ps1`（`-Remove` 删除）；VM 上 `wf-b6b-*` 防火墙、`wfk-b6b*.tgz`、`b6b-product.json`、`b6b-client.txt` 已清理；`.98`/`.77.99` 别名已清。 | 清理后三个计数均为 0。 |
+| hotswap 旧连接继续收发 | swap 客户端在 gap 后继续在旧连接发一轮；套件断言旧连接双向 4096B、新连接 2048B。 | 27 PASS / 0 FAIL，`b6b-recheck-hotswap.log`。 |
+| 单 L 多目的替换表述 | 保留并确认：替换后旧目的在途回程会命中新表项并被还原成新 server，单 L 并发多目的不是 fail-closed。 | §13.3。 |
+| 边界 | UDP 多 L/热替换、IPv6 多入口、LWF 仍未验证，留 B6c/未验证，不伪装。 | §13.3。 |
+
+收口构建：驱动 ABI 7，SHA-256
+`EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`；DACF 回滚文件仍在
+`C:\workspace\wfprobe-final.sys`。
+
+收口复跑：
+- Linux `check.sh --full` 8/8 PASS、`dotnet test` 227/227、`verify-gates.sh` 23/23（19 变异全红）。
+  日志 `b6b-recheck-linux-check.log`、`b6b-recheck-dotnet-test.log`、`b6b-recheck-verify-gates.log`。
+- VM `forwarded-tcp core` 44/0（含 legacy 64B 输出）、`multi` 42/0、`hotswap` 27/0、`noingress` 18/0、`forwarded-udp core`
+  85/0、`vm-check` 86/0、host 五套件 EXIT 全 0；日志 `b6b-recheck-*.log`。
+- StateCommand `forwarded ... enabled=0 ingresses=0`，并输出 `udp_return_miss_blocked`（`b6b-recheck-state.log`）。
+- 独立复核（`review2/`）：Linux 8/8、dotnet 227、gates 23；VM core 44、multi 42、hotswap 27、noingress 18、UDP 85、vm-check 86；产品 UDP reject PASS；详见 `review2/README.md`。
+- 未 commit/push；未 reset VM。

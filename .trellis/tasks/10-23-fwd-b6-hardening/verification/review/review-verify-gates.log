@@ -1,0 +1,25 @@
+PASS 基线/ABI 一致性（基线绿）
+PASS 基线/全部单测（基线绿）
+PASS ABI/改 C++ 头的结构尺寸（变异后变红）
+PASS ABI/改 C++ 头的字段偏移（变异后变红）
+PASS ABI/改 C++ 头的枚举取值（变异后变红）
+PASS ABI/改 C++ 头的 IOCTL 功能号（变异后变红）
+PASS ABI/改 redirect_context 魔数（变异后变红）
+PASS ABI/改夹具的 ABI 版本（变异后变红）
+PASS ABI/改夹具的枚举取值（变异后变红）
+PASS ABI/改产品常量（变异后变红）
+PASS 冲突检查/拆掉进程谓词（变异后变红）
+PASS 配置/让未知字段被静默忽略（变异后变红）
+PASS SOCKS5/把域名地址类型写成 IPv4（变异后变红）
+PASS SOCKS5/把 IPv6 地址类型写成 IPv4（变异后变红）
+PASS SOCKS5/端口字节序写反（变异后变红）
+PASS SOCKS5/握手超时不包装成 Socks5Exception（变异后变红）
+PASS SOCKS5/忽略 rep 非 0（变异后变红）
+PASS SOCKS5/接受上游拒绝 no-auth（变异后变红）
+PASS SOCKS5/非 ASCII 域名不校验（变异后变红）
+PASS SOCKS5/配了上游却走直连（静默回退）（变异后变红）
+PASS 配置/静默忽略 socks5 段（变异后变红）
+PASS 还原后/ABI 一致性（基线绿）
+PASS 还原后/全部单测（基线绿）
+
+===== 反向验证通过：19 条变异全部让目标测试变红；4 条基线为绿（共 23 条检查）=====

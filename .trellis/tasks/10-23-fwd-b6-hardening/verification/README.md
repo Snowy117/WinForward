@@ -30,6 +30,19 @@
 | `gate-b6a-r5-1.log` / `gate-b6a-r5-2.log` | 第五轮交付源码连续两次 gate：均 GATE-RESULT=PASS；gate 构建 SHA 5067…4B37 / B572…4FAC；U13 修复后无 flake。 |
 | `udp-rules-final4-standalone.log` | gate 首次 U13 flake 后单独重跑 `udp-rules`：verdict=PASS。 |
 | `b6-core-a.out` / `b6-frag4.out` / `b6-frag6.out` / `b6-fraghost.out` / `b6-capacity.out` / `b6-tcp2.out` / `b6-u7a5.out` / `b6-u7b5.out` | 修复前/中期的原始运行，保留对照。 |
+## B6b 证据（ABI v7）
+
+| 文件 | 内容 |
+|---|---|
+| `b6b-abi.log` / `b6b-dotnet-test.log` / `b6b-verify-gates.log` | ABI 23/23、dotnet 227/227、verify-gates 23/23。 |
+| `b6b-linux-check.log` | `tools/check.sh --full` 8 PASS / 0 FAIL。 |
+| `b6b-tcp-core.log` / `b6b-tcp-multi.log` / `b6b-tcp-hotswap.log` | forwarded TCP core / multi / hotswap；multi 覆盖两入口与同入口两 L，hotswap 覆盖旧表项 generation/upstream 保留。 |
+| `b6b-udp-core.log` | forwarded UDP core 84 PASS（10/10、源地址恢复）。 |
+| `b6b-host-suites.log` | host rules / forwarded-rules / selftest / gates / udp-rules，EXIT 全 0。 |
+| `b6b-product-udp-reject.log` / `b6b-product-controller.log` | 产品 Controller + `ForwardedUdpRelay` 的 reject E2E 与 ingress 日志。 |
+| `b6b-state.log` / `b6b-final-state.log` | StateCommand 输出与测试后 VM 状态。 |
+| `review/` | 第一轮独立复核复跑（Linux 门禁、TCP core/multi/hotswap、UDP core）与客户端 stdout，见 `review/README.md`。 |
+| `review2/` / `b6b-recheck-*` | 第二轮收口与独立复核：core 44、multi 42、hotswap 27（含 post-swap）、noingress 18、UDP 85、vm-check 86、产品 reject PASS，见 `review2/README.md`。 |
 
 说明：
 

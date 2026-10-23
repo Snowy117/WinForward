@@ -1,0 +1,21 @@
+policy rules=0 fallback=Permit blob=40 config=C:\workspace\b6b-product.json records=True socks5=none
+controller-rules installed=1 generation=102 count=0 fallback=0 blob=40 process_pool=0 networks=0
+controller-forwarded-installed generation=47 count=1 fallback=0 blob=104
+controller-forwarded count=1 upstreams=1 blob=104
+controller-forwarded-ingress-config enabled=0 count=1 listener_port=54298 (redirect table cleared)
+controller-forwarded-ingress ifindex=5 listener=192.168.100.2:54298 family=4
+udp-relay start port=54298 listeners=1 upstreams=1
+controller-config enabled=1 listener_port=54298 listener_pid=7108 self_count=1
+controller-ready pid=7108 port=54298 listener=192.168.100.2:54298
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-forwarded-reject.stop
+udp-relay association client=192.168.100.4:40501 server=192.168.100.99:40250 upstream_id=0 via=192.168.100.4:40500
+udp-relay association-failed client=192.168.100.4:40501 server=192.168.100.99:40250 Socks5Exception: SOCKS5 ?? 192.168.100.4:40500 ?? UDP ASSOCIATE:rep=7
+udp-relay association client=192.168.100.4:40501 server=192.168.100.99:40250 upstream_id=0 via=192.168.100.4:40500
+udp-relay association-failed client=192.168.100.4:40501 server=192.168.100.99:40250 Socks5Exception: SOCKS5 ?? 192.168.100.4:40500 ?? UDP ASSOCIATE:rep=7
+controller-config-disabled enabled=0
+controller-forwarded-ingress-config-disabled enabled=0 count=1 port=54298
+udp-relay stop in=3 relayed=0 back=0 associations=2 failures=2 drops=0
+controller-forwarded-installed generation=48 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=0 refused=0 bytes_in=0 bytes_out=0
+controller-exit code=0
