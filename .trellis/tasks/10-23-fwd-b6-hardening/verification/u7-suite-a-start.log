@@ -1,0 +1,10 @@
+SUITE-PID=6472
+ASSERT PASS: 解析入口 ifIndex (ifindex=5 local-ip=192.168.100.2)
+ASSERT PASS: 驱动 ABI 版本与夹具一致 (expected=6 actual=6)
+ASSERT PASS: forwarded blob installed=1 (expected=1 actual=1)
+ASSERT PASS: forwarded 规则数回读一致 (expected=1 actual=1)
+ASSERT PASS: config 回读 enabled=1 (expected=1 actual=1)
+ASSERT PASS: config 回读 listener_port (expected=40400 actual=40400)
+ASSERT PASS: config 回读 family (expected=4 actual=4)
+[forwarded-udp] 看门狗已启动：100s 后恢复空 permit 表与 disabled config generation=31 log=C:\Users\Neko\AppData\Local\Temp\wfprobe-watchdog-40400.log
+[forwarded-udp] READY phase=core listener=40400 verify_port=41400 remote=192.168.100.99:40250 backend=192.168.100.4:40250 datagrams=1 created=1 decoy=bound

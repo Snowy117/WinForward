@@ -1,0 +1,11 @@
+ASSERT PASS: controller 进入 READY (pid=5396 log=C:\Users\Neko\AppData\Local\Temp\wf-forwarded-reject-controller.log)
+DECOY-BOUND 192.168.100.99:40250
+READY：请在 Linux 侧运行 reject 客户端（15 秒窗口），log=C:\Users\Neko\AppData\Local\Temp\wf-forwarded-reject-controller.log
+ASSERT PASS: decoy 没有收到直连回退帧 (count=0 bytes=0)
+ASSERT PASS: controller 记录了 association-failed (log=C:\Users\Neko\AppData\Local\Temp\wf-forwarded-reject-controller.log)
+ASSERT PASS: controller 打印了 udp-relay stop (matched=True)
+ASSERT PASS: 没有成功中继的 datagram (relayed=0)
+ASSERT PASS: 没有回程字节 (back=0)
+ASSERT PASS: 至少尝试过一次 UDP ASSOCIATE (associations=3)
+ASSERT PASS: 所有关联都失败 (failures=3)
+REJECT-E2E-RESULT=PASS

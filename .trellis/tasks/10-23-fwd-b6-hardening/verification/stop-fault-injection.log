@@ -1,0 +1,14 @@
+stop_seconds=0.055216
+state=STATE              : 1  STOPPED
+
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\wfprobe
+    LastStopOutstandingAtEntry    REG_DWORD    0x0
+
+
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\wfprobe
+    LastStopOutstandingAfterDrain    REG_DWORD    0x0
+
+
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\wfprobe
+    LastStopDelayedCompletions    REG_DWORD    0x2
+
