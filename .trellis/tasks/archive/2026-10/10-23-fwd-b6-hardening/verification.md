@@ -306,3 +306,82 @@ hotswap 关键断言：旧连接 upstream 0 / generation 32，新连接 upstream
 - StateCommand `forwarded ... enabled=0 ingresses=0`，并输出 `udp_return_miss_blocked`（`b6b-recheck-state.log`）。
 - 独立复核（`review2/`）：Linux 8/8、dotnet 227、gates 23；VM core 44、multi 42、hotswap 27、noingress 18、UDP 85、vm-check 86；产品 UDP reject PASS；详见 `review2/README.md`。
 - 未 commit/push；未 reset VM。
+
+## 14. B6c：独立 Linux 门禁、A5、文档与验收（2026-10-23）
+
+### 14.1 独立 Linux 门禁
+
+- 脚本：`tools/linux/forwarded_gate.py`（说明 `tools/linux/forwarded_gate.md`）。
+  通过 `--run-cmd/--poll-cmd/--up-cmd` 驱动 Windows；默认 `windows-vm` 会话，CI 换成等价
+  SSH/WinRM 包装。
+- 自动 prepare/cleanup：`tools/windows/prepare-b6c-forwarded.ps1` 加 `.99` 别名与
+  40250/40400/40600/40500/41400 放行，退出时 `-Remove`；Linux 侧按需启动 TCP/UDP echo
+  backend。门禁对 suite 和客户端都检查 **禁止 `--no-verify`**。
+- 覆盖并通过：`tcp-core`、`udp-core`、`fragment-ipv4`（9 片）、`permit-first`、`host-same-remote`、
+  产品 `reject`。完整跑一次 `ALL PASS`，原始日志 `verification/forwarded-gate/run.log` 与
+  各阶段 `*-suite.log`/`*-client.log`、`reject-*`。
+- **fail 阶段（B6c 发现，未修数据面）**：ABI v7 下 config disabled 时 WFP filter 不再进入
+  classify，B6a 的 `udp_no_config`/`blocked` 断言不成立；`--include-fail` 诊断日志
+  `verification/forwarded-gate-failcheck/run.log` 复现（calls 有值、no_config=0、客户端无回包）。
+  门禁默认跳过并在 `run.log` 打印原因。这是 B6b 引入的行为差异，不是测试替身可修的问题；
+  需要产品确认“disabled 不拦截”语义，B6c 不改数据面。
+- 未自动化（明确）：multi/hotswap/noingress/StateCommand（Windows-only wfprobe 阶段，B6b 单独
+  验证）、IPv6 9 片（需要客户端 IPv6/MTU）、A5（测量脚本，不是 pass/fail）。
+
+### 14.2 gate.ps1
+
+- Windows-only gate 需要外部 **Linux 客户端**才能跑 forwarded-udp core/fragment/permit/host/reject；
+  脚本在 gate 内没有 Linux 客户端执行面，强行加会变成“suite 空等/假绿”。因此 gate.ps1 保持
+  host/WFP/forwarded-rules F1/F2/F3/F6/池检查，并打印
+  `FORWARDED-DATAPLANE=EXTERNAL（…forwarded_gate.py…）`；forwarded 数据面由 Linux 门禁单独
+  作为通过条件，失败即该门禁失败。
+- gate.ps1 本轮未改数据面；B6b 的 host/WFP gate 仍全绿（见 §13.4）。
+
+### 14.3 A5 成本
+
+- 方法/原始日志：`verification/a5-cost.md`、`verification/a5-cost/`。
+- 量级：forwarded TCP 1MiB 0.8–4.5 MB/s、forwarded UDP 200×64B burst 209pps；host 直连
+  12.9 MB/s / 1590pps。包含 C# suite 中继 + VM vSwitch，单次采样噪声大；未用 iperf3/内核 sink。
+- 结论：只作参考，**不设硬 kill criteria**，不能据此声称优于 WinpkFilter；D7 保持未决。
+
+### 14.4 文档
+
+- `AGENTS.md`：ABI v7、Forwarded 状态/边界、Linux 门禁入口、结构性缺口更新。
+- `wfp-architecture.md`：ABI v7 描述、§7.16 B6c 门禁/成本/验收、D7 指针。
+- `src/driver/README.md`、`src/userland/README.md`：B6c 门禁、fail 边界、A5、产品多 L 限制。
+- `d7-decision.md`：WFP L2 vs NDISAPI/WinpkFilter 的产品决策记录（未决 + 采用条件）。
+- 边界统一见 §15。
+
+### 14.5 最终验收
+
+- 当前驱动 ABI v7，SHA-256 `EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`
+  （B6b 收口构建，B6c 未改驱动/ABI）；最终 gate 后从 `C:\workspace\wfprobe-abi7.sys` 重新安装，
+  `sc query` RUNNING，installed SHA 与备份一致。
+- Linux：`tools/check.sh --full` 8 PASS / 0 FAIL（`verification/b6c-linux-check.log`）；
+  `dotnet run --project ... -- test` 227/227（`b6c-dotnet-test.log`）；`verify-gates.sh` 23/23
+  （`b6c-verify-gates.log`，19 变异全红）。
+- Linux 门禁：`verification/forwarded-gate/run.log` **ALL PASS**（tcp/udp core、fragment、permit-first、
+  host-same-remote、reject）；fail 阶段已知差异见 §14.1。
+- VM：host `rules`/`udp-rules`/`gates` EXIT 0，`selftest` V4/V6 均 PASS（`b6c-host-*.log`、
+  `b6c-selftest*.log`）；`gate.ps1` **GATE-RESULT=PASS**（`b6c-gate.log`），gate 构建 SHA 即 EA27，
+  卸载池 WfPr 177→177、WfIj 1→0、WfTr 6→0；日志中有
+  `FORWARDED-DATAPLANE=EXTERNAL`，forwarded 数据面由 Linux 门禁覆盖。
+- 归档：B6 与父任务 `task.py archive --no-commit`（不 commit/push）；B6 任务目录移入
+  `.trellis/tasks/archive/`，父任务状态按归档结果记录。
+## 15. B6 已知边界汇总（统一一处）
+
+| 边界 | 状态/证据 | 位置 |
+|---|---|---|
+| 产品控制器每个 ifindex 只解析一个 L | 已决策：产品配置无按规则选 L 字段；同 ifindex 多 L 是驱动/夹具能力 | §13.4、`WfpController.ResolveForwardedListenerPlan` |
+| 单 L 并发多目的会替换表项，在途回程可能还原成新 server | 已知、非 fail-closed；B6b 多 L 测试不覆盖单 L 并发 | §13.3 |
+| UDP 多 L 并发多目的 / UDP 热替换 | 未单独 E2E；UDP core 单 L 回归 | §13.3、§13.4 |
+| IPv6 多入口/多 L | 未验证；IPv6 分片仍是 1280 MTU 内核分片 | §13.3 |
+| LWF 对注入帧的可见性 | 未验证（关闭/带外会话未做） | B6a §12 |
+| config disabled 的 fail 行为 | ABI v7 filter 不进入 classify，`no_config` 断言不成立；产品语义待确认 | §14.1 |
+| stop entry 非零采样 | 仅 fault-injection 测试构建可触发；交付构建无 hook/无 RtlWrite | B6a §5、B6c 文档 |
+| TCP 多 NB“部分注入失败” | 无法从网络构造；代码路径有 decrement 修复但无 E2E | B6a §12 |
+| 非首片先到（反序） | 本机 raw 反序受重排影响，未作为 E2E 证据；空表 host 单测覆盖 | B6a §2.2 |
+| IPv6 atomic fragment | 代码按非分片处理；仅代码级，未 E2E | B6a §2.2 |
+| A5 性能基线 | 仅有含 suite 中继的单次量级数据，噪声大；无 iperf3/内核 sink | §14.3、`a5-cost.md` |
+| reject | 产品 UDP ASSOCIATE 拒绝 E2E 通过；TCP reject 不在 B6 范围 | B6a §3、Linux 门禁 |
+| Host adapter 选择器/ARM64 | 未做，需产品决策 | AGENTS |

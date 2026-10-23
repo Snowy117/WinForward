@@ -1,0 +1,15 @@
+[selftest] config: abi=7 enabled=1 listener-pid=8816 port=54714 self-pids=[]
+ASSERT PASS: selftest 规则数 (expected=1 actual=1)
+ASSERT PASS: selftest 兜底动作 (expected=0 actual=0)
+[selftest] #0 context raw=57464331000000007022000001003A9D0606000000000000000000000000FFFFC0A86404 pid=8816 family=6 original=::ffff:192.168.100.4:40250
+[selftest] iterations=3 completed=3 failures=0 contexts_ok=3 contexts_failed=0 echo_ok=3
+[selftest] endpoints: ::1:54714x3
+[selftest] stats: classify=3 redirected=3 contexts_allocated=3 alloc_failures=0 apply_failures=0
+[selftest] events(recent 3): redirected=3 any_to_loopback=3 local_address=0
+ASSERT PASS: 连接数 (expected=3 actual=3)
+ASSERT PASS: context 全部读回并通过校验 (expected=3 actual=3)
+ASSERT PASS: echo 全部成功 (expected=3 actual=3)
+ASSERT PASS: redirected 计数与连接数一致 (expected=3 actual=3)
+ASSERT PASS: contexts_allocated 与连接数一致 (expected=3 actual=3)
+ASSERT PASS: accepted 端点在预期地址族 (::1:54714)
+[selftest] verdict=PASS dual=True family=6

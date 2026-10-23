@@ -51,3 +51,9 @@
 - 产品 reject 必须走 `WinForward.Controller` + `ForwardedUdpRelay`；suite 的 `reject` phase 是进程内
   夹具，不能单独作为产品证据。
 - 所有 `ASSERT PASS/FAIL` 与客户端 stdout 原样保留。
+
+| 路径 | 说明 |
+|---|---|
+| `forwarded-gate/` | B6c 独立 Linux 门禁完整一次 `ALL PASS` 的 run/各阶段原始日志。 |
+| `forwarded-gate-failcheck/` | fail 阶段在 ABI v7 的失败诊断日志（门禁默认跳过，非通过条件）。 |
+| `a5-cost/` + `a5-cost.md` | A5 成本采样原始日志与说明（量级参考，无 kill criteria）。 |
