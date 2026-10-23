@@ -1,6 +1,6 @@
 #pragma once
 
-// 驱动与测试程序之间的控制面 ABI（v5）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
+// 驱动与测试程序之间的控制面 ABI（v6）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
 // 两侧都有布局断言。任何字段调整都必须同时提升 probe_abi_version。
 //
 // 与 src/common/redirect_context.h 的分工：那个头定义的是“用途数据”（随连接走、用户态用
@@ -13,7 +13,7 @@
 namespace winforward::wfp::probe
 {
 
-inline constexpr std::uint32_t probe_abi_version = 5;
+inline constexpr std::uint32_t probe_abi_version = 6;
 
 // 单块规则 blob 的上限。METHOD_BUFFERED 会替我们复制一份输入，这个上限只用于拒绝明显
 // 异常的下发（正常策略是几百字节到几 KB）。
@@ -64,8 +64,10 @@ inline constexpr std::uint32_t ioctl_set_forwarded_config = make_ioctl(0x80C);
 inline constexpr std::uint32_t ioctl_get_forwarded_config = make_ioctl(0x80D);
 inline constexpr std::uint32_t ioctl_query_forwarded_redirect = make_ioctl(0x80E);
 
-// 一次 redirect 查询的输入：用户态用 accepted socket 的本地端口（listener）与对端（client）填。
-// family 与 client_address 必须与驱动表项的地址族一致。
+// 一次 redirect 查询的输入：用户态用 listener 端口与对端（client）填。TCP 是 accepted socket 的
+// 对端，UDP 是收到 datagram 的源地址。protocol 区分同一 listener 端口上的 TCP 与 UDP 表项：
+// 0 表示 TCP（B4b 兼容值），6 = TCP，17 = UDP；其他值拒绝。family 与 client_address 必须与
+// 驱动表项的地址族一致。
 struct probe_forwarded_redirect_query
 {
     std::uint16_t listener_port;
@@ -73,7 +75,8 @@ struct probe_forwarded_redirect_query
     std::uint8_t reserved0;
     std::uint8_t client_address[16];
     std::uint16_t client_port;
-    std::uint16_t reserved1;
+    std::uint8_t protocol; // 0/6 = TCP（0 是 B4b 兼容值），17 = UDP
+    std::uint8_t reserved1;
 };
 
 static_assert(sizeof(probe_forwarded_redirect_query) == 24, "probe_forwarded_redirect_query 是对外 ABI");
@@ -81,8 +84,8 @@ static_assert(offsetof(probe_forwarded_redirect_query, listener_port) == 0);
 static_assert(offsetof(probe_forwarded_redirect_query, family) == 2);
 static_assert(offsetof(probe_forwarded_redirect_query, client_address) == 4);
 static_assert(offsetof(probe_forwarded_redirect_query, client_port) == 20);
-static_assert(offsetof(probe_forwarded_redirect_query, reserved1) == 22);
-
+static_assert(offsetof(probe_forwarded_redirect_query, protocol) == 22);
+static_assert(offsetof(probe_forwarded_redirect_query, reserved1) == 23);
 // redirect 表项的生命周期状态。数值是对外 ABI，只追加。
 inline constexpr std::uint32_t forwarded_redirect_state_syn = 1;
 inline constexpr std::uint32_t forwarded_redirect_state_established = 2;
@@ -307,12 +310,14 @@ static_assert(offsetof(probe_forwarded_info, reserved0) == 28);
 //   classify_calls == no_write_right + inbound_frames + outbound_frames
 //   inbound_frames + outbound_frames ==
 //       self_injected + no_table + malformed + non_ip + permitted + blocked + redirected
-//   permitted == matched_permit + fallback_permit
+//   permitted == matched_permit + fallback_permit + udp_return_miss
 //   blocked == matched_block + fallback_block + redirect_blocked + redirect_return_failed
+//              + udp_blocked + udp_return_failed
 //   matched == matched_permit + matched_block + matched_redirect
-//   matched_redirect == redirect_ingress + redirect_blocked
+//   matched_redirect + udp_fragmented == redirect_ingress + redirect_blocked + udp_ingress + udp_blocked
 //   redirect_blocked == no_config + no_state + capacity + non_tcp + inject_failed
-//   redirected == redirect_ingress + redirect_return
+//   udp_blocked == udp_no_config + udp_no_state + udp_capacity + udp_fragmented + udp_inject_failed
+//   redirected == redirect_ingress + redirect_return + udp_ingress + udp_return
 //   fallback == fallback_permit + fallback_block
 struct probe_forwarded_stats
 {
@@ -358,13 +363,33 @@ struct probe_forwarded_stats
     std::uint64_t redirect_multi_nb;
     std::uint64_t inject_complete_calls;
     std::uint64_t inject_complete_failed;
+    // B5：UDP 数据面计数。bucket 语义与 TCP 一一对应，但计数按 NBL 记（一个 NBL 可含多个 NET_BUFFER）：
+    //   udp_created：首个 datagram 建表次数（后续 datagram 命中不增）；
+    //   udp_ingress / udp_return：成功 DNAT / SNAT 注入的 NBL 数；
+    //   udp_blocked：入口 UDP redirect 失败被 block 的帧数；
+    //   udp_return_failed：回程 UDP SNAT 失败被 block 的 listener 帧数；
+    //   udp_return_miss：listener 源端口候选但查表未命中的帧数（该帧按普通本机流量 permit）；
+    //   udp_no_state 目前保留：UDP 每次未命中都会尝试建表，只有建表失败（capacity）才算失败。
+    std::uint64_t udp_created;
+    std::uint64_t udp_ingress;
+    std::uint64_t udp_return;
+    std::uint64_t udp_blocked;
+    std::uint64_t udp_return_failed;
+    std::uint64_t udp_return_miss;
+    std::uint64_t udp_no_config;
+    std::uint64_t udp_no_state;
+    std::uint64_t udp_capacity;
+    std::uint64_t udp_fragmented;
+    std::uint64_t udp_inject_failed;
+    std::uint64_t udp_expired;
+    std::uint64_t udp_multi_nb;
     std::uint32_t redirect_active;
     std::uint32_t redirect_high_water;
     std::uint32_t last_status;
     std::uint32_t abi_version;
 };
 
-static_assert(sizeof(probe_forwarded_stats) == 296, "probe_forwarded_stats 是对外 ABI");
+static_assert(sizeof(probe_forwarded_stats) == 400, "probe_forwarded_stats 是对外 ABI");
 static_assert(offsetof(probe_forwarded_stats, permitted) == 24);
 static_assert(offsetof(probe_forwarded_stats, self_injected) == 88);
 static_assert(offsetof(probe_forwarded_stats, rejected_blobs) == 128);
@@ -375,10 +400,23 @@ static_assert(offsetof(probe_forwarded_stats, redirect_created) == 160);
 static_assert(offsetof(probe_forwarded_stats, redirect_multi_nb) == 256);
 static_assert(offsetof(probe_forwarded_stats, inject_complete_calls) == 264);
 static_assert(offsetof(probe_forwarded_stats, inject_complete_failed) == 272);
-static_assert(offsetof(probe_forwarded_stats, redirect_active) == 280);
-static_assert(offsetof(probe_forwarded_stats, redirect_high_water) == 284);
-static_assert(offsetof(probe_forwarded_stats, last_status) == 288);
-static_assert(offsetof(probe_forwarded_stats, abi_version) == 292);
+static_assert(offsetof(probe_forwarded_stats, udp_created) == 280);
+static_assert(offsetof(probe_forwarded_stats, udp_ingress) == 288);
+static_assert(offsetof(probe_forwarded_stats, udp_return) == 296);
+static_assert(offsetof(probe_forwarded_stats, udp_blocked) == 304);
+static_assert(offsetof(probe_forwarded_stats, udp_return_failed) == 312);
+static_assert(offsetof(probe_forwarded_stats, udp_return_miss) == 320);
+static_assert(offsetof(probe_forwarded_stats, udp_no_config) == 328);
+static_assert(offsetof(probe_forwarded_stats, udp_no_state) == 336);
+static_assert(offsetof(probe_forwarded_stats, udp_capacity) == 344);
+static_assert(offsetof(probe_forwarded_stats, udp_fragmented) == 352);
+static_assert(offsetof(probe_forwarded_stats, udp_inject_failed) == 360);
+static_assert(offsetof(probe_forwarded_stats, udp_expired) == 368);
+static_assert(offsetof(probe_forwarded_stats, udp_multi_nb) == 376);
+static_assert(offsetof(probe_forwarded_stats, redirect_active) == 384);
+static_assert(offsetof(probe_forwarded_stats, redirect_high_water) == 388);
+static_assert(offsetof(probe_forwarded_stats, last_status) == 392);
+static_assert(offsetof(probe_forwarded_stats, abi_version) == 396);
 
 // 环形事件日志。时间戳是 KeQueryInterruptTime() 的 100ns 计数，仅用于排序与相对比较；
 // 地址按原样保存（IPv4 只用前 4 字节），端口为主机字节序。

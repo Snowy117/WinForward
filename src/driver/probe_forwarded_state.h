@@ -125,6 +125,19 @@ inline void publish_forwarded_counters(forwarded_state& state, const probe_forwa
     state.stats.redirect_expired += delta.redirect_expired;
     state.stats.redirect_return_miss += delta.redirect_return_miss;
     state.stats.redirect_multi_nb += delta.redirect_multi_nb;
+    state.stats.udp_created += delta.udp_created;
+    state.stats.udp_ingress += delta.udp_ingress;
+    state.stats.udp_return += delta.udp_return;
+    state.stats.udp_blocked += delta.udp_blocked;
+    state.stats.udp_return_failed += delta.udp_return_failed;
+    state.stats.udp_return_miss += delta.udp_return_miss;
+    state.stats.udp_no_config += delta.udp_no_config;
+    state.stats.udp_no_state += delta.udp_no_state;
+    state.stats.udp_capacity += delta.udp_capacity;
+    state.stats.udp_fragmented += delta.udp_fragmented;
+    state.stats.udp_inject_failed += delta.udp_inject_failed;
+    state.stats.udp_expired += delta.udp_expired;
+    state.stats.udp_multi_nb += delta.udp_multi_nb;
     forwarded_unlock(raised, old_irql);
 }
 

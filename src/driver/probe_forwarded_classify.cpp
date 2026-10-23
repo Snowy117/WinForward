@@ -1,5 +1,6 @@
 #include "probe_driver.h"
 #include "probe_forwarded_path.h"
+#include "probe_forwarded_return.h"
 #include "probe_forwarded_state.h"
 
 namespace winforward::wfp::probe
@@ -9,6 +10,9 @@ namespace
 
 constexpr std::uint8_t tcp_flag_fin = 0x01;
 constexpr std::uint8_t tcp_flag_rst = 0x04;
+
+constexpr std::uint8_t ip_protocol_tcp = 6;
+constexpr std::uint8_t ip_protocol_udp = 17;
 
 [[nodiscard]] std::uint32_t frame_interface_index(const FWPS_INCOMING_VALUES0* values, bool inbound) noexcept
 {
@@ -51,6 +55,12 @@ void set_frame_action(FWPS_CLASSIFY_OUT0* classify_out, bool block) noexcept
 [[nodiscard]] bool tcp_is_fin_or_rst(const forwarded_frame_facts& facts) noexcept
 {
     return (facts.tcp_flags & (tcp_flag_fin | tcp_flag_rst)) != 0;
+}
+
+[[nodiscard]] bool has_transport_payload(const forwarded_frame_facts& facts) noexcept
+{
+    return (facts.protocol == ip_protocol_tcp && facts.transport_length != 0) ||
+           (facts.protocol == ip_protocol_udp && facts.transport_length != 0);
 }
 
 } // namespace
@@ -147,13 +157,9 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
         return;
     }
 
-    const std::uint32_t interface_index = frame_interface_index(in_fixed_values, inbound);
-    const std::uint32_t ndis_port = frame_ndis_port(in_fixed_values, inbound);
-
-    // 回程 SNAT：listener 进程发出的 TCP 帧，源端口等于 listener_port。MAC 层一个 NBL 可以带多个
-    // NET_BUFFER（每帧一个），必须逐帧查询/改写/注入；原 NBL 整体 block。计数按 NBL 记，
-    // 与 outbound_frames 的「一次 classify = 一个 NBL」口径一致。
-    if (outbound && facts.protocol == 6 && facts.tcp_length != 0)
+    // UDP 分片在 forwarded 数据面统一 fail closed：非首片没有端口，首片也无法从单帧拼出完整
+    // datagram；必须在规则匹配之前 block，不能依赖端口规则是否命中。
+    if (facts.protocol == ip_protocol_udp && facts.fragmented)
     {
         probe_forwarded_config config{};
         {
@@ -163,116 +169,45 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
             forwarded_unlock(raised, old_irql);
         }
 
-        const bool configured = config.enabled != 0 && config.listener_port != 0;
-        NET_BUFFER_LIST* const nbl = static_cast<NET_BUFFER_LIST*>(layer_data);
-        std::uint32_t buffer_count = 0;
-        std::uint32_t injected = 0;
-        std::uint32_t failed = 0;
-        std::uint32_t candidates = 0;
-        std::uint32_t missed = 0;
-        bool closing = false;
-        forwarded_frame_facts closing_facts{};
-
-        for (NET_BUFFER* buffer = nbl != nullptr ? NET_BUFFER_LIST_FIRST_NB(nbl) : nullptr; buffer != nullptr;
-             buffer = NET_BUFFER_NEXT_NB(buffer))
+        if (config.enabled != 0)
         {
-            ++buffer_count;
-            forwarded_frame_facts buffer_facts{};
-            if (probe_forwarded_parse_frame(buffer, buffer_facts) != forwarded_frame_kind::ip ||
-                buffer_facts.protocol != 6 || buffer_facts.tcp_length == 0 ||
-                buffer_facts.source_port != config.listener_port)
-            {
-                continue;
-            }
-
-            ++candidates;
-
-            forwarded_redirect_snapshot return_entry{};
-            KIRQL old_irql{};
-            const bool raised = forwarded_lock(old_irql);
-            const forwarded_redirect_lookup lookup = forwarded_redirect_find_return(state.redirects,
-                                                                                    buffer_facts.family,
-                                                                                    config.listener_port,
-                                                                                    buffer_facts.destination_address,
-                                                                                    buffer_facts.destination_port,
-                                                                                    return_entry);
-            if (lookup == forwarded_redirect_lookup::expired)
-            {
-                ++state.stats.redirect_expired;
-            }
-            forwarded_unlock(raised, old_irql);
-            if (lookup != forwarded_redirect_lookup::found)
-            {
-                ++missed;
-                continue;
-            }
-
-            forwarded_frame_rewrite rewrite{};
-            rewrite.source_address = return_entry.server_address;
-            rewrite.rewrite_source_port = true;
-            rewrite.source_port = return_entry.server_port;
-            rewrite.source_mac = return_entry.local_mac;
-            rewrite.destination_mac = return_entry.client_mac;
-
-            const NTSTATUS status = probe_forwarded_inject_frame(
-                buffer, buffer_facts, true, return_entry.ingress_ifindex, ndis_port, rewrite);
-            if (NT_SUCCESS(status))
-            {
-                ++injected;
-                if (tcp_is_fin_or_rst(buffer_facts))
-                {
-                    closing = true;
-                    closing_facts = buffer_facts;
-                }
-            }
-            else
-            {
-                ++failed;
-                state.stats.last_status = static_cast<std::uint32_t>(status);
-            }
-        }
-
-        if (buffer_count > 1)
-        {
-            delta.redirect_multi_nb = 1;
-        }
-
-        if (injected > 0)
-        {
-            delta.redirect_return = 1;
-            delta.redirected = 1;
-            if (failed > 0)
-            {
-                delta.redirect_inject_failed = failed;
-            }
-            if (closing)
-            {
-                mark_forwarded_redirect_closing(state,
-                                                closing_facts.family,
-                                                config.listener_port,
-                                                closing_facts.destination_address,
-                                                closing_facts.destination_port);
-            }
-            release_forwarded_snapshot(table);
-            publish_forwarded_counters(state, delta);
-            set_frame_action(classify_out, true);
-            return;
-        }
-
-        if (configured && failed > 0)
-        {
-            // 所有命中表项的回程帧都没能排队注入：原帧已 block，必须显式计入失败。
-            delta.redirect_return_failed = 1;
             delta.blocked = 1;
+            delta.udp_blocked = 1;
+            delta.udp_fragmented = 1;
+            state.stats.last_status = static_cast<std::uint32_t>(STATUS_NOT_SUPPORTED);
             release_forwarded_snapshot(table);
             publish_forwarded_counters(state, delta);
             set_frame_action(classify_out, true);
             return;
         }
+    }
 
-        if (configured && candidates > 0 && missed > 0)
+    const std::uint32_t interface_index = frame_interface_index(in_fixed_values, inbound);
+    const std::uint32_t ndis_port = frame_ndis_port(in_fixed_values, inbound);
+
+    if (outbound && facts.protocol == ip_protocol_tcp && facts.transport_length != 0)
+    {
+        const forwarded_return_decision decision =
+            handle_forwarded_tcp_return(state, facts, layer_data, ndis_port, delta);
+        if (decision.handled)
         {
-            delta.redirect_return_miss = 1;
+            release_forwarded_snapshot(table);
+            publish_forwarded_counters(state, delta);
+            set_frame_action(classify_out, decision.block);
+            return;
+        }
+    }
+
+    if (outbound && facts.protocol == ip_protocol_udp)
+    {
+        const forwarded_return_decision decision =
+            handle_forwarded_udp_return(state, facts, layer_data, ndis_port, delta);
+        if (decision.handled)
+        {
+            release_forwarded_snapshot(table);
+            publish_forwarded_counters(state, delta);
+            set_frame_action(classify_out, decision.block);
+            return;
         }
     }
 
@@ -301,8 +236,8 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
         delta.matched = 1;
         delta.matched_redirect = 1;
 
-        const bool usable_tcp = facts.protocol == 6 && facts.tcp_length != 0;
-        if (inbound && usable_tcp)
+        const bool usable = has_transport_payload(facts);
+        if (inbound && usable)
         {
             const forwarded_inbound_plan plan =
                 plan_forwarded_inbound(state, facts, interface_index, ndis_port, result.upstream_id, result.rule_index);
@@ -310,7 +245,14 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
             {
                 if (plan.created)
                 {
-                    delta.redirect_created = 1;
+                    if (facts.protocol == ip_protocol_udp)
+                    {
+                        delta.udp_created = 1;
+                    }
+                    else
+                    {
+                        delta.redirect_created = 1;
+                    }
                 }
 
                 forwarded_frame_rewrite rewrite{};
@@ -332,7 +274,7 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
                     ++buffer_count;
                     forwarded_frame_facts buffer_facts{};
                     if (probe_forwarded_parse_frame(buffer, buffer_facts) != forwarded_frame_kind::ip ||
-                        buffer_facts.protocol != 6 || buffer_facts.tcp_length == 0)
+                        buffer_facts.protocol != facts.protocol || !has_transport_payload(buffer_facts))
                     {
                         ++failed;
                         continue;
@@ -343,7 +285,7 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
                     if (NT_SUCCESS(status))
                     {
                         ++injected;
-                        if (tcp_is_fin_or_rst(buffer_facts))
+                        if (facts.protocol == ip_protocol_tcp && tcp_is_fin_or_rst(buffer_facts))
                         {
                             closing = true;
                             closing_facts = buffer_facts;
@@ -358,21 +300,32 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
 
                 if (buffer_count > 1)
                 {
-                    delta.redirect_multi_nb = 1;
+                    if (facts.protocol == ip_protocol_udp)
+                    {
+                        delta.udp_multi_nb = 1;
+                    }
+                    else
+                    {
+                        delta.redirect_multi_nb = 1;
+                    }
                 }
 
-                if (injected > 0)
+                if (injected > 0 && failed == 0)
                 {
-                    delta.redirect_ingress = 1;
-                    delta.redirected = 1;
-                    if (failed > 0)
+                    if (facts.protocol == ip_protocol_udp)
                     {
-                        delta.redirect_inject_failed = failed;
+                        delta.udp_ingress = 1;
                     }
+                    else
+                    {
+                        delta.redirect_ingress = 1;
+                    }
+                    delta.redirected = 1;
                     if (closing)
                     {
                         mark_forwarded_redirect_closing(state,
                                                         closing_facts.family,
+                                                        ip_protocol_tcp,
                                                         plan.listener_port,
                                                         closing_facts.source_address,
                                                         closing_facts.source_port);
@@ -380,16 +333,39 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
                 }
                 else
                 {
-                    delta.redirect_blocked = 1;
                     delta.blocked = 1;
-                    delta.redirect_inject_failed = failed > 0 ? failed : 1;
+                    if (facts.protocol == ip_protocol_udp)
+                    {
+                        delta.udp_blocked = 1;
+                        delta.udp_inject_failed = failed > 0 ? failed : 1;
+                    }
+                    else
+                    {
+                        delta.redirect_blocked = 1;
+                        delta.redirect_inject_failed = failed > 0 ? failed : 1;
+                    }
                 }
             }
             else
             {
-                delta.redirect_blocked = 1;
                 delta.blocked = 1;
-                if (plan.no_config)
+                if (facts.protocol == ip_protocol_udp)
+                {
+                    delta.udp_blocked = 1;
+                    if (plan.no_config)
+                    {
+                        delta.udp_no_config = 1;
+                    }
+                    else if (plan.capacity)
+                    {
+                        delta.udp_capacity = 1;
+                    }
+                    else
+                    {
+                        delta.udp_no_state = 1;
+                    }
+                }
+                else if (plan.no_config)
                 {
                     delta.redirect_no_config = 1;
                 }
@@ -401,20 +377,30 @@ void NTAPI probe_forwarded_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_val
                 {
                     delta.redirect_no_state = 1;
                 }
+                if (facts.protocol != ip_protocol_udp)
+                {
+                    delta.redirect_blocked = 1;
+                }
                 state.stats.last_status = static_cast<std::uint32_t>(STATUS_NOT_FOUND);
             }
         }
         else
         {
-            // 非 TCP 或没有可用 TCP 头：B4b 先 block（UDP 归 B5）；出向命中 redirect 规则同样 fail closed。
-            delta.redirect_blocked = 1;
+            // 非 TCP/UDP、没有可用传输层头，或出向帧命中 redirect 规则：不能安全改写，fail closed。
             delta.blocked = 1;
-            if (facts.protocol == 6)
+            if (facts.protocol == ip_protocol_udp)
             {
+                delta.udp_blocked = 1;
+                delta.udp_no_state = 1;
+            }
+            else if (facts.protocol == ip_protocol_tcp)
+            {
+                delta.redirect_blocked = 1;
                 delta.redirect_no_state = 1;
             }
             else
             {
+                delta.redirect_blocked = 1;
                 delta.redirect_non_tcp = 1;
             }
             state.stats.last_status = static_cast<std::uint32_t>(STATUS_NOT_SUPPORTED);

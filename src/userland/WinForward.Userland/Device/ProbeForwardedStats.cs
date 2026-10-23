@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace WinForward.Userland.Device;
 
 /// <summary>
-/// <c>probe_forwarded_stats</c> 的逐字段镜像：296 字节，Pack = 8。
+/// <c>probe_forwarded_stats</c> 的逐字段镜像：400 字节，Pack = 8。
 /// 恒等式（对任意 reset 之后的增量成立）：
 /// <c>classify_calls == no_write_right + inbound_frames + outbound_frames</c>；
 /// 帧去向 = self_injected + no_table + malformed + non_ip + permitted + blocked + redirected；
@@ -50,6 +50,21 @@ public struct ProbeForwardedStats
     public ulong RedirectMultiNb;
     public ulong InjectCompleteCalls;
     public ulong InjectCompleteFailed;
+
+    // B5：UDP 数据面计数（尾部追加；redirect_active/high_water/last_status/abi_version 后移）。
+    public ulong UdpCreated;
+    public ulong UdpIngress;
+    public ulong UdpReturn;
+    public ulong UdpBlocked;
+    public ulong UdpReturnFailed;
+    public ulong UdpReturnMiss;
+    public ulong UdpNoConfig;
+    public ulong UdpNoState;
+    public ulong UdpCapacity;
+    public ulong UdpFragmented;
+    public ulong UdpInjectFailed;
+    public ulong UdpExpired;
+    public ulong UdpMultiNb;
     public uint RedirectActive;
     public uint RedirectHighWater;
     public uint LastStatus;

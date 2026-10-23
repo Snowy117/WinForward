@@ -29,6 +29,7 @@ struct forwarded_inbound_plan
 
 void mark_forwarded_redirect_closing(forwarded_state& state,
                                      std::uint8_t family,
+                                     std::uint8_t protocol,
                                      std::uint16_t listener_port,
                                      const std::uint8_t* client_address,
                                      std::uint16_t client_port) noexcept;

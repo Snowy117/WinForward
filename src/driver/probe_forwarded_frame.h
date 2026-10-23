@@ -20,17 +20,19 @@ enum class forwarded_frame_kind : std::uint8_t
 
 struct forwarded_frame_facts
 {
-    std::uint32_t data_length; // 整个 NBL 的帧长（含以太网头与 VLAN）
+    std::uint32_t data_length; // 当前 NET_BUFFER 的帧长（含以太网头与 VLAN）
     std::uint32_t network_offset; // IP 头起点
-    std::uint32_t transport_offset; // TCP 头起点
+    std::uint32_t transport_offset; // TCP/UDP 头起点
     std::uint32_t ip_header_length; // IPv4 头长；IPv6 为 40
     std::uint32_t ip_payload_length; // IPv4 total_length - IHL；IPv6 payload_length - 扩展头
-    std::uint32_t tcp_length; // TCP 头 + 负载（校验和覆盖范围）
+    std::uint32_t transport_length; // TCP 段长（头+负载）或 UDP 长度（含 8 字节头）；畸形/非首片为 0
     std::uint16_t source_port;
     std::uint16_t destination_port;
     std::uint8_t protocol;
     std::uint8_t family; // 4 / 6
     std::uint8_t tcp_flags;
+    bool first_fragment; // 没有分片头也算 true；IPv4 只看 fragment offset
+    bool fragmented; // IPv4 MF 或 offset != 0；IPv6 出现过 Fragment 头
     std::uint8_t destination_mac[6];
     std::uint8_t source_mac[6];
     std::uint8_t source_address[16];
@@ -57,7 +59,7 @@ struct forwarded_frame_rewrite
     const std::uint8_t* destination_mac;
 };
 
-// 复制整帧 → 改写 → 重算 IP/TCP 校验和 → FwpsInjectMacReceiveAsync0（入栈）
+// 复制整帧 → 改写 → 重算 IP/传输层校验和 → FwpsInjectMacReceiveAsync0（入栈）
 // 或 FwpsInjectMacSendAsync0（出栈）。返回调用（排队）状态；失败由调用方 block 原帧并计数。
 [[nodiscard]] NTSTATUS probe_forwarded_inject_frame(const NET_BUFFER* source,
                                                     const forwarded_frame_facts& facts,

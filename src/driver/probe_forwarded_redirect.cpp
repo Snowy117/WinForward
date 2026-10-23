@@ -42,6 +42,7 @@ void hash_u32(std::uint32_t& hash, std::uint32_t value) noexcept
 
 std::uint32_t ingress_hash(std::uint32_t ingress_ifindex,
                            std::uint8_t family,
+                           std::uint8_t protocol,
                            const std::uint8_t* client_address,
                            std::uint16_t client_port,
                            const std::uint8_t* server_address,
@@ -51,6 +52,7 @@ std::uint32_t ingress_hash(std::uint32_t ingress_ifindex,
     hash_byte(hash, 0x49); // 'I'
     hash_u32(hash, ingress_ifindex);
     hash_byte(hash, family);
+    hash_byte(hash, protocol);
     hash_bytes(hash, client_address, 16);
     hash_u16(hash, client_port);
     hash_bytes(hash, server_address, 16);
@@ -59,6 +61,7 @@ std::uint32_t ingress_hash(std::uint32_t ingress_ifindex,
 }
 
 std::uint32_t return_hash(std::uint8_t family,
+                          std::uint8_t protocol,
                           std::uint16_t listener_port,
                           const std::uint8_t* client_address,
                           std::uint16_t client_port) noexcept
@@ -66,6 +69,7 @@ std::uint32_t return_hash(std::uint8_t family,
     std::uint32_t hash = hash_offset_basis;
     hash_byte(hash, 0x52); // 'R'
     hash_byte(hash, family);
+    hash_byte(hash, protocol);
     hash_u16(hash, listener_port);
     hash_bytes(hash, client_address, 16);
     hash_u16(hash, client_port);
@@ -75,24 +79,27 @@ std::uint32_t return_hash(std::uint8_t family,
 bool same_ingress_key(const forwarded_redirect_entry& entry,
                       std::uint32_t ingress_ifindex,
                       std::uint8_t family,
+                      std::uint8_t protocol,
                       const std::uint8_t* client_address,
                       std::uint16_t client_port,
                       const std::uint8_t* server_address,
                       std::uint16_t server_port) noexcept
 {
-    return entry.ingress_ifindex == ingress_ifindex && entry.family == family && entry.client_port == client_port &&
-           entry.server_port == server_port && RtlEqualMemory(entry.client_address, client_address, 16) &&
+    return entry.ingress_ifindex == ingress_ifindex && entry.family == family && entry.protocol == protocol &&
+           entry.client_port == client_port && entry.server_port == server_port &&
+           RtlEqualMemory(entry.client_address, client_address, 16) &&
            RtlEqualMemory(entry.server_address, server_address, 16);
 }
 
 bool same_return_key(const forwarded_redirect_entry& entry,
                      std::uint8_t family,
+                     std::uint8_t protocol,
                      std::uint16_t listener_port,
                      const std::uint8_t* client_address,
                      std::uint16_t client_port) noexcept
 {
-    return entry.family == family && entry.listener_port == listener_port && entry.client_port == client_port &&
-           RtlEqualMemory(entry.client_address, client_address, 16);
+    return entry.family == family && entry.protocol == protocol && entry.listener_port == listener_port &&
+           entry.client_port == client_port && RtlEqualMemory(entry.client_address, client_address, 16);
 }
 
 std::uint64_t now_100ns() noexcept
@@ -108,7 +115,12 @@ bool expired(const forwarded_redirect_entry& entry, std::uint64_t now) noexcept
     }
 
     std::uint64_t timeout = forwarded_redirect_established_timeout;
-    if (entry.state == forwarded_redirect_state_syn)
+    if (entry.protocol == 17)
+    {
+        // UDP 没有连接状态：首个 datagram 建表后 60s 无活动即回收。
+        timeout = forwarded_redirect_udp_timeout;
+    }
+    else if (entry.state == forwarded_redirect_state_syn)
     {
         timeout = forwarded_redirect_syn_timeout;
     }
@@ -128,6 +140,7 @@ void fill_snapshot(const forwarded_redirect_entry& entry, forwarded_redirect_sna
     snapshot.generation = entry.generation;
     snapshot.state = entry.state;
     snapshot.family = entry.family;
+    snapshot.protocol = entry.protocol;
     snapshot.client_port = entry.client_port;
     snapshot.server_port = entry.server_port;
     snapshot.listener_port = entry.listener_port;
@@ -166,6 +179,7 @@ void remove_entry(forwarded_redirect_table& table, std::uint32_t index) noexcept
 
     const std::uint32_t ingress_bucket = ingress_hash(entry.ingress_ifindex,
                                                       entry.family,
+                                                      entry.protocol,
                                                       entry.client_address,
                                                       entry.client_port,
                                                       entry.server_address,
@@ -184,7 +198,7 @@ void remove_entry(forwarded_redirect_table& table, std::uint32_t index) noexcept
     }
 
     const std::uint32_t return_bucket =
-        return_hash(entry.family, entry.listener_port, entry.client_address, entry.client_port) &
+        return_hash(entry.family, entry.protocol, entry.listener_port, entry.client_address, entry.client_port) &
         forwarded_redirect_bucket_mask;
     link = &table.return_buckets[return_bucket];
     while (*link != 0)
@@ -212,6 +226,7 @@ void remove_entry(forwarded_redirect_table& table, std::uint32_t index) noexcept
 forwarded_redirect_entry* find_ingress_entry(forwarded_redirect_table& table,
                                              std::uint32_t ingress_ifindex,
                                              std::uint8_t family,
+                                             std::uint8_t protocol,
                                              const std::uint8_t* client_address,
                                              std::uint16_t client_port,
                                              const std::uint8_t* server_address,
@@ -219,14 +234,15 @@ forwarded_redirect_entry* find_ingress_entry(forwarded_redirect_table& table,
                                              std::uint32_t& index) noexcept
 {
     const std::uint32_t bucket =
-        ingress_hash(ingress_ifindex, family, client_address, client_port, server_address, server_port) &
+        ingress_hash(ingress_ifindex, family, protocol, client_address, client_port, server_address, server_port) &
         forwarded_redirect_bucket_mask;
     std::uint32_t link = table.ingress_buckets[bucket];
     while (link != 0)
     {
         const std::uint32_t current = link - 1;
         forwarded_redirect_entry& entry = table.entries[current];
-        if (same_ingress_key(entry, ingress_ifindex, family, client_address, client_port, server_address, server_port))
+        if (same_ingress_key(
+                entry, ingress_ifindex, family, protocol, client_address, client_port, server_address, server_port))
         {
             index = current;
             return &entry;
@@ -238,19 +254,20 @@ forwarded_redirect_entry* find_ingress_entry(forwarded_redirect_table& table,
 
 forwarded_redirect_entry* find_return_entry(forwarded_redirect_table& table,
                                             std::uint8_t family,
+                                            std::uint8_t protocol,
                                             std::uint16_t listener_port,
                                             const std::uint8_t* client_address,
                                             std::uint16_t client_port,
                                             std::uint32_t& index) noexcept
 {
     const std::uint32_t bucket =
-        return_hash(family, listener_port, client_address, client_port) & forwarded_redirect_bucket_mask;
+        return_hash(family, protocol, listener_port, client_address, client_port) & forwarded_redirect_bucket_mask;
     std::uint32_t link = table.return_buckets[bucket];
     while (link != 0)
     {
         const std::uint32_t current = link - 1;
         forwarded_redirect_entry& entry = table.entries[current];
-        if (same_return_key(entry, family, listener_port, client_address, client_port))
+        if (same_return_key(entry, family, protocol, listener_port, client_address, client_port))
         {
             index = current;
             return &entry;
@@ -322,6 +339,7 @@ void forwarded_redirect_clear(forwarded_redirect_table& table) noexcept
 forwarded_redirect_lookup forwarded_redirect_find_ingress(forwarded_redirect_table& table,
                                                           std::uint32_t ingress_ifindex,
                                                           std::uint8_t family,
+                                                          std::uint8_t protocol,
                                                           const std::uint8_t* client_address,
                                                           std::uint16_t client_port,
                                                           const std::uint8_t* server_address,
@@ -335,7 +353,7 @@ forwarded_redirect_lookup forwarded_redirect_find_ingress(forwarded_redirect_tab
 
     std::uint32_t index = 0;
     forwarded_redirect_entry* entry = find_ingress_entry(
-        table, ingress_ifindex, family, client_address, client_port, server_address, server_port, index);
+        table, ingress_ifindex, family, protocol, client_address, client_port, server_address, server_port, index);
     if (entry == nullptr)
     {
         return forwarded_redirect_lookup::missing;
@@ -377,8 +395,13 @@ bool forwarded_redirect_create(forwarded_redirect_table& table,
 
     // 客户端端口复用：回程 key 是唯一的，旧表项必须先删掉，否则回程会命中旧连接。
     std::uint32_t conflict = 0;
-    if (find_return_entry(
-            table, create.family, create.listener_port, create.client_address, create.client_port, conflict) != nullptr)
+    if (find_return_entry(table,
+                          create.family,
+                          create.protocol,
+                          create.listener_port,
+                          create.client_address,
+                          create.client_port,
+                          conflict) != nullptr)
     {
         remove_entry(table, conflict);
         if (table.free_head == 0)
@@ -397,9 +420,10 @@ bool forwarded_redirect_create(forwarded_redirect_table& table,
     entry.upstream_id = create.upstream_id;
     entry.rule_index = create.rule_index;
     entry.generation = create.generation;
-    entry.state = forwarded_redirect_state_syn;
+    entry.state = create.protocol == 17 ? forwarded_redirect_state_established : forwarded_redirect_state_syn;
     entry.last_activity = now_100ns();
     entry.family = create.family;
+    entry.protocol = create.protocol;
     entry.client_port = create.client_port;
     entry.server_port = create.server_port;
     entry.listener_port = create.listener_port;
@@ -410,6 +434,7 @@ bool forwarded_redirect_create(forwarded_redirect_table& table,
 
     const std::uint32_t ingress_bucket = ingress_hash(create.ingress_ifindex,
                                                       create.family,
+                                                      create.protocol,
                                                       create.client_address,
                                                       create.client_port,
                                                       create.server_address,
@@ -419,7 +444,7 @@ bool forwarded_redirect_create(forwarded_redirect_table& table,
     table.ingress_buckets[ingress_bucket] = index + 1;
 
     const std::uint32_t return_bucket =
-        return_hash(create.family, create.listener_port, create.client_address, create.client_port) &
+        return_hash(create.family, create.protocol, create.listener_port, create.client_address, create.client_port) &
         forwarded_redirect_bucket_mask;
     entry.next_return = table.return_buckets[return_bucket];
     table.return_buckets[return_bucket] = index + 1;
@@ -436,6 +461,7 @@ bool forwarded_redirect_create(forwarded_redirect_table& table,
 
 forwarded_redirect_lookup forwarded_redirect_find_return(forwarded_redirect_table& table,
                                                          std::uint8_t family,
+                                                         std::uint8_t protocol,
                                                          std::uint16_t listener_port,
                                                          const std::uint8_t* client_address,
                                                          std::uint16_t client_port,
@@ -448,7 +474,7 @@ forwarded_redirect_lookup forwarded_redirect_find_return(forwarded_redirect_tabl
 
     std::uint32_t index = 0;
     forwarded_redirect_entry* entry =
-        find_return_entry(table, family, listener_port, client_address, client_port, index);
+        find_return_entry(table, family, protocol, listener_port, client_address, client_port, index);
     if (entry == nullptr)
     {
         return forwarded_redirect_lookup::missing;
@@ -468,6 +494,7 @@ forwarded_redirect_lookup forwarded_redirect_find_return(forwarded_redirect_tabl
 
 bool forwarded_redirect_mark_closing(forwarded_redirect_table& table,
                                      std::uint8_t family,
+                                     std::uint8_t protocol,
                                      std::uint16_t listener_port,
                                      const std::uint8_t* client_address,
                                      std::uint16_t client_port) noexcept
@@ -479,7 +506,7 @@ bool forwarded_redirect_mark_closing(forwarded_redirect_table& table,
 
     std::uint32_t index = 0;
     forwarded_redirect_entry* entry =
-        find_return_entry(table, family, listener_port, client_address, client_port, index);
+        find_return_entry(table, family, protocol, listener_port, client_address, client_port, index);
     if (entry == nullptr)
     {
         return false;

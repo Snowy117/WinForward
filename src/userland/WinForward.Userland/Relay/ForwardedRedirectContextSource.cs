@@ -7,8 +7,9 @@ using WinForward.Userland.Device;
 namespace WinForward.Userland.Relay;
 
 /// <summary>
-/// forwarded 路径：按 accepted socket 的本地端口（listener）与对端（client）查驱动的 redirect 表。
-/// 查不到（STATUS_NOT_FOUND）不是异常，而是「这条连接不是 forwarded 重定向来的」，交给下一个 source。
+/// forwarded 路径：按 listener 端口与对端（client）查驱动的 redirect 表。TCP 用 accepted socket 的对端，
+/// UDP 用收到 datagram 的源地址；同一个 listener 端口上的两类表项由查询里的 protocol 区分。
+/// 查不到（STATUS_NOT_FOUND）不是异常，而是「这条流量不是 forwarded 重定向来的」，交给下一个 source。
 /// </summary>
 public sealed class ForwardedRedirectContextSource : IRedirectContextSource
 {
@@ -32,8 +33,33 @@ public sealed class ForwardedRedirectContextSource : IRedirectContextSource
             return false;
         }
 
-        ProbeForwardedRedirectQuery query =
-            ProbeForwardedRedirectQuery.ForClient((ushort)local.Port, remote);
+        return TryQuery(ProbeForwardedRedirectQuery.ForClient((ushort)local.Port, remote), out destination, out error);
+    }
+
+    public bool TryReadUdp(EndPoint client, int listenerPort, [NotNullWhen(true)] out RedirectDestination? destination,
+                           out string error)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        destination = null;
+
+        if (client is not IPEndPoint remote)
+        {
+            error = "UDP 客户端端点不是 IP";
+            return false;
+        }
+
+        if (listenerPort is <= 0 or > 65535)
+        {
+            error = $"listener 端口 {listenerPort} 越界";
+            return false;
+        }
+
+        return TryQuery(ProbeForwardedRedirectQuery.ForClientUdp((ushort)listenerPort, remote), out destination, out error);
+    }
+
+    private bool TryQuery(ProbeForwardedRedirectQuery query, out RedirectDestination? destination, out string error)
+    {
+        destination = null;
         ProbeForwardedRedirect redirect;
         try
         {

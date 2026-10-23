@@ -62,6 +62,12 @@ internal static class ForwardedTcpSuite
         ProbeStats stats = device.GetStats();
         Check.Equal(Protocol.AbiVersion, (long)stats.AbiVersion, "驱动 ABI 版本与夹具一致");
 
+        using OnLinkAlias alias = OnLinkAlias.Ensure(remoteAddress, localIp, ifIndex, !options.Has("no-alias"));
+        if (!alias.Ready)
+        {
+            Console.WriteLine($"[forwarded-tcp] alias 不可用：{alias.Error}");
+            return 7;
+        }
         int watchdogSeconds = options.GetInt("watchdog-seconds", Math.Max(90, (waitMs / 1000) + 60));
         using var watchdog = StartRestoreWatchdog(watchdogSeconds, listenerPort);
         try
@@ -534,6 +540,7 @@ internal static class ForwardedTcpSuite
         query.ListenerPort = (ushort)local.Port;
         query.Family = (byte)(remote.AddressFamily == AddressFamily.InterNetwork ? 4 : 6);
         query.ClientPort = (ushort)remote.Port;
+        query.Protocol = Protocol.RuleProtocolTcp;
         byte[] clientBytes = remote.Address.GetAddressBytes();
         for (int index = 0; index < clientBytes.Length; index++)
         {
@@ -612,18 +619,19 @@ internal static class ForwardedTcpSuite
                     (long)(stats.SelfInjected + stats.NoTable + stats.Malformed + stats.NonIp + stats.Permitted +
                            stats.Blocked + stats.Redirected),
                     $"{name}：帧去向守恒（含 redirected）");
-        Check.Equal((long)stats.Permitted, (long)(stats.MatchedPermit + stats.FallbackPermit),
-                    $"{name}：permitted == matched_permit + fallback_permit");
+        Check.Equal((long)(stats.MatchedPermit + stats.FallbackPermit + stats.UdpReturnMiss),
+                    (long)stats.Permitted,
+                    $"{name}：permitted == matched_permit + fallback_permit + udp_return_miss");
         Check.Equal((long)stats.Blocked,
                     (long)(stats.MatchedBlock + stats.FallbackBlock + stats.RedirectBlocked +
-                           stats.RedirectReturnFailed),
-                    $"{name}：blocked == matched_block + fallback_block + redirect 失败");
+                           stats.RedirectReturnFailed + stats.UdpBlocked + stats.UdpReturnFailed),
+                    $"{name}：blocked == matched_block + fallback_block + redirect 失败 + udp 失败");
         Check.Equal((long)stats.Matched,
                     (long)(stats.MatchedPermit + stats.MatchedBlock + stats.MatchedRedirect),
                     $"{name}：matched == permit + block + redirect");
-        Check.Equal((long)stats.MatchedRedirect,
+        Check.Equal((long)(stats.MatchedRedirect + stats.UdpFragmented),
                     (long)(stats.RedirectIngress + stats.RedirectBlocked),
-                    $"{name}：matched_redirect == ingress + blocked");
+                    $"{name}：matched_redirect + udp_fragmented == ingress + blocked");
         Check.Equal((long)stats.RedirectBlocked,
                     (long)(stats.RedirectNoConfig + stats.RedirectNoState + stats.RedirectCapacity +
                            stats.RedirectNonTcp + stats.RedirectInjectFailed),

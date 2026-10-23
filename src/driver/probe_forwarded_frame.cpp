@@ -1,4 +1,5 @@
 #include "probe_driver.h"
+#include "probe_forwarded_checksum.h"
 #include "probe_forwarded_state.h"
 
 namespace winforward::wfp::probe
@@ -17,6 +18,7 @@ constexpr std::uint32_t ipv4_min_header_size = 20;
 constexpr std::uint32_t ipv6_header_size = 40;
 constexpr std::uint32_t ipv6_max_extension_hops = 4;
 constexpr std::uint32_t tcp_min_header_size = 20;
+constexpr std::uint32_t udp_header_size = 8;
 constexpr std::uint32_t frame_window_size = 192;
 
 constexpr std::uint16_t ethertype_ipv4 = 0x0800;
@@ -24,8 +26,6 @@ constexpr std::uint16_t ethertype_ipv6 = 0x86DD;
 constexpr std::uint16_t ethertype_vlan = 0x8100;
 constexpr std::uint16_t ethertype_qinq = 0x88A8;
 
-constexpr std::uint8_t ip_protocol_tcp = 6;
-constexpr std::uint8_t ip_protocol_udp = 17;
 constexpr std::uint8_t ipv6_next_hop_by_hop = 0;
 constexpr std::uint8_t ipv6_next_routing = 43;
 constexpr std::uint8_t ipv6_next_fragment = 44;
@@ -63,8 +63,10 @@ parse_ipv4(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset
     }
 
     const std::uint16_t fragment = read_be16(frame + offset + 6);
+    const bool more_fragments = (fragment & 0x2000U) != 0;
     const bool first_fragment = (static_cast<std::uint32_t>(fragment) & 0x1FFFU) == 0;
-
+    facts.first_fragment = first_fragment;
+    facts.fragmented = more_fragments || !first_fragment;
     facts.family = 4;
     facts.protocol = frame[offset + 9];
     facts.ip_header_length = header_length;
@@ -80,12 +82,16 @@ parse_ipv4(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset
         facts.source_port = read_be16(frame + transport);
         facts.destination_port = read_be16(frame + transport + 2);
         facts.tcp_flags = frame[transport + 13];
-        facts.tcp_length = facts.ip_payload_length;
+        facts.transport_length = facts.ip_payload_length;
     }
     else if (first_fragment && facts.protocol == ip_protocol_udp && length >= transport + 4)
     {
         facts.source_port = read_be16(frame + transport);
         facts.destination_port = read_be16(frame + transport + 2);
+        if (length >= transport + 8)
+        {
+            facts.transport_length = read_be16(frame + transport + 4);
+        }
     }
     return true;
 }
@@ -106,6 +112,7 @@ parse_ipv6(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset
     std::uint8_t next_header = frame[offset + 6];
     std::uint32_t transport = offset + ipv6_header_size;
     bool first_fragment = true;
+    bool fragmented = false;
 
     for (std::uint32_t hop = 0; hop < ipv6_max_extension_hops; ++hop)
     {
@@ -134,6 +141,7 @@ parse_ipv6(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset
             }
             const std::uint16_t fragment = read_be16(frame + transport + 2);
             first_fragment = (static_cast<std::uint32_t>(fragment) >> 3) == 0;
+            fragmented = true;
             next_header = frame[transport];
             transport += 8;
             continue;
@@ -153,74 +161,28 @@ parse_ipv6(const std::uint8_t* frame, std::uint32_t length, std::uint32_t offset
     facts.ip_header_length = ipv6_header_size + extension_bytes;
     facts.ip_payload_length = static_cast<std::uint32_t>(payload_length) - extension_bytes;
     facts.transport_offset = transport;
+    facts.first_fragment = first_fragment;
+    facts.fragmented = fragmented;
     RtlCopyMemory(facts.source_address, frame + offset + 8, 16);
     RtlCopyMemory(facts.destination_address, frame + offset + 24, 16);
-
     if (first_fragment && next_header == ip_protocol_tcp && length >= transport + tcp_min_header_size &&
         facts.ip_payload_length >= tcp_min_header_size)
     {
         facts.source_port = read_be16(frame + transport);
         facts.destination_port = read_be16(frame + transport + 2);
         facts.tcp_flags = frame[transport + 13];
-        facts.tcp_length = facts.ip_payload_length;
+        facts.transport_length = facts.ip_payload_length;
     }
     else if (first_fragment && next_header == ip_protocol_udp && length >= transport + 4)
     {
         facts.source_port = read_be16(frame + transport);
         facts.destination_port = read_be16(frame + transport + 2);
+        if (length >= transport + 8)
+        {
+            facts.transport_length = read_be16(frame + transport + 4);
+        }
     }
     return true;
-}
-
-[[nodiscard]] std::uint32_t checksum_add(std::uint32_t sum, const std::uint8_t* data, std::uint32_t length) noexcept
-{
-    std::uint32_t index = 0;
-    for (; index + 1 < length; index += 2)
-    {
-        sum += (static_cast<std::uint32_t>(data[index]) << 8) | data[index + 1];
-    }
-    if ((length & 1U) != 0)
-    {
-        sum += static_cast<std::uint32_t>(data[length - 1]) << 8;
-    }
-    return sum;
-}
-
-[[nodiscard]] std::uint16_t checksum_fold(std::uint32_t sum) noexcept
-{
-    while ((sum >> 16) != 0)
-    {
-        sum = (sum & 0xFFFFU) + (sum >> 16);
-    }
-    return static_cast<std::uint16_t>(~sum & 0xFFFFU);
-}
-
-[[nodiscard]] std::uint16_t ipv4_header_checksum(const std::uint8_t* header, std::uint32_t length) noexcept
-{
-    return checksum_fold(checksum_add(0, header, length));
-}
-
-[[nodiscard]] std::uint16_t
-tcp_checksum_ipv4(const std::uint8_t* ip, const std::uint8_t* tcp, std::uint32_t length) noexcept
-{
-    std::uint32_t sum = 0;
-    sum = checksum_add(sum, ip + 12, 8); // source + destination
-    sum += ip_protocol_tcp;
-    sum += length;
-    sum = checksum_add(sum, tcp, length);
-    return checksum_fold(sum);
-}
-
-[[nodiscard]] std::uint16_t
-tcp_checksum_ipv6(const std::uint8_t* ip, const std::uint8_t* tcp, std::uint32_t length) noexcept
-{
-    std::uint32_t sum = 0;
-    sum = checksum_add(sum, ip + 8, 32); // source + destination
-    sum += (length >> 16) & 0xFFFFU;
-    sum += length & 0xFFFFU;
-    sum += ip_protocol_tcp; // 32-bit next header，低 16 位为协议号
-    sum = checksum_add(sum, tcp, length);
-    return checksum_fold(sum);
 }
 
 void NTAPI injection_complete(void* context, NET_BUFFER_LIST* nbl, BOOLEAN dispatch_level) noexcept
@@ -257,30 +219,41 @@ void NTAPI injection_complete(void* context, NET_BUFFER_LIST* nbl, BOOLEAN dispa
     }
 }
 
-[[nodiscard]] bool rewrite_in_bounds(const forwarded_frame_facts& facts,
-                                     std::uint32_t network_offset,
-                                     std::uint32_t transport_offset,
-                                     std::uint32_t tcp_length,
-                                     std::uint32_t frame_length) noexcept
+[[nodiscard]] bool rewrite_in_bounds(const forwarded_frame_facts& facts) noexcept
 {
     const std::uint32_t address_size = facts.family == 6 ? 16U : 4U;
-    if (network_offset + 20U > frame_length)
+    const std::uint32_t frame_length = facts.data_length;
+    if (facts.network_offset + 20U > frame_length)
     {
         return false;
     }
-    if (network_offset + address_size * 2U > frame_length)
+    if (facts.network_offset + address_size * 2U > frame_length)
     {
         return false;
     }
-    if (transport_offset + tcp_min_header_size > frame_length)
+    if (facts.transport_offset + 4U > frame_length)
     {
         return false;
     }
-    if (tcp_length < tcp_min_header_size || transport_offset + tcp_length > frame_length)
+    if (facts.protocol == ip_protocol_tcp)
     {
-        return false;
+        return facts.transport_length >= tcp_min_header_size &&
+               facts.transport_offset + facts.transport_length <= frame_length;
     }
-    return true;
+    if (facts.protocol == ip_protocol_udp)
+    {
+        if (facts.transport_length < udp_header_size)
+        {
+            return false;
+        }
+        if (facts.fragmented)
+        {
+            // 分片一律在 classify 早退 block；这里再拒绝一次，避免将来新增调用点绕过 fail-closed。
+            return false;
+        }
+        return facts.transport_offset + facts.transport_length <= frame_length;
+    }
+    return false;
 }
 
 } // namespace
@@ -365,8 +338,7 @@ NTSTATUS probe_forwarded_inject_frame(const NET_BUFFER* source,
     {
         return STATUS_INVALID_DEVICE_STATE;
     }
-    if (facts.data_length < ethernet_header_size || facts.family == 0 ||
-        !rewrite_in_bounds(facts, facts.network_offset, facts.transport_offset, facts.tcp_length, facts.data_length))
+    if (facts.data_length < ethernet_header_size || facts.family == 0 || !rewrite_in_bounds(facts))
     {
         return STATUS_INVALID_PARAMETER;
     }
@@ -434,16 +406,40 @@ NTSTATUS probe_forwarded_inject_frame(const NET_BUFFER* source,
         frame[network + 11] = static_cast<std::uint8_t>(header_sum & 0xFFU);
     }
 
-    frame[transport + 16] = 0;
-    frame[transport + 17] = 0;
-    const std::uint16_t tcp_sum = facts.family == 6
-                                      ? tcp_checksum_ipv6(frame + network, frame + transport, facts.tcp_length)
-                                      : tcp_checksum_ipv4(frame + network, frame + transport, facts.tcp_length);
-    frame[transport + 16] = static_cast<std::uint8_t>((tcp_sum >> 8) & 0xFFU);
-    frame[transport + 17] = static_cast<std::uint8_t>(tcp_sum & 0xFFU);
+    if (facts.protocol == ip_protocol_udp)
+    {
+        frame[transport + 6] = 0;
+        frame[transport + 7] = 0;
+        std::uint16_t udp_sum = facts.family == 6
+                                    ? udp_checksum_ipv6(frame + network, frame + transport, facts.transport_length)
+                                    : udp_checksum_ipv4(frame + network, frame + transport, facts.transport_length);
+        if (udp_sum == 0)
+        {
+            // RFC 768：计算结果是 0 时要写成全 1（0 表示“无校验和”，只对 IPv4 合法）。
+            udp_sum = 0xFFFFU;
+        }
+        frame[transport + 6] = static_cast<std::uint8_t>((udp_sum >> 8) & 0xFFU);
+        frame[transport + 7] = static_cast<std::uint8_t>(udp_sum & 0xFFU);
+    }
+    else
+    {
+        frame[transport + 16] = 0;
+        frame[transport + 17] = 0;
+        const std::uint16_t tcp_sum =
+            facts.family == 6 ? tcp_checksum_ipv6(frame + network, frame + transport, facts.transport_length)
+                              : tcp_checksum_ipv4(frame + network, frame + transport, facts.transport_length);
+        frame[transport + 16] = static_cast<std::uint8_t>((tcp_sum >> 8) & 0xFFU);
+        frame[transport + 17] = static_cast<std::uint8_t>(tcp_sum & 0xFFU);
+    }
 
     // NdisHandle 传 NBL 池句柄而不是 nullptr：PREfast C6387 把 nullptr 当缺陷；
     // 也不能改用 IoAllocateMdl —— 实测那种 MDL 注入后在 inbound 层被本机栈丢弃（SYN 有去无回）。
+    if (state.nbl_pool == nullptr)
+    {
+        ExFreePoolWithTag(storage, injection_pool_tag);
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
     PMDL mdl = NdisAllocateMdl(state.nbl_pool, storage, frame_length);
     if (mdl == nullptr)
     {

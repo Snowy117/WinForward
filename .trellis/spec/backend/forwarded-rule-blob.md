@@ -291,10 +291,39 @@ redirect 规则的 `upstream_id` 是用户态选 SOCKS5 的唯一依据；驱动
 - 用户态 `ForwardedRedirectContextSource` 用 accepted socket 的 (listener_port, client) 查询；
 - `RelayServer` 按 `ForwardedUpstreams[upstream_id]` 取 endpoint，再走 SOCKS5 CONNECT；
   表项缺失时拒绝连接，不直连；
-- ABI v5 的 `probe_forwarded_stats` 为 296 字节，尾部追加 redirect 计数（`matched_redirect`、
+- ABI v6 的 `probe_forwarded_stats` 在 B4b 时为 296 字节，尾部追加 redirect 计数（`matched_redirect`、
   `redirected`、`redirect_created/ingress/return/blocked` 等）与 `redirect_multi_nb`、
   `inject_complete_calls`、`inject_complete_failed` 诊断计数；v4 的 0–143 字段偏移不变，
-  `last_status`/`abi_version` 后移；
+  `last_status`/`abi_version` 后移。B5 在同一尾部追加 13 个 UDP 计数后扩到 400 字节，并把
+  `probe_abi_version` 从 5 升到 6；`probe_forwarded_redirect_query` 偏移 22 的字节改为 `protocol`（0/6 = TCP，17 = UDP），见 §10；
 - `forwarded-rules` 的 F6 不再把 redirect 当作非法 blob；数据面验证入口是
   `wfprobe forwarded-tcp --phase core|upstreams|fail`；套件默认用 verify 端口（listener+1000）
   断言外部客户端实收字节/SHA-256/ACK，缺回报或内容不一致即 FAIL。
+
+## 10. B5 UDP 映射与接缝
+
+规则层不需要新字段：UDP 规则就是 `protocol = udp(17)`（或 `any`）的 redirect 规则，`upstream_id`
+的含义与 TCP 相同。驱动在执行层按协议分派：
+
+- `protocol=udp` 的 redirect 规则命中后，非分片首个 datagram 建表（没有 SYN），后续 datagram 查表；
+  **任何 UDP 分片**（IPv4 首片/非首片、IPv6 分片）在规则匹配前统一 block + `udp_fragmented`，不建表、不注入。
+  表项 key 增加协议，TCP/UDP 共用 listener 端口也不会互串。UDP 空闲 60s 回收，容量与 TCP 共享 4096。
+- 回程 UDP 帧按 listener 源端口 + 客户端地址/端口 + protocol=17 查表，再 SNAT 回原始服务器；
+  用户态 listener 用**同一个 socket** `sendto` 客户端，驱动负责源地址还原。
+- 用户态查询复用 `ioctl_query_forwarded_redirect`：`probe_forwarded_redirect_query.protocol=17`；
+  输出 `probe_forwarded_redirect.protocol` 回填 17，其余字段（server/upstream/ingress/rule）不变。
+- `forwarded-udp` 套件验证 core/socks5/fail/fragment/capacity/reject：core 额外绑定原始目的地 decoy，
+  fragment 用 4000 字节 datagram 验证分片 fail closed，capacity 用 capacity=8 测试构建验证表满，
+  reject 验证 ASSOCIATE 失败静默丢包；host UDP、forwarded TCP 与 `forwarded-rules` 的回归在 B5 不改语义。
+- 产品 E2E 使用 WinForward.Controller + Linux fake SOCKS5 UDP：5/5，源地址恢复，产品日志
+  `udp-relay stop in=6 relayed=5 back=5 associations=1 failures=0 drops=1`；未命中 forwarded 表的
+  直接 datagram 计 drop，不直连。
+
+映射表补充：
+
+| JSON | 模型 | blob / 驱动 |
+|---|---|---|
+| `rules[i].protocol = "udp"` | `ForwardedPolicyRule.Protocol = Udp` | rule `protocol = 17` |
+| 同一规则同时覆盖 TCP/UDP | `Protocol = Any` | rule `protocol = 0`；UDP 分支独立建表 |
+| `target` / `upstream_id` | 与 TCP 相同 | 表项记录 `upstream_id`，用户态按它选 SOCKS5 UDP 上游 |
+| UDP listener 端口 | 与 TCP listener 同端口号 | `probe_forwarded_config.listener_port` 同时用于两种协议 |

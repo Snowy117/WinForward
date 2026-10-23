@@ -3,10 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace WinForward.Probe;
 
-// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v5）。
+// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v6）。
 internal static class Protocol
 {
-    public const uint AbiVersion = 5;
+    public const uint AbiVersion = 6;
 
     // CTL_CODE(FILE_DEVICE_UNKNOWN, function, METHOD_BUFFERED, FILE_ANY_ACCESS)
     private static uint MakeIoctl(uint function) => (0x22u << 16) | (function << 2);
@@ -206,6 +206,19 @@ internal struct ProbeForwardedStats
     public ulong RedirectMultiNb;
     public ulong InjectCompleteCalls;
     public ulong InjectCompleteFailed;
+    public ulong UdpCreated;
+    public ulong UdpIngress;
+    public ulong UdpReturn;
+    public ulong UdpBlocked;
+    public ulong UdpReturnFailed;
+    public ulong UdpReturnMiss;
+    public ulong UdpNoConfig;
+    public ulong UdpNoState;
+    public ulong UdpCapacity;
+    public ulong UdpFragmented;
+    public ulong UdpInjectFailed;
+    public ulong UdpExpired;
+    public ulong UdpMultiNb;
     public uint RedirectActive;
     public uint RedirectHighWater;
     public uint LastStatus;
@@ -231,7 +244,8 @@ internal unsafe struct ProbeForwardedRedirectQuery
     public byte Reserved0;
     public fixed byte ClientAddress[16];
     public ushort ClientPort;
-    public ushort Reserved1;
+    public byte Protocol; // 0/6 = TCP，17 = UDP
+    public byte Reserved1;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -324,7 +338,7 @@ internal static class ProtocolLayout
         Check<ProbeStats>(264, "ProbeStats");
         Check<ProbeRuleInfo>(32, "ProbeRuleInfo");
         Check<ProbeForwardedInfo>(32, "ProbeForwardedInfo");
-        Check<ProbeForwardedStats>(296, "ProbeForwardedStats");
+        Check<ProbeForwardedStats>(400, "ProbeForwardedStats");
         Check<ProbeForwardedConfig>(28, "ProbeForwardedConfig");
         Check<ProbeForwardedRedirectQuery>(24, "ProbeForwardedRedirectQuery");
         Check<ProbeForwardedRedirect>(64, "ProbeForwardedRedirect");

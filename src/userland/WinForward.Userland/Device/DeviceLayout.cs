@@ -20,7 +20,7 @@ public static class DeviceLayout
     public const int ProbeForwardedConfigSize = 28;
     public const int ProbeForwardedRedirectQuerySize = 24;
     public const int ProbeForwardedRedirectSize = 64;
-    public const int ProbeForwardedStatsSize = 296;
+    public const int ProbeForwardedStatsSize = 400;
     public const int ProbeEventSize = 64;
     public const int ProcessPathMeasurementSize = 520;
     public const int RedirectContextSize = 36;
@@ -162,10 +162,23 @@ public static class DeviceLayout
         CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectMultiNb), 256);
         CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.InjectCompleteCalls), 264);
         CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.InjectCompleteFailed), 272);
-        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectActive), 280);
-        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectHighWater), 284);
-        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.LastStatus), 288);
-        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.AbiVersion), 292);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpCreated), 280);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpIngress), 288);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpReturn), 296);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpBlocked), 304);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpReturnFailed), 312);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpReturnMiss), 320);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpNoConfig), 328);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpNoState), 336);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpCapacity), 344);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpFragmented), 352);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpInjectFailed), 360);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpExpired), 368);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.UdpMultiNb), 376);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectActive), 384);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.RedirectHighWater), 388);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.LastStatus), 392);
+        CheckOffset<ProbeForwardedStats>(nameof(ProbeForwardedStats.AbiVersion), 396);
     }
 
     private static void VerifyProbeForwardedRedirect()
@@ -184,7 +197,8 @@ public static class DeviceLayout
         CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Reserved0), 3);
         CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.ClientAddress), 4);
         CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.ClientPort), 20);
-        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Reserved1), 22);
+        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Protocol), 22);
+        CheckOffset<ProbeForwardedRedirectQuery>(nameof(ProbeForwardedRedirectQuery.Reserved1), 23);
 
         CheckSize<ProbeForwardedRedirect>(ProbeForwardedRedirectSize);
         CheckOffset<ProbeForwardedRedirect>(nameof(ProbeForwardedRedirect.Magic), 0);

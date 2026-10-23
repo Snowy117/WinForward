@@ -123,9 +123,9 @@ public sealed class RedirectDestination
             return false;
         }
 
-        if (redirect.Protocol != RedirectContext.ProtocolTcp)
+        if (redirect.Protocol != RedirectContext.ProtocolTcp && redirect.Protocol != RedirectContext.ProtocolUdp)
         {
-            error = $"forwarded redirect 协议 {redirect.Protocol} 不是 TCP（B4b 只有 TCP）";
+            error = $"forwarded redirect 协议 {redirect.Protocol} 不是 TCP/UDP";
             return false;
         }
 
@@ -143,7 +143,7 @@ public sealed class RedirectDestination
 
         IPAddress server = redirect.ServerIP;
         destination = new RedirectDestination(redirect.Family,
-                                              (byte)RedirectContext.ProtocolTcp,
+                                              redirect.Protocol,
                                               new IPEndPoint(server, redirect.ServerPort),
                                               0,
                                               (int)redirect.RuleIndex,

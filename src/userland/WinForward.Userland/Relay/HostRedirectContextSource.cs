@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using System.Net.Sockets;
 
 namespace WinForward.Userland.Relay;
@@ -25,5 +26,15 @@ public sealed class HostRedirectContextSource : IRedirectContextSource
         }
 
         return RedirectDestination.TryParse(rawContext, out destination, out error);
+    }
+
+    /// <summary>host UDP 的回程由 listener 用同一个 socket 完成，不使用 forwarded redirect 表。</summary>
+    public bool TryReadUdp(EndPoint client, int listenerPort, [NotNullWhen(true)] out RedirectDestination? destination,
+                           out string error)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        destination = null;
+        error = "host UDP 中继不在本仓库";
+        return false;
     }
 }

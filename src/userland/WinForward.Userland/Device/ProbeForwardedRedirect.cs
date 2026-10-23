@@ -17,7 +17,8 @@ public struct ProbeForwardedRedirectQuery
     public byte Reserved0;
     public AddressBytes ClientAddress;
     public ushort ClientPort;
-    public ushort Reserved1;
+    public byte Protocol; // 0/6 = TCP（0 是 B4b 兼容值），17 = UDP
+    public byte Reserved1;
 
     [InlineArray(16)]
     public struct AddressBytes
@@ -27,6 +28,15 @@ public struct ProbeForwardedRedirectQuery
 
     public static ProbeForwardedRedirectQuery ForClient(ushort listenerPort, IPEndPoint client)
     {
+        return ForClient(listenerPort, client, RedirectContext.ProtocolTcp);
+    }
+
+    /// <summary>UDP 用：同一个 listener 端口上的 TCP/UDP 表项按 protocol 区分。</summary>
+    public static ProbeForwardedRedirectQuery ForClientUdp(ushort listenerPort, IPEndPoint client) =>
+        ForClient(listenerPort, client, RedirectContext.ProtocolUdp);
+
+    private static ProbeForwardedRedirectQuery ForClient(ushort listenerPort, IPEndPoint client, byte protocol)
+    {
         ArgumentNullException.ThrowIfNull(client);
         byte family = (byte)(client.AddressFamily == AddressFamily.InterNetwork ? 4
                                : client.AddressFamily == AddressFamily.InterNetworkV6 ? 6
@@ -34,6 +44,7 @@ public struct ProbeForwardedRedirectQuery
         ProbeForwardedRedirectQuery query = default;
         query.ListenerPort = listenerPort;
         query.Family = family;
+        query.Protocol = protocol;
         query.ClientPort = (ushort)client.Port;
         client.Address.GetAddressBytes().CopyTo(query.ClientAddress);
         return query;

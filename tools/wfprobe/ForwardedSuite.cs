@@ -805,12 +805,13 @@ internal static class ForwardedSuite
                     (long)(stats.SelfInjected + stats.NoTable + stats.Malformed + stats.NonIp + stats.Permitted +
                            stats.Blocked + stats.Redirected),
                     $"{name}：帧去向守恒");
-        Check.Equal((long)stats.Permitted, (long)(stats.MatchedPermit + stats.FallbackPermit),
-                    $"{name}：permitted == matched_permit + fallback_permit");
+        Check.Equal((long)(stats.MatchedPermit + stats.FallbackPermit + stats.UdpReturnMiss),
+                    (long)stats.Permitted,
+                    $"{name}：permitted == matched_permit + fallback_permit + udp_return_miss");
         Check.Equal((long)stats.Blocked,
                     (long)(stats.MatchedBlock + stats.FallbackBlock + stats.RedirectBlocked +
-                           stats.RedirectReturnFailed),
-                    $"{name}：blocked == matched_block + fallback_block + redirect 失败");
+                           stats.RedirectReturnFailed + stats.UdpBlocked + stats.UdpReturnFailed),
+                    $"{name}：blocked == matched_block + fallback_block + redirect 失败 + udp 失败");
         Check.Equal((long)stats.Matched,
                     (long)(stats.MatchedPermit + stats.MatchedBlock + stats.MatchedRedirect),
                     $"{name}：matched == permit + block + redirect");
@@ -823,10 +824,13 @@ internal static class ForwardedSuite
         stats.InboundFrames + stats.OutboundFrames ==
         stats.SelfInjected + stats.NoTable + stats.Malformed + stats.NonIp + stats.Permitted + stats.Blocked +
             stats.Redirected &&
-        stats.Permitted == stats.MatchedPermit + stats.FallbackPermit &&
+        stats.Permitted == stats.MatchedPermit + stats.FallbackPermit + stats.UdpReturnMiss &&
         stats.Blocked ==
-            stats.MatchedBlock + stats.FallbackBlock + stats.RedirectBlocked + stats.RedirectReturnFailed &&
+            stats.MatchedBlock + stats.FallbackBlock + stats.RedirectBlocked + stats.RedirectReturnFailed +
+            stats.UdpBlocked + stats.UdpReturnFailed &&
         stats.Matched == stats.MatchedPermit + stats.MatchedBlock + stats.MatchedRedirect &&
+        stats.MatchedRedirect + stats.UdpFragmented ==
+            stats.RedirectIngress + stats.RedirectBlocked + stats.UdpIngress + stats.UdpBlocked &&
         stats.Fallback == stats.FallbackPermit + stats.FallbackBlock;
 
     private static uint? FindAdapterIndex(string address)

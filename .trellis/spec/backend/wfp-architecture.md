@@ -88,7 +88,7 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 
 两侧都有布局断言：C++ 侧 `static_assert`（尺寸、对齐、`offsetof`），C# 侧以布局一致性测试锁定。版本号变更即视为破坏性变更。
 
-控制面 ABI（`probe_ioctl.h`）当前是 **v5**：v3 的 `probe_event` / `probe_stats` 字段不变；v4 新增 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL（`0x808`–`0x80B`）；v5 新增 `probe_forwarded_config` / `probe_forwarded_redirect_query` / `probe_forwarded_redirect` 与 `0x80C`–`0x80E`，并在 `probe_forwarded_stats` 尾部追加 redirect 计数：v4 的 0–143 字段偏移不变，`last_status` / `abi_version` 后移。驱动与用户态必须同批升级。
+控制面 ABI（`probe_ioctl.h`）当前是 **v6**：v3 的 `probe_event` / `probe_stats` 字段不变；v4 新增 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL（`0x808`–`0x80B`）；v5 新增 `probe_forwarded_config` / `probe_forwarded_redirect_query` / `probe_forwarded_redirect` 与 `0x80C`–`0x80E`，并在 `probe_forwarded_stats` 尾部追加 redirect 计数（296 字节）；v6 在同一尾部追加 13 个 UDP 计数扩到 400 字节，并提升 `probe_abi_version`。v4 的 0–143 字段偏移不变，`last_status` / `abi_version` 后移。驱动与用户态必须同批升级。
 
 ---
 
@@ -254,11 +254,12 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 
 ### 7.13 Forwarded TCP 数据面（B4b 实测）
 
-- **ABI v5 与两套配置。** forwarded 数据面有自己的 probe_forwarded_config（enabled / listener_port /
+- **ABI v6 与两套配置。** forwarded 数据面有自己的 probe_forwarded_config（enabled / listener_port /
   family / listener_address=L）与三个 IOCTL（0x80C–0x80E），与 host 的 probe_config 完全独立。
   关闭 config 会清空 redirect 表；换规则 blob 不清表，旧表项保持旧 generation / upstream。
-  probe_forwarded_stats 为 296 字节；尾部除 redirect 计数外还有 redirect_multi_nb、
-  inject_complete_calls、inject_complete_failed 三个诊断字段，v4 的 0–143 偏移不变。
+  probe_forwarded_stats 在 B4b 时为 296 字节；尾部除 redirect 计数外还有 redirect_multi_nb、
+  inject_complete_calls、inject_complete_failed 三个诊断字段，v4 的 0–143 偏移不变。B5 在同一尾部
+  追加 13 个 UDP 计数后扩到 400 字节（UDP 计数在 280–383，末四个 u32 后移），ABI 同时升到 v6，见 §7.14。
 - **原帧消费。** 入口 DNAT 与回程 SNAT 都返回 FWP_ACTION_BLOCK，只注入改写副本。B3 的加法注入
   （原帧 permit + 注入副本）没有进入正式驱动。实测：客户端连接成功、监听端只接住一次、注入帧全部
   被 FwpsQueryPacketInjectionState0 识别为 self_injected。
@@ -271,8 +272,9 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
   实测一个回程 NBL 可带 7 个 NET_BUFFER（1448B + 376B 等），只处理首帧会让接收端停在 63712B。
 - **校验和按实际偏移重算。** IPv4 头校验和 + TCP 校验和（IPv6 用伪头）；VLAN、IPv4 option、IPv6
   扩展头都用解析出的 network_offset / transport_offset，不假设 14 字节以太网头。
-- **注入 MDL 必须用 NdisAllocateMdl。** NdisHandle 传 NBL 池句柄（不传 nullptr，PREfast C6387）；
-  实测 IoAllocateMdl 创建的 MDL 经 FwpsInjectMacReceiveAsync0 后会被本机栈丢弃（SYN 有去无回）。
+- **注入 MDL 必须用 NdisAllocateMdl。** NdisHandle 传 NBL 池句柄，并在调用前显式拒绝 null 池
+  （第一版只在注释里说明，PREfast 仍报 C6387；gate 首次失败即此告警）；实测 IoAllocateMdl 创建的
+  MDL 经 FwpsInjectMacReceiveAsync0 后会被本机栈丢弃（SYN 有去无回）。
 - **回程 MAC 还原。** 表项记录入口帧的源 MAC（client）与目的 MAC（local）。回程注入的目的 MAC =
   client_mac、源 MAC = local_mac；未命中回程表的 listener 端口包按普通本机流量继续走规则匹配。
 - **失败关闭。** 无 config/L → redirect_no_config，非 SYN 且无表项 → redirect_no_state，
@@ -287,6 +289,50 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
   SHA-256 与 TCP ACK 字节数，套件按 client_port 配对断言，缺回报/内容不符即 FAIL（--no-verify 仅手工）。
   产品 E2E 由 WinForward.Controller run 驱动。实测计数与恒等式见 src/driver/README.md 的 B4b 段。
   forwarded-rules 的 F6 不再把 redirect 当作非法 blob。
-- **边界。** 单入口 / 单 listener 端口 / 单 L；UDP redirect 仍 block（B5）；只处理首片；
-  表满没有用 4096 条真实连接压测；LWF 对注入帧的可见性仍未测。一个 NBL 内的 NET_BUFFER 按同一
-  listener 回程流处理，混合流不在本版支持范围。
+- **边界。** 单入口 / 单 listener 端口 / 单 L；UDP 数据面见 §7.14；表满路径用 capacity=8 测试
+  构建验证；LWF 对注入帧的可见性仍未测。一个 NBL 内的 NET_BUFFER 按同一 listener 回程流处理，
+  混合流不在本版支持范围。
+
+### 7.14 Forwarded UDP 数据面（B5 实测）
+
+- **表与生命周期。** UDP 复用 TCP 的 redirect 表框架，但 key 增加 protocol：入口
+  (ingress, family, protocol, client, server)、回程 (family, protocol, listener_port, client)。同一
+  listener 端口上的 TCP/UDP 表项不能互串。TCP/UDP 共用容量 4096；UDP 首个 datagram 建表，状态直接
+  established，60s 无活动回收；TCP 的三段超时不变。回收是惰性的，过期后下一个 datagram 重建表项。
+- **入口 DNAT。** forwarded config enabled 时，**任何 UDP 分片**（IPv4 首片、IPv4 非首片、IPv6
+  分片）都在规则匹配之前 block + udp_fragmented，不建表、不注入；非分片才按规则匹配。
+  非分片帧查/建表，目的地址/端口改为 (L, listener_port)，重算 IPv4 头与 UDP 校验和（IPv4/IPv6
+  都重算），逐 NET_BUFFER 用 FwpsInjectMacReceiveAsync0 注入，原帧 block。
+- **回程 SNAT。** 出向 UDP 帧源端口等于 listener_port 时按 (family, protocol=17, listener, client)
+  查表；命中则源地址/端口改回原始服务器、目的 MAC=client_mac、源 MAC=local_mac，重算 UDP 校验和，
+  FwpsInjectMacSendAsync0 注入入口网卡，原 NBL block。候选全部未命中时 permit（listener 回客户端的
+  普通本机流量），并计 udp_return_miss；命中但注入失败 → block + udp_return_failed。
+- **失败关闭。** 无 config/L → udp_no_config，表满 → udp_capacity，任何分片 → udp_fragmented，
+  注入失败 → udp_inject_failed；入口失败统一计 udp_blocked 并 block 原帧。UDP 无 RST，失败是静默丢包。
+  分片在规则匹配前 block，因此 matched_redirect 恒等式带 udp_fragmented 项。
+  恒等式见 src/driver/README.md 的 B5 段与 probe_ioctl.h 注释。
+- **ABI。** probe_forwarded_stats 扩到 400 字节（UDP 计数 udp_created/ingress/return/blocked/
+  return_failed/return_miss/no_config/no_state/capacity/fragmented/inject_failed/expired/multi_nb）。
+  probe_abi_version 从 5 升到 6；布局不变，C++/C#/夹具/ABI 测试同步。
+  probe_forwarded_redirect_query 偏移 22 的字节从 reserved1 改为 protocol（0/6 = TCP，17 = UDP），
+  reserved1 移到偏移 23；查询输出回填表项协议。旧用户态必须在同一批升级。
+- **用户态。** ListenerSet 在 TCP 端口上同时绑 v4/v6 UDP socket；ForwardedRedirectContextSource 新增
+  TryReadUdp（protocol=17 查询），ForwardedUdpRelay 按 (client, server, upstream_id) 复用一条 SOCKS5
+  UDP ASSOCIATE，空闲 30s 回收、容量 1024，缺 upstream/上游失败一律丢包不回退直连；回程用同一
+  listener socket sendto，驱动负责 SNAT。WfpController 在 forwarded config 启用后启动 UDP relay，
+  退出时先 disabled config（清表）再停 relay，最后空 blob。
+- **验证入口。** wfprobe forwarded-udp --phase core|socks5|fail|fragment|capacity|reject（--restore-only
+  兜底）；core 直连 Linux UDP echo 并绑定原始目的地 decoy 证明原帧未 permit，socks5 用进程内两个假
+  SOCKS5 UDP 上游验证 upstream_id 选择与关联复用，fail 验证无 config 时静默丢包，fragment 发 4000
+  字节 datagram 验证全部分片 fail closed，capacity 用小容量测试构建验证表满，reject 验证 ASSOCIATE
+  失败静默丢包。外部 Linux 客户端经 verify TCP 端口回报实收字节/SHA/源地址；--expect-created 2
+  配合客户端 65s 间隔可验证 60s 超时回收。
+- **实测（2026-10-23）。** core 10/10；socks5 两客户端各 10/10、两个上游各只 1 次 ASSOCIATE；
+  fail 5 条 datagram 全部 udp_no_config；60s 超时后 udp_created=2/udp_expired=1；forwarded-tcp core、
+  forwarded-rules F1/F2/F3/F6、host udp-rules/rules/selftest/gates 全 PASS；产品 E2E
+  （WinForward.Controller + Linux fake SOCKS5 UDP 40500）5/5、源地址恢复为原始服务器，产品日志
+  `udp-relay stop in=6 relayed=5 back=5 associations=1 failures=0 drops=1`（drops 是直接打到 listener 的
+  query-miss datagram）。
+- **边界。** 单入口/单 listener 端口/单 L 不变；所有 UDP 分片 fail closed；native IPv6 UDP 代码路径
+  已实现但本环境未在入口网卡做 E2E（Linux 的 fd00 地址在另一张网卡）；host UDP 的 listener/中继
+  不在本仓库，未命中 forwarded 表的 datagram 丢弃。

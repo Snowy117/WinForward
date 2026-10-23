@@ -45,6 +45,7 @@ static void RegisterAll()
     RuleOrderTests.Register();
     DeviceAbiTests.Register();
     Socks5Tests.Register();
+    Socks5UdpCodecTests.Register();
     Socks5ConfigurationTests.Register();
     RelayPumpTests.Register();
     WinForward.Userland.Tests.Abi.AbiConsistencyTests.Register();

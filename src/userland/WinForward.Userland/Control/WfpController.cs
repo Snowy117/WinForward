@@ -24,16 +24,18 @@ public sealed class WfpController : IAsyncDisposable
     private readonly RelayServer _relay;
     private readonly TextWriter _report;
     private readonly object _reportGate = new();
+    private readonly ForwardedUdpRelay? _udpRelay;
     private bool _stopped;
 
     // 没有 forwarded 段时下发的空表：清掉上一次异常退出可能留下的规则。空表 = 全部走 fallback permit。
     private static readonly byte[] EmptyForwardedBlob =
         ForwardedBlobCompiler.Compile(new ForwardedPolicyTable([], RuleAction.Permit));
 
-    private WfpController(WfpDeviceClient device, RelayServer relay, TextWriter report)
+    private WfpController(WfpDeviceClient device, RelayServer relay, ForwardedUdpRelay? udpRelay, TextWriter report)
     {
         _device = device;
         _relay = relay;
+        _udpRelay = udpRelay;
         _report = report;
     }
 
@@ -47,6 +49,7 @@ public sealed class WfpController : IAsyncDisposable
 
         WfpDeviceClient device = WfpDeviceClient.Open();
         RelayServer? relay = null;
+        ForwardedUdpRelay? udpRelay = null;
         try
         {
             ProbeStats stats = device.GetStats();
@@ -95,6 +98,11 @@ public sealed class WfpController : IAsyncDisposable
                 Report(settings.Report, "controller-forwarded-cleared rules=0 fallback=permit");
             }
             ConfigureForwarded(device, settings, (ushort)relay.Port);
+            if (settings.Forwarded is not null)
+            {
+                udpRelay = ForwardedUdpRelay.Start(listeners.UdpSockets, device, settings.ForwardedUpstreams,
+                                                   relay.Port, settings.Report);
+            }
 
             uint processId = (uint)Environment.ProcessId;
             device.SetConfig(ProbeConfig.EnabledFor(processId, (ushort)relay.Port, new[] { processId }));
@@ -110,7 +118,7 @@ public sealed class WfpController : IAsyncDisposable
             Report(settings.Report, $"controller-ready pid={Environment.ProcessId} port={relay.Port} " +
                                     $"listener={DescribeListeners(listeners)}");
 
-            return new WfpController(device, relay, settings.Report);
+            return new WfpController(device, relay, udpRelay, settings.Report);
         }
         catch
         {
@@ -137,6 +145,10 @@ public sealed class WfpController : IAsyncDisposable
                        $"controller-forwarded-clear-error {exception.GetType().Name}: {exception.Message}");
             }
 
+            if (udpRelay is not null)
+            {
+                udpRelay.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
             if (relay is not null)
             {
                 relay.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -168,6 +180,13 @@ public sealed class WfpController : IAsyncDisposable
             Report(_report, $"controller-disable-error {exception.GetType().Name}: {exception.Message}");
         }
 
+        // 先停监听、等会话收尾，再报计数：否则 controller-stop 里的 bytes 可能还是 0。
+        if (_udpRelay is not null)
+        {
+            await _udpRelay.DisposeAsync();
+        }
+        await _relay.DisposeAsync();
+
         try
         {
             _device.SetForwardedBlob(EmptyForwardedBlob);
@@ -178,9 +197,6 @@ public sealed class WfpController : IAsyncDisposable
         {
             Report($"controller-forwarded-clear-error {exception.GetType().Name}: {exception.Message}");
         }
-
-        // 先停监听、等会话收尾，再报计数：否则 controller-stop 里的 bytes 可能还是 0。
-        await _relay.DisposeAsync();
         Report(_report, $"controller-stop accepted={_relay.Accepted} refused={_relay.Refused} " +
                         $"bytes_in={_relay.BytesClientToServer} bytes_out={_relay.BytesServerToClient}");
 

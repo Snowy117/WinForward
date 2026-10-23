@@ -260,7 +260,8 @@ internal static class DeviceAbiTests
         Check.Equal(11UL, BitConverter.ToUInt64(statsBytes, 0), "classify_calls 在偏移 0");
         Check.Equal(6UL, BitConverter.ToUInt64(statsBytes, 16), "outbound_frames 在偏移 16");
         Check.Equal(2UL, BitConverter.ToUInt64(statsBytes, 128), "rejected_blobs 在偏移 128");
-        Check.Equal(ProbeIoctl.AbiVersion, BitConverter.ToUInt32(statsBytes, 292), "abi_version 在偏移 292");
+        Check.Equal(ProbeIoctl.AbiVersion, BitConverter.ToUInt32(statsBytes, 396), "abi_version 在偏移 396");
+        Check.Equal(0UL, BitConverter.ToUInt64(statsBytes, 280), "udp_created 在偏移 280");
         Check.Equal(1UL, BitConverter.ToUInt64(statsBytes, 144), "matched_redirect 在偏移 144");
     }
 

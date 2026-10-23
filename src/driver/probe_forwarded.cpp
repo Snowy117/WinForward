@@ -462,8 +462,9 @@ probe_forwarded_query_redirect(const void* buffer, ULONG input_length, void* out
 
     probe_forwarded_redirect_query query{};
     RtlCopyMemory(&query, buffer, sizeof(query));
+    const std::uint8_t protocol = query.protocol == 0 ? 6 : query.protocol;
     if (query.reserved0 != 0 || query.reserved1 != 0 || query.listener_port == 0 || query.client_port == 0 ||
-        (query.family != 4 && query.family != 6))
+        (query.family != 4 && query.family != 6) || (protocol != 6 && protocol != 17))
     {
         return STATUS_INVALID_PARAMETER;
     }
@@ -474,11 +475,23 @@ probe_forwarded_query_redirect(const void* buffer, ULONG input_length, void* out
 
     KIRQL old_irql{};
     const bool raised = forwarded_lock(old_irql);
-    lookup = forwarded_redirect_find_return(
-        state.redirects, query.family, query.listener_port, query.client_address, query.client_port, snapshot);
+    lookup = forwarded_redirect_find_return(state.redirects,
+                                            query.family,
+                                            protocol,
+                                            query.listener_port,
+                                            query.client_address,
+                                            query.client_port,
+                                            snapshot);
     if (lookup == forwarded_redirect_lookup::expired)
     {
-        ++state.stats.redirect_expired;
+        if (protocol == 17)
+        {
+            ++state.stats.udp_expired;
+        }
+        else
+        {
+            ++state.stats.redirect_expired;
+        }
     }
     forwarded_unlock(raised, old_irql);
 
@@ -491,7 +504,7 @@ probe_forwarded_query_redirect(const void* buffer, ULONG input_length, void* out
     result.magic = forwarded_redirect_magic;
     result.version = forwarded_redirect_version;
     result.family = snapshot.family;
-    result.protocol = 6;
+    result.protocol = snapshot.protocol;
     result.client_port = snapshot.client_port;
     result.server_port = snapshot.server_port;
     result.listener_port = snapshot.listener_port;

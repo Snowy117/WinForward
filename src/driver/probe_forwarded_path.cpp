@@ -6,6 +6,7 @@ namespace winforward::wfp::probe
 {
 namespace
 {
+
 constexpr std::uint8_t tcp_flag_syn = 0x02;
 constexpr std::uint8_t tcp_flag_ack = 0x10;
 [[nodiscard]] bool tcp_is_syn_only(const forwarded_frame_facts& facts) noexcept
@@ -41,6 +42,7 @@ forwarded_inbound_plan plan_forwarded_inbound(forwarded_state& state,
         forwarded_redirect_lookup lookup = forwarded_redirect_find_ingress(state.redirects,
                                                                            ingress_ifindex,
                                                                            facts.family,
+                                                                           facts.protocol,
                                                                            facts.source_address,
                                                                            facts.source_port,
                                                                            facts.destination_address,
@@ -48,13 +50,20 @@ forwarded_inbound_plan plan_forwarded_inbound(forwarded_state& state,
                                                                            plan.entry);
         if (lookup == forwarded_redirect_lookup::expired)
         {
-            ++state.stats.redirect_expired;
+            if (facts.protocol == 17)
+            {
+                ++state.stats.udp_expired;
+            }
+            else
+            {
+                ++state.stats.redirect_expired;
+            }
         }
         if (lookup == forwarded_redirect_lookup::found)
         {
             plan.proceed = true;
         }
-        else if (facts.protocol == 6 && facts.tcp_length != 0 && tcp_is_syn_only(facts))
+        else if ((facts.protocol == 6 && facts.transport_length != 0 && tcp_is_syn_only(facts)) || facts.protocol == 17)
         {
             forwarded_redirect_request create{};
             create.ingress_ifindex = ingress_ifindex;
@@ -63,6 +72,7 @@ forwarded_inbound_plan plan_forwarded_inbound(forwarded_state& state,
             create.rule_index = rule_index;
             create.generation = state.generation;
             create.family = facts.family;
+            create.protocol = facts.protocol;
             create.client_port = facts.source_port;
             create.server_port = facts.destination_port;
             create.listener_port = config.listener_port;
@@ -91,13 +101,15 @@ forwarded_inbound_plan plan_forwarded_inbound(forwarded_state& state,
 
 void mark_forwarded_redirect_closing(forwarded_state& state,
                                      std::uint8_t family,
+                                     std::uint8_t protocol,
                                      std::uint16_t listener_port,
                                      const std::uint8_t* client_address,
                                      std::uint16_t client_port) noexcept
 {
     KIRQL old_irql{};
     const bool raised = forwarded_lock(old_irql);
-    (void)forwarded_redirect_mark_closing(state.redirects, family, listener_port, client_address, client_port);
+    (void)forwarded_redirect_mark_closing(
+        state.redirects, family, protocol, listener_port, client_address, client_port);
     forwarded_unlock(raised, old_irql);
 }
 
