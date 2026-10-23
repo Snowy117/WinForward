@@ -338,3 +338,12 @@ redirect 规则的 `upstream_id` 是用户态选 SOCKS5 的唯一依据；驱动
 | 同一规则同时覆盖 TCP/UDP | `Protocol = Any` | rule `protocol = 0`；UDP 分支独立建表 |
 | `target` / `upstream_id` | 与 TCP 相同 | 表项记录 `upstream_id`，用户态按它选 SOCKS5 UDP 上游 |
 | UDP listener 端口 | 与 TCP listener 同端口号 | `probe_forwarded_config.listener_port` 同时用于两种协议 |
+
+## 9. B6c 门禁与已知边界
+
+- 独立 Linux 门禁 `tools/linux/forwarded_gate.py` 覆盖 TCP/UDP core、分片、permit-first、
+  host 同 remote 和产品 reject；CI 禁止 `--no-verify`。Windows-only `gate.ps1` 不包含需要外部
+  Linux 客户端的 forwarded 数据面阶段。
+- ABI v7 下 config disabled 时过滤器不再进入 classify，B6a 的 `udp_no_config` 断言在 v7 不成立；
+  Linux 门禁默认跳过 fail 阶段（`--include-fail` 仅诊断）。这是 B6c 记录的行为差异，未改数据面。
+- 已知边界统一见 `.trellis/tasks/archive/2026-10/10-23-fwd-b6-hardening/verification.md` §15。

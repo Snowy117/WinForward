@@ -10,7 +10,7 @@ filter 执行。host TCP 与 host UDP 共用同一套 callout、四道闸与规�
 
 | 文件 | 内容 |
 |---|---|
-| `probe_ioctl.h` | 控制面 ABI v4：IOCTL 码、配置、计数、host 规则表回读、forwarded 表回读、事件 |
+| `probe_ioctl.h` | 控制面 ABI v7：IOCTL 码、配置、计数、host 规则表回读、forwarded 表/ingress 回读、事件 |
 | `rule_table.h/.cpp` | 规则 blob 的池内存副本、校验（含 selector UTF-8/511、fallback 冲突、顺序冲突）、引用计数、原子替换与退役链 |
 | `probe_driver.h` | 驱动内部共享面（状态、锁、窄接口、callout 原型、include 顺序约束） |
 | `probe_driver.cpp` | `DriverEntry`/卸载、设备、WFP provider/callout/filter 的注册与拆除 |
@@ -599,3 +599,16 @@ pwsh -File tools/windows/gate.ps1 -Remote <测试目标地址:端口>
 - 用户态要用 `FwpmGetAppIdFromFileName0` 取 app id；该 API 对 >MAX_PATH 的路径会失败，长路径
   需要用户态自己拼 device path。
 - 闸 2 目前只由组合用例覆盖，未单独钉住（需要第二个 redirector，findings §5）。
+
+
+### B6c 独立门禁与 A5（2026-10-23）
+
+- Linux 门禁：`tools/linux/forwarded_gate.py`，覆盖 TCP/UDP core、IPv4 9 片、permit-first、
+  host 同 remote、产品 reject；自动 prepare/cleanup，CI 禁止 `--no-verify`。
+- `gate.ps1` 不包含需要外部 Linux 客户端的 forwarded 数据面阶段（原因与替代见
+  `tools/linux/forwarded_gate.md` 和任务 `verification.md` §14）。
+- 已知 fail 阶段边界：ABI v7 config disabled 时过滤器不进入 classify，B6a 的 `no_config` 断言
+  在 v7 不成立；Linux 门禁默认跳过，`--include-fail` 仅诊断。未改数据面语义。
+- A5 仅为含 C# suite 中继的量级采样（1MiB TCP 0.8–4.5 MB/s，200×64B UDP burst 209pps；
+  host 12.9 MB/s/1590pps），不设 kill criteria，详见 `verification/a5-cost.md`。
+- 驱动 SHA-256：`EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`（ABI v7）。

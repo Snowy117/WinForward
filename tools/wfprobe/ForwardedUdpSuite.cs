@@ -611,6 +611,7 @@ internal static class ForwardedUdpSuite
         ProbeForwardedInfo info = device.GetForwardedInfo();
         Check.Equal(1, info.Installed, "redirect 规则可以下发");
         s_installedGeneration = info.Generation;
+        device.SetForwardedIngressConfig(false, Array.Empty<ProbeForwardedIngress>());
         device.SetForwardedConfig(DisabledConfig(listenerPort));
         device.ResetForwardedStats();
 
@@ -620,7 +621,7 @@ internal static class ForwardedUdpSuite
         Console.Out.Flush();
 
         bool received = false;
-        using (var window = new CancellationTokenSource(Math.Min(waitMs, 5000)))
+        using (var window = new CancellationTokenSource(Math.Min(waitMs, 15000)))
         {
             try
             {

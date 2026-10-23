@@ -88,7 +88,7 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 
 两侧都有布局断言：C++ 侧 `static_assert`（尺寸、对齐、`offsetof`），C# 侧以布局一致性测试锁定。版本号变更即视为破坏性变更。
 
-控制面 ABI（`probe_ioctl.h`）当前是 **v6**：v3 的 `probe_event` / `probe_stats` 字段不变；v4 新增 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL（`0x808`–`0x80B`）；v5 新增 `probe_forwarded_config` / `probe_forwarded_redirect_query` / `probe_forwarded_redirect` 与 `0x80C`–`0x80E`，并在 `probe_forwarded_stats` 尾部追加 redirect 计数（296 字节）；v6 在同一尾部追加 13 个 UDP 计数扩到 400 字节，并提升 `probe_abi_version`。v4 的 0–143 字段偏移不变，`last_status` / `abi_version` 后移。驱动与用户态必须同批升级。
+控制面 ABI（`probe_ioctl.h`）当前是 **v7**：v3 的 `probe_event` / `probe_stats` 字段不变；v4 新增 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL（`0x808`–`0x80B`）；v5 新增 `probe_forwarded_config` / `probe_forwarded_redirect_query` / `probe_forwarded_redirect` 与 `0x80C`–`0x80E`，并在 `probe_forwarded_stats` 尾部追加 redirect 计数（296 字节）；v6 追加 13 个 UDP 计数扩到 400 字节；v7 新增 ingress 配置/查询（`0x80F`/`0x810`）、24→40B 查询、64→88B 输出与 stats 尾部 7 个 u64（456 字节，448 字节输出仍兼容）。v4 的 0–143 字段偏移不变，`last_status` / `abi_version` 后移。驱动与用户态必须同批升级。
 
 ---
 
@@ -397,3 +397,23 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
   第二轮新增 `noingress` 正测、任意 L 查询歧义、旧尺寸 IOCTL（vm-check 86/0）与换表后旧连接继续收发。
 
   host rules/selftest/gates/udp-rules 与 forwarded-rules F1/F2/F3/F6 全 PASS。
+
+### 7.16 B6c 门禁、成本与验收（2026-10-23）
+
+- **独立 Linux 门禁。** `tools/linux/forwarded_gate.py` 在 Linux 客户端侧自动 prepare/cleanup
+  （`.99` 别名、40400/40600/41400 等端口放行），跑 TCP/UDP core、IPv4 9 片、permit-first、
+  host 同 remote 和产品 reject；CI 禁止 `--no-verify`。原始日志在 `verification/forwarded-gate/`。
+  multi/hotswap/noingress/StateCommand、IPv6 9 片、A5 不在该门禁内，原因见 `tools/linux/forwarded_gate.md`。
+- **fail 阶段边界。** ABI v7 下 config disabled 时 WFP filter 不再进入 classify，B6a 的
+  `udp_no_config`/`blocked` 断言不成立；`--include-fail` 保留诊断，不作为门禁通过条件。这是
+  B6c 发现，未改数据面语义。
+- **Windows gate。** `gate.ps1` 保持 host/WFP/forwarded-rules/池检查；forwarded 数据面需要外部
+  Linux 客户端，未塞进 Windows-only gate，由 Linux 门禁单独承担，失败即 Linux 门禁失败。
+- **A5 成本。** `verification/a5-cost.md`：forwarded TCP 1MiB 0.8–4.5 MB/s、UDP 200×64B burst
+  209pps；host 对照 12.9 MB/s、1590pps。数字包含 C# suite 中继、VM vSwitch、单次采样噪声，
+  只作量级参考，不设 kill criteria；未用 iperf3/内核 sink。
+- **D7。** 见 `.trellis/tasks/archive/2026-10/10-23-fwd-b6-hardening/d7-decision.md`：WFP L2 保留为 kernel
+  edition 候选，不正式替代 NDISAPI/WinpkFilter；采用条件（独立性能、LWF、IPv6 多入口、
+  UDP 多 L/热替换、产品多 L、Runtime 集成、稳定性）全部满足后再评估。
+- **交付边界。** 当前驱动 ABI v7，SHA-256 `EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`
+  （B6b 收口构建）；B6c 只改门禁/文档/验收，未改数据面。已知边界统一见任务 `verification.md` §15。

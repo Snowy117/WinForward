@@ -112,6 +112,7 @@ try {
     # 连接窗口用默认 1000ms；完整 1/10/60/180/300s 测量见 udp-rules 的 research 记录，gate 不等 300s。
     $code = Invoke-WfSuite -Root $Root -ToolExe $toolBinary -Arguments @("udp-rules", "--timeout-ms", "10000", "--ping-host", $pingHost, "--connected-window-ms", "1000")
     Assert "udp-rules 套件" ($code -eq 0) "exit=$code"
+    "FORWARDED-DATAPLANE=EXTERNAL（需要 Linux 客户端；由 tools/linux/forwarded_gate.py 承担，Windows-only gate 不运行）"
 
     "===== dual-mode 之前的 V4 重定向 ====="
     $code = Invoke-WfSuite -Root $Root -ToolExe $toolBinary -Arguments @("selftest", "--remote", $Remote, "--iterations", $Iterations)

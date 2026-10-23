@@ -249,3 +249,12 @@ python3 src/userland/scripts/check-effective-lines.py
   是矛盾配置，在编译期拒绝。
 - 本仓库的用户态 `Relay/` 仍是 TCP 中继；UDP 的 listener / 中继在 WinForward 侧实现，
   UDP 重定向的接住与回包不在当前控制器范围内。
+
+
+## B6c 门禁与边界（2026-10-23）
+
+- 独立 Linux 门禁 `tools/linux/forwarded_gate.py` 走产品 listener/reject harness；Windows-only
+  `gate.ps1` 不含需要外部 Linux 客户端的 forwarded 数据面。
+- 产品控制器每个 ifindex 只解析一个 L；UDP 多 L 并发多目的、UDP 热替换、IPv6 多入口未 E2E；
+  LWF 注入可见性未验证。统一边界见任务 `verification.md` §15。
+- `StateCommand` 输出 `forwarded` / `forwarded-ingress` / `forwarded-stat`（ABI v7）。

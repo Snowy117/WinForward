@@ -721,6 +721,7 @@ internal static class ForwardedTcpSuite
         ProbeForwardedInfo info = device.GetForwardedInfo();
         Check.Equal(1, info.Installed, "redirect 规则可以下发（B4b 不再整块拒绝）");
         s_installedGeneration = info.Generation;
+        device.SetForwardedIngressConfig(false, Array.Empty<ProbeForwardedIngress>());
         device.SetForwardedConfig(DisabledConfig(listenerPort));
         device.ResetForwardedStats();
 
