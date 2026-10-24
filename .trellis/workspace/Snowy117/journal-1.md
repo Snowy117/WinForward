@@ -193,3 +193,25 @@
 
 - 无：Host UDP 的驱动、ABI、验证、文档与归档均已完成；后续若 WFP 释放 connected context，可收紧 U12。
 
+
+
+## Session 6: Host 规则数组与进程选择器 parity
+<!-- trellis-session: v=2 fp=a2263a9348851df1 -->
+
+**Date**: 2026-10-24
+**Task**: Host 规则数组与进程选择器 parity
+**Branch**: `feat/host-rule-arrays-process-match`
+
+### Summary
+
+blob v2、数组选择器、文件名/精确路径/目录前缀、block 边界与预算；Linux check 8/8 + 变异 25 红/4 绿 + WinLTSC GATE PASS（驱动 SHA 402748…），block/sink 与质量项另开 follow-up。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3a73653` | feat(rules): 支持 Host 规则数组与进程选择器 parity（blob v2） |
+
+### Status
+
+[OK] **Completed**
