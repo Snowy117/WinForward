@@ -1,7 +1,7 @@
 # WFP 内核化 —— 架构与已定决策
 
 > 本文件记录**已经拍板的决策**与由它推出的组件划分。未决事项集中放在 §6，讨论中的方案不写进决策表。
-> 最后更新：2026-10-22。
+> 最后更新：2026-10-24。
 
 ---
 
@@ -83,12 +83,12 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 内核与 C# 之间有两个数据面 ABI 面，定义在本仓库、由 C# 侧镜像：
 
 - **`wf_redirect_context`**：原始目的地（地址族、地址、端口）+ 诊断用标识。内核分配、用户态经 `SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT` 读取。
-- **`wf_rule_blob`**：magic、版本、总长、规则数与各段偏移。
-- 规则 blob 的字节布局、布局断言与解码/求值入口见 [`src/common/rule_blob.h`](../../../src/common/rule_blob.h) 与 [`src/common/matcher.h`](../../../src/common/matcher.h)。
+- **`wf_rule_blob`**（Host 规则 blob，当前 **v2**）：56 字节头 + 每条规则 32 字节。规则的选择器全部是「池下标 + 数量」区间：进程指向 8 字节 `process_selector`，网段指向 20 字节 `network_prefix`，端口指向 4 字节 `port_range`；段序固定为 `header | rules | process_pool | selector_pool | network_pool | port_pool`，段首 4 字节对齐。v2 相对 v1 的破坏性变化是进程 / 网段 / 端口 / 协议 / 族都从单值变成集合（同字段 OR、字段间 AND，一条配置规则仍只编译成一条 blob 规则）；magic 仍是 `"WRB1"`，版本号为 2。
+- 规则 blob 的字节布局、布局断言与解码 / 求值入口见 [`src/common/rule_blob.h`](../../../src/common/rule_blob.h) 与 [`src/common/matcher.h`](../../../src/common/matcher.h)；字段语义、`try_open_blob` 校验清单、进程选择器与 block 边界见 [host-rule-blob.md](./host-rule-blob.md)。
 
-两侧都有布局断言：C++ 侧 `static_assert`（尺寸、对齐、`offsetof`），C# 侧以布局一致性测试锁定。版本号变更即视为破坏性变更。
+两侧都有布局断言：C++ 侧 `static_assert`（尺寸、对齐、`offsetof`），C# 侧以布局一致性测试锁定。v2 的常量由 `BlobAbiConsistencyTests` 从 `rule_blob.h` 源码文本读取，与 `RuleBlobLayout` / `PolicyLimits` / `tools/wfprobe/Protocol.cs` 三处互锁；版本号变更即视为破坏性变更。
 
-控制面 ABI（`probe_ioctl.h`）当前是 **v7**：v3 的 `probe_event` / `probe_stats` 字段不变；v4 新增 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL（`0x808`–`0x80B`）；v5 新增 `probe_forwarded_config` / `probe_forwarded_redirect_query` / `probe_forwarded_redirect` 与 `0x80C`–`0x80E`，并在 `probe_forwarded_stats` 尾部追加 redirect 计数（296 字节）；v6 追加 13 个 UDP 计数扩到 400 字节；v7 新增 ingress 配置/查询（`0x80F`/`0x810`）、24→40B 查询、64→88B 输出与 stats 尾部 7 个 u64（456 字节，448 字节输出仍兼容）。v4 的 0–143 字段偏移不变，`last_status` / `abi_version` 后移。驱动与用户态必须同批升级。
+控制面 ABI（`probe_ioctl.h`）当前是 **v7**：v3 的 `probe_event` / `probe_stats` 字段不变；v4 新增 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL（`0x808`–`0x80B`）；v5 新增 `probe_forwarded_config` / `probe_forwarded_redirect_query` / `probe_forwarded_redirect` 与 `0x80C`–`0x80E`，并在 `probe_forwarded_stats` 尾部追加 redirect 计数（296 字节）；v6 追加 13 个 UDP 计数扩到 400 字节；v7 新增 ingress 配置/查询（`0x80F`/`0x810`）、24→40B 查询、64→88B 输出与 stats 尾部 7 个 u64（456 字节，448 字节输出仍兼容）。v4 的 0–143 字段偏移不变，`last_status` / `abi_version` 后移。驱动与用户态必须同批升级。Host 规则 blob 升到 v2 不改控制面：IOCTL 仍按 v7 下发整块字节流。
 
 ---
 
@@ -100,7 +100,7 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 | O2 | IOCTL 协议的形状与版本化策略 | 未开始 |
 | O3 | 无调试器时计数器与诊断的回灌通道 | 未开始 |
 | O4 | 防循环各道闸的具体判据与顺序 | 未开始 |
-| O5 | 进程选择器在内核侧的比较形式（DOS 路径 / NT 路径 / appId）与编译期规整规则 | 未开始 |
+| O5 | 进程选择器在内核侧的比较形式（DOS 路径 / NT 路径 / appId）与编译期规整规则 | **已决**：内核只比较 `ALE_APP_ID` 的 UTF-16LE 设备路径转成的 UTF-8；编译期用句柄法把 DOS 路径解析成同形设备路径。文件名 / 精确路径 / 目录前缀三种语义、`\device\` 前缀、ASCII 折叠与 511 字节上限见 §7.10 与 [host-rule-blob.md](./host-rule-blob.md) |
 | O6 | Phase 0 验证范围 —— 选定 D3 后收敛为：redirect 能否落地、用户态能否取到 context 与 records | **已结案**：三条全部成立，见 `.trellis/tasks/10-20-wfp-phase0-probe/research/phase0-findings.md` |
 | O7 | Host UDP 的接入范围与回程 —— 已由 D7 结案：host 域同时做 TCP 与 UDP，UDP 回程由用户态 listener 用同一 socket 完成，驱动不注入 | **已决**；实现事实见 §7.11 |
 
@@ -177,6 +177,7 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 注意 `FWP_V4_ADDR_AND_MASK` 的 `addr` 与 `mask` 是**主机字节序**（fwptypes.h 原文），写成网络序会得到 `FWP_E_INVALID_NET_MASK`。
 
 **遗留的语义偏差**：filter 只看自身条件，不参与 blob 的「首个命中」顺序。若一条 block 规则的匹配集被更早的 permit 规则覆盖，filter 仍然会拦，与配置作者的本意相反。这类重叠必须在**编译期拒绝**，不许静默改变语义。
+**block 的进程条件只能是精确 `ALE_APP_ID`**：`FWPM_CONDITION_ALE_APP_ID` 只支持 `FWP_MATCH_EQUAL`，没有可用的前缀匹配，目录也构造不出 app-id。因此 block 规则不允许文件名 / 目录前缀进程选择器（编译期带规则序号拒绝，驱动对同形 blob 整块拒绝）；网段 / 端口 / 协议 / 族的数组按 layer × protocol × process × port × network 展开，总数受 `max_block_filters = 128` 限制。展开公式与顺序校验见 [host-rule-blob.md](./host-rule-blob.md) §7/§8，顺序歧义拒绝与 D4 的 RST / 静默丢包语义不变。
 **失败路径的语义要写实话**：既然这一层不执行拦截，那么任何「失败就 BLOCK」的写法的实际效果都是**放行到真实目的地**（fail-open），而计数器还会记成 `blocked`——既没保护也不诚实。正确的做法是如实置 PERMIT 并单独计数（`redirect_failures`），让「重定向失败 = 直连」成为一个可观测的事实。要真的拒绝，必须落到 `ALE_AUTH_CONNECT` 的 BLOCK filter 上。
 
 顺带一条同类教训：`fallback_action = block` 会为 TCP(6) 与 UDP(17) 各生成一条协议过滤器（IPv4/IPv6 每层一对），把同表里所有 TCP/UDP 的 permit / redirect 规则变成死规则，而 classify 仍按规则表报 `permitted`；这些过滤器只写 6/17，ICMP 等非 TCP/UDP 协议不受影响。这类「兜底与规则组合起来自相矛盾」的配置必须在编译期拒绝，驱动侧再拒绝一次。
@@ -184,6 +185,16 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 ### 7.10 进程选择器的字节契约
 
 `ALE_CONNECT_REDIRECT` 层**没有** `FWPS_METADATA_FIELD_PROCESS_PATH`（实测该层 `PROCESS_PATH` metadata 计数恒为 0，而同一次运行里进程规则能命中）。这一层能拿到的是固定的 `ALE_APP_ID`，即 **UTF-16LE 的设备路径**，形如 `\device\harddiskvolumeN\...`。
+
+Host blob v2 的进程选择器有两种 kind、三种语义：
+
+| 写法 | blob kind / `is_directory` | 匹配 |
+|---|---|---|
+| `dns.exe`（不含 `/`、`\`） | 文件名 / 0 | 只比较连接路径最后一个 `\` 之后的部分；`dns` 不命中 `dns.exe` |
+| `C:\Tools\curl.exe` | 路径 / 0（精确文件） | 完整路径相等，**或**位于该路径之下（前缀 + `\`） |
+| `C:\Program Files\MyApp` | 路径 / 1（目录） | 同上；路径型选择器在 matcher 里始终带前缀语义，`is_directory` 只影响 block 表达边界与顺序校验 |
+
+路径型选择器写进 blob 的串必须是 **`\device\` 开头**（ASCII 大小写不敏感）、不以 `\` 结尾的设备路径；卷根 `\device\harddiskvolumeN` 合法。不满足这个形状的串永远命中不了内核看到的 `ALE_APP_ID`，所以编译期、`try_open_blob` 与 `wfprobe` 三处一致拒绝。
 
 因此进程选择器两侧必须约定同一套字节形式：
 
@@ -196,13 +207,18 @@ UDP 的 listener / 中继在 WinForward 侧；本仓库负责驱动侧 redirect 
 | **长度上限** | **511 字节，UTF-8，不含结尾 NUL**（缓冲区 512 含 NUL） |
 | 超限行为 | **整条不匹配**（`process_path_length` 置 0）。**不截断**——截断会产生错误匹配，比不匹配危险 |
 | 孤立代理项 | 不匹配；用户态在编译期就拒绝 |
-| 用户态归一化 | `FwpmGetAppIdFromFileName0` 把 DOS 路径解析成设备路径，再按上表编码 |
+| 控制字符 | C0（U+0000–U+001F）、DEL（U+007F）、C1（U+0080–U+009F）在编译期与 `try_open_blob` 都拒绝 |
+| 用户态归一化 | 句柄法（见下），输出与 `ALE_APP_ID` 同形 |
 
-**这个上限必须由两侧共用同一个具名常量**，不要在任一侧写死数字。它曾经出现过三方不一致：契约写 511、classify 的条件写 `>= 512`（实际只接受 510）、block filter 按 511 算、而用户态完全没有检查——最终症状是 C# 编译出 624 字节的路径、blob 合法、内核折成 0，**规则永久静默不命中**。
+**路径解析改用句柄法。** `FwpmGetAppIdFromFileName0` 实测把结果归一成小写设备路径，但**对目录路径失败**（`ERROR_ACCESS_DENIED` / `ERROR_PATH_NOT_FOUND`），长路径也不可靠；它只接受已存在的文件。现在 `WindowsDevicePath.Resolve` 走 `Path.GetFullPath` → `\\?\` / `\\?\UNC\` 长路径前缀 → `CreateFileW(..., FILE_FLAG_BACKUP_SEMANTICS)` → `GetFinalPathNameByHandleW(FILE_NAME_NORMALIZED | VOLUME_NAME_NT)` → `GetFileInformationByHandle` 判目录 → 去尾部 `\`，再做 ASCII 小写折叠。路径型选择器要求编译期路径存在（文件或目录），解析失败带规则序号拒绝——这比“装一条永远不命中的规则”可诊断。
+
+**这个上限必须由两侧共用同一个具名常量**，不要在任一侧写死数字。它曾经出现过三方不一致：契约写 511、classify 的条件写 `>= 512`（实际只接受 510）、block filter 按 511 算、而用户态完全没有检查——最终症状是 C# 编译出 624 字节的路径、blob 合法、内核折成 0，**规则永久静默不命中**。现在 `rule_blob.h` 的 `process_selector_text_max_size` 是唯一权威，`try_open_blob` 解码时逐条检查，用户态 `PolicyLimits.MaxProcessPathBytes` 与 `tools/wfprobe/Protocol.cs` 由 `BlobAbiConsistencyTests` 三处互锁。
 
 差分测试对这种不一致无能为力：C++ 的 `matcher` 不认识这个上限，夹具里的路径又都很短。这条只能靠两侧各自的编译期/解码期检查，以及一条「恰好 511 通过、512 拒绝」的边界用例。
 
-同理，`FwpmGetAppIdFromFileName0` 的真实行为（返回什么形状、失败时指针是否为空）只在 Windows 上可验证，Linux 单测只能覆盖注入的映射——真实 API 的覆盖属于 VM 集成测试，不要把它算进 Linux 门禁的覆盖范围。
+同理，句柄法的真实行为（`GetFinalPathNameByHandleW` 的输出形状、目录标记、UNC / 映射盘）只在 Windows 上可验证，Linux 单测只能覆盖注入的映射——真实 API 的覆盖属于 VM 集成测试，不要把它算进 Linux 门禁的覆盖范围。
+
+**block 边界：auth filter 只能精确匹配 `ALE_APP_ID`。** `FWPM_CONDITION_ALE_APP_ID` 只支持 `FWP_MATCH_EQUAL`；WFP 没有 app-id 前缀匹配（`FWP_MATCH_PREFIX` 实际是后缀匹配），目录路径也构造不出 app-id。因此 block 规则的进程选择器只允许路径型且 `is_directory = 0`（可写数组）；文件名 / 目录前缀在编译期带规则序号拒绝，驱动 `allocate_rule_table` 对同形 blob 整块拒绝。block 的网段 / 端口 / 协议 / 族数组按 auth filter 展开，总数受 `max_block_filters = 128` 限制；展开公式与预算见 [host-rule-blob.md](./host-rule-blob.md) §8。D4 的 RST / 静默丢包语义与顺序歧义拒绝不变。
 
 ### 7.11 Host UDP 的实现事实（B0–B2b 实测）
 

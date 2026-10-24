@@ -16,7 +16,7 @@ SOCKS5 上游。它与 host 规则是两份独立 ABI：
 | 维度 | host `wf_rule_blob` | forwarded `wf_forwarded_blob` |
 |---|---|---|
 | magic | `"WRB1"`（`0x31425257`） | `"WFB1"`（`0x31424657`） |
-| 版本 | 1 | 1 |
+| 版本 | 2 | 1 |
 | 匹配维度 | 进程路径、目的 CIDR、端口、协议、族 | 入口适配器、客户端 CIDR、目的 CIDR、端口、协议、族 |
 | 动作载荷 | 无 | `upstream_id` |
 | 共享定义 | —— | `network_prefix`、`rule_action`、协议/族常量 |

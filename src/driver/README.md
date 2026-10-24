@@ -11,10 +11,10 @@ filter 执行。host TCP 与 host UDP 共用同一套 callout、四道闸与规�
 | 文件 | 内容 |
 |---|---|
 | `probe_ioctl.h` | 控制面 ABI v7：IOCTL 码、配置、计数、host 规则表回读、forwarded 表/ingress 回读、事件 |
-| `rule_table.h/.cpp` | 规则 blob 的池内存副本、校验（含 selector UTF-8/511、fallback 冲突、顺序冲突）、引用计数、原子替换与退役链 |
+| `rule_table.h/.cpp` | 规则 blob 的池内存副本、block 表达边界 / filter 预算 / fallback 冲突 / 顺序冲突校验、引用计数、原子替换与退役链（字节级布局校验在 `try_open_blob`） |
 | `probe_driver.h` | 驱动内部共享面（状态、锁、窄接口、callout 原型、include 顺序约束） |
 | `probe_driver.cpp` | `DriverEntry`/卸载、设备、WFP provider/callout/filter 的注册与拆除 |
-| `block_filters.cpp` | 把 block 规则编译成 ALE_AUTH_CONNECT 的 `FWP_ACTION_BLOCK` filter（`protocol=any` 与 fallback 按 6/17 展开；增删/滚动替换） |
+| `block_filters.cpp` | 把 block 规则按 layer × protocol × process × port × network 展开成 ALE_AUTH_CONNECT 的 `FWP_ACTION_BLOCK` filter（显式 6/17 条件；预算 128；增删/滚动替换） |
 | `probe_control.cpp` | IOCTL 处理：配置（含 0↔1 切换时 block filter 的挂/摘）、规则下发、计数、事件、调用者校验 |
 | `probe_classify.cpp` | classify：facts、四道防循环闸、matcher、三个动作、重定向 |
 | `process_path.cpp` | `ALE_APP_ID` 的 UTF-16 → UTF-8 转换（511 字节边界、代理对）与 0x807 诊断 |
@@ -83,9 +83,12 @@ v7 在同一控制面上追加（旧尺寸前缀仍可读）：
 ## 规则与防循环
 
 规则 blob 的第一条命中决定动作（`permit` / `block` / `redirect`，未命中用 `fallback_action`）。
-协议字段取 `rule_protocol_any=0` / `tcp=6` / `udp=17`；`any` 同时覆盖 TCP 与 UDP（相对旧版
-“any 只匹配 TCP”的行为变化）。17 是规则 blob 的枚举扩展，布局没有变化，因此
-`rule_blob_version` 仍是 1；旧驱动会把 17 当作未知协议拒绝整块 blob（fail-closed）。
+Host blob 当前是 **v2**：56 字节头 + 32 字节规则；进程指向 8 字节 `process_selector`，网段指向
+20 字节 `network_prefix`，端口指向 4 字节 `port_range`；段序为 `header | rules | process_pool |
+selector_pool | network_pool | port_pool`。每个选择器都是「池下标 + 数量」区间：同字段内 OR、
+字段之间 AND，数量 0 表示任意；协议 / 地址族用位掩码（0 = 任意，1 / 2 = 单个，3 = 两者）。
+`protocol=any`（掩码 0）同时覆盖 TCP 与 UDP（相对旧版“any 只匹配 TCP”的行为变化）。
+`rule_blob_version` 是 2，v1 blob 被整块拒绝，不存在新旧混跑窗口；控制面 IOCTL 仍是 v7。
 
 classify 依次检查：
 
@@ -101,6 +104,40 @@ UDP 的 connected 路径（`connect` + `send`）与 unconnected `sendto` 也会�
 `block` 决策在 redirect 层只记账并放行；真正的拒绝由 auth 层的 block filter 完成。TCP 客户端
 通常看到 RST（`AccessDenied(10013)`），UDP 则是静默丢包，详见下一节。TCP 侧的背景见
 `.trellis/tasks/10-20-wfp-driver-rules/research/findings.md` §2。
+
+### 进程选择器
+
+Host blob v2 的进程选择器有两种 kind、三种语义：
+
+- 文件名（不含 `/`、`\`）：比较连接路径最后一个 `\` 之后的部分，`dns` 不命中 `dns.exe`；
+- 精确文件路径：完整路径相等，或连接路径以「选择器 + `\`」开头；
+- 目录前缀：同样是「相等或前缀 + `\`」，命中直接子文件与任意深度后代；`is_directory` 只用于
+  block 表达边界与顺序校验，不改变 matcher 的前缀语义。
+
+路径型选择器的串必须是 `\device\` 开头（ASCII 大小写不敏感）、不以 `\` 结尾的设备路径；
+两种形态都只折叠 ASCII 大小写。连接侧 `process_path.cpp` 把 `ALE_APP_ID` 的 UTF-16LE 转成
+UTF-8，上限 511 字节（不含 NUL，缓冲区 512 含 NUL），超限或孤立代理项整条不匹配、不截断。
+
+selector 的字节级校验（串首 / NUL 终止、UTF-8、1..511 字节、控制字符 C0 / DEL / C1、文件名
+不含分隔符、路径 `\device\` 前缀且不以 `\` 结尾、kind / is_directory / reserved、`count == 0`
+时 `first == 0`）全部在 `src/common/rule_blob.h` 的 `try_open_blob` 里；`rule_table.cpp` 只保留
+block 表达边界、filter 预算、fallback 冲突与顺序校验。变异脚本的 `selector-utf8-guard` 标记
+因此位于 `rule_blob.h`。
+
+### block filter 的展开与预算
+
+block 规则由 `block_filters.cpp` 按 layer × protocol × process × port × network 展开：
+WFP 同一字段的多个条件是 AND，表达不了数组的 OR，所以每条组合生成一条 filter。协议掩码 0 / 3
+展开 TCP(6) + UDP(17)；端口与网段按层过滤；进程条件只能写 `FWPM_CONDITION_ALE_APP_ID` 的
+`FWP_MATCH_EQUAL`（UTF-16LE），因此 block 规则的进程选择器只允许精确文件路径（路径型且
+`is_directory = 0`，可写数组）。文件名 / 目录前缀在编译期带规则序号拒绝，`allocate_rule_table`
+对同形 blob 整块拒绝——否则会出现「classify 记 block、auth 层拦不住」的假 block。
+
+总数（含 `fallback=block` 的 2 层 × 2 协议 = 4 条）超过 `max_block_filters = 128` 时，
+`allocate_rule_table` 与 `probe_install_block_filters` 都拒绝，旧表与旧 filter 保持不变。
+`rule_order_valid` 按集合掩码、端口 / 网段数组、进程文件名 / 路径前缀语义逐条比对更早的非
+block 规则；任何可能重叠都整块拒绝，与 C# `RuleOrderValidator` 同算法。展开公式见
+`.trellis/spec/backend/host-rule-blob.md` §8。
 
 ## Host UDP
 
@@ -591,13 +628,17 @@ pwsh -File tools/windows/gate.ps1 -Remote <测试目标地址:端口>
 手工操作的状态不一致；完整流程用 `gate.ps1`，临时调试用 `load-driver.ps1`。
 
 - block 规则编译成独立的 auth 层 filter；`protocol=any` 与 `fallback_action=block` 按 6/17 各一条
-  （IPv4 / IPv6 各一对）。凡是“更早的非 block 规则可能与它重叠”的配置会在换表时整块拒绝
-  （`rule_order_valid`），绝不让 filter 抢掉 blob 里本应首个命中的 permit/redirect。
+  （IPv4 / IPv6 各一对）。block 的进程条件只能是精确 `ALE_APP_ID`，所以只接受精确文件路径数组；
+  文件名 / 目录前缀在编译期与 `allocate_rule_table` 都被拒绝。凡是“更早的非 block 规则可能与
+  它重叠”的配置会在换表时整块拒绝（`rule_order_valid`），绝不让 filter 抢掉 blob 里本应首个
+  命中的 permit/redirect；filter 总数超过 128 同样整块拒绝。
 - 进程选择器是 `ALE_APP_ID` 的 UTF-16 device path → UTF-8（ASCII 大小写折叠，代理对按标准
-  展开）。上限是 **UTF-8 511 字节（不含 NUL）**，缓冲区 512 字节含 NUL；超限/非法代理项整条
+  展开）。上限是 **UTF-8 511 字节（不含 NUL）**，缓冲区 512 字节含 NUL；超限 / 非法代理项整条
   不匹配、不截断。中文路径与 511/512 边界都已实测。
-- 用户态要用 `FwpmGetAppIdFromFileName0` 取 app id；该 API 对 >MAX_PATH 的路径会失败，长路径
-  需要用户态自己拼 device path。
+- 用户态的路径型选择器走句柄法：`CreateFileW(FILE_FLAG_BACKUP_SEMANTICS)` +
+  `GetFinalPathNameByHandleW(VOLUME_NAME_NT)`，对文件与目录都可用、支持长路径；要求编译期路径
+  存在。产品的路径解析不再使用 `FwpmGetAppIdFromFileName0`（目录失败、长路径不可靠）；
+  `tools/wfprobe` 的夹具对已存在文件仍用它取参照值。
 - 闸 2 目前只由组合用例覆盖，未单独钉住（需要第二个 redirector，findings §5）。
 
 
@@ -612,3 +653,5 @@ pwsh -File tools/windows/gate.ps1 -Remote <测试目标地址:端口>
 - A5 仅为含 C# suite 中继的量级采样（1MiB TCP 0.8–4.5 MB/s，200×64B UDP burst 209pps；
   host 12.9 MB/s/1590pps），不设 kill criteria，详见 `verification/a5-cost.md`。
 - 驱动 SHA-256：`EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`（ABI v7）。
+  这是 B6c 收口的历史构建（Host 规则 blob 尚未升到 v2 的时期），保留作记录；Host 规则数组 /
+  blob v2 批次的最终驱动 SHA 见 `.trellis/tasks/10-24-host-rule-arrays-process-match/verification.md`。

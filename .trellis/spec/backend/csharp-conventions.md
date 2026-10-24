@@ -67,8 +67,10 @@ C# 的 ABI 镜像结构用 `public` 字段（而不是属性）：`MemoryMarshal
 
 不允许提供「忘了传就静默走默认实现」的重载：`RuleBlobCompiler.Compile` 只接受显式的
 `IProcessPathNormalizer`。测试注入假映射（`TestAppId`），生产入口注入
-`FwpmAppIdNormalizer.ForWindows()` —— 静默降级（例如忘传就退回 DOS 路径）会让规则不生效
-却不报错，这正是这一层要避免的事。
+`WindowsProcessPathNormalizer.ForWindows()` —— 静默降级（例如忘传就退回 DOS 路径）会让规则不生效
+却不报错，这正是这一层要避免的事。路径型选择器走句柄法（`CreateFileW` +
+`GetFinalPathNameByHandleW(VOLUME_NAME_NT)`）解析成 `ALE_APP_ID` 同形的设备路径，并要求路径
+在编译期存在；文件名型不经过解析器，只折叠 ASCII 大小写。
 
 ---
 
@@ -83,7 +85,9 @@ C# 的 ABI 镜像结构用 `public` 字段（而不是属性）：`MemoryMarshal
   退出码即门禁结果；`dotnet run ... -- emit-fixtures [目录]` 只生成差分夹具。
 - 断言消息必须同时给出**期望值与实际值**（`Check` 已经这么做了，别绕开它）。
 - ABI 镜像结构必须有布局断言：`Marshal.SizeOf`、逐字段 `Marshal.OffsetOf`、
-  `Unsafe.SizeOf` 一致、`Pack == 4`，数值直接照抄 `src/common/rule_blob.h`。
+  `Unsafe.SizeOf` 一致、`Pack == 4`，数值直接照抄 `src/common/rule_blob.h`；
+  `BlobAbiConsistencyTests` 再从源码文本把版本、尺寸、掩码与 511 / 64 KiB / 128 三个上限
+  与 `PolicyLimits`、`tools/wfprobe/Protocol.cs` 互锁。
 - 测试的通过原因必须就是它的名字（见 [cpp-conventions.md §9](./cpp-conventions.md)）；
   计数类断言写精确值，不写「非空即过」。
 
