@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../WinForward.Userland/WinForward.Userland.csproj" />
+    <ProjectReference Include="../WinForward.Controller/WinForward.Controller.csproj" />
   </ItemGroup>
 
 </Project>

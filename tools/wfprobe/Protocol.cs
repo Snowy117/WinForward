@@ -59,6 +59,29 @@ internal static class Protocol
 
     public const uint MaxSelfProcessIds = 8;
     public const uint RuleBlobMaxSize = 64 * 1024;
+    public const uint MaxBlockFilters = 128;
+
+    public const uint RuleBlobMagic = 0x31425257;
+    public const ushort RuleBlobVersion = 2;
+    public const int RuleBlobHeaderSize = 56;
+    public const int RuleBlobRuleSize = 32;
+    public const int RuleBlobProcessSelectorSize = 8;
+    public const int RuleBlobPortRangeSize = 4;
+    public const int RuleBlobNetworkPrefixSize = 20;
+    public const int RuleBlobSegmentAlignment = 4;
+    public const int RuleBlobProcessSelectorTextMaxSize = 511;
+
+    public const byte ProcessSelectorKindFileName = 0;
+    public const byte ProcessSelectorKindPath = 1;
+
+    public const byte RuleProtocolMaskTcp = 0x01;
+    public const byte RuleProtocolMaskUdp = 0x02;
+    public const byte RuleFamilyMaskIpv4 = 0x01;
+    public const byte RuleFamilyMaskIpv6 = 0x02;
+
+    public const byte RuleFamilyAny = 0;
+    public const byte RuleFamilyIpv4 = 4;
+    public const byte RuleFamilyIpv6 = 6;
 
     public const uint RuleActionPermit = 0;
     public const uint RuleActionBlock = 1;

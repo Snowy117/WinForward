@@ -370,7 +370,7 @@ internal static class RuleSuite
                     Action = Protocol.RuleActionPermit,
                     PortStart = 50004,
                     PortEnd = 50004,
-                    Process = longSelector,
+                    Processes = new[] { TestProcessSelector.FileName(longSelector) },
                 },
             }, Protocol.RuleActionPermit);
             ProbeRuleInfo beforeLong = device.GetRuleInfo();
@@ -386,13 +386,14 @@ internal static class RuleSuite
             Check.True(longRejected, "超长 selector 的 permit blob 被驱动拒绝", "STATUS_INVALID_PARAMETER");
             Check.Equal(beforeLong.Generation, device.GetRuleInfo().Generation, "超长 selector 不改变 generation");
 
+            const string casePath = @"\device\harddiskvolume3\windows\system32\abc.exe";
             bool caseRejected = false;
             try
             {
                 _ = BlobBuilder.Build(new[]
                 {
-                    TestRule.PermitPort(50005, "ABC"),
-                    TestRule.BlockPort(50005, "abc"),
+                    TestRule.PermitPort(50005, casePath.ToUpperInvariant()),
+                    TestRule.BlockPort(50005, casePath),
                 }, Protocol.RuleActionPermit);
             }
             catch (InvalidOperationException)
@@ -550,7 +551,9 @@ internal static class RuleSuite
             ("rules_offset 越界", BlobBuilder.RulesOffsetOutOfRange(mainBlob)),
             ("rules_offset 未对齐", BlobBuilder.RulesOffsetUnaligned(mainBlob)),
             ("process_pool 越界", BlobBuilder.ProcessPoolOutOfRange(mainBlob)),
+            ("selector_pool 越界", BlobBuilder.SelectorPoolOutOfRange(mainBlob)),
             ("network_pool 越界", BlobBuilder.NetworkPoolOutOfRange(mainBlob)),
+            ("port_pool 越界", BlobBuilder.PortPoolOutOfRange(mainBlob)),
             ("进程池末尾非 NUL", BlobBuilder.ProcessPoolUnterminated(mainBlob)),
         };
         foreach ((string name, byte[] bad) in invalidVariants)
@@ -666,6 +669,9 @@ internal static class RuleSuite
             }
             socket?.Dispose();
         }
+
+        HostRuleParitySuite.Run(device, timeoutMs);
+        device.SetRuleBlob(mainBlob);
 
         config.Enabled = 0;
         device.SetConfig(config);

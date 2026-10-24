@@ -307,12 +307,14 @@ $mutations = @(
     },
     @{
         Name = "selector UTF-8/511 校验被绕过"
-        File = "rule_table.cpp"
+        File = "..\common\rule_blob.h"
         Edits = @(@{
             Id = "selector-utf8-guard"
             New = (@(
-                "        if (table->view.rule_count == 0xFFFFFFFFU && selected.process_index != rule_pool_index_any &&"
-                "            !valid_utf8_selector(table->view.process_pool + selected.process_index))"
+                "    if (length == 0xFFFFFFFFU)"
+                "    {"
+                "        return false;"
+                "    }"
             ) -join "`n")
         })
         Target = @("rules", "--iterations", "3")
@@ -406,7 +408,7 @@ $mutations = @(
         Edits = @(@{
             Id = "block-filter-protocol"
             New = (@(
-                "    if (protocol == rule_protocol_any)"
+                "    if (protocol_mask == rule_protocol_mask_any || protocol_mask == rule_protocol_mask_all)"
                 "    {"
                 "        return protocol_expansion{ { rule_protocol_tcp, 0 }, 1 };"
                 "    }"

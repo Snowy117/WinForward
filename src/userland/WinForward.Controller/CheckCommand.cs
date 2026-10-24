@@ -19,11 +19,14 @@ internal static class CheckCommand
             ControllerConfiguration configuration =
                 PolicyConfigurationDocument.LoadConfiguration(path, adapterResolver);
             PolicyTable policy = configuration.Policy;
-            // 没有 process 规则时编译器不会调用 normalizer；用无副作用实现，
-            // 非 Windows 也能离线跑 check（有 process 规则时仍需要 Windows 解析器）。
-            IProcessPathNormalizer normalizer = policy.Rules.Any(rule => rule.Process is not null)
-                                                    ? FwpmAppIdNormalizer.ForWindows()
-                                                    : AsciiLowercaseNormalizer.Instance;
+            // 只有路径型选择器需要 Windows 句柄法解析；纯文件名规则在 Linux 也能离线检查。
+            // 编译器不会调用 normalizer 时，用明确拒绝调用的实现，避免静默返回错误路径。
+            bool needsWindowsResolver = policy.Rules.Any(rule =>
+                rule.Processes is { } processes &&
+                processes.Any(selector => selector.Kind == ProcessSelectorKind.Path));
+            IProcessPathNormalizer normalizer = needsWindowsResolver
+                                                    ? WindowsProcessPathNormalizer.ForWindows()
+                                                    : UnusedProcessPathNormalizer.Instance;
             byte[] blob = RuleBlobCompiler.Compile(policy, normalizer);
             Console.WriteLine($"policy rules={policy.Rules.Count} fallback={policy.FallbackAction} blob={blob.Length} bytes");
 
@@ -40,11 +43,21 @@ internal static class CheckCommand
             Console.WriteLine($"check OK {path}");
             return 0;
         }
-        catch (Exception exception) when (exception is ConfigurationException or PolicyCompileException)
+        catch (Exception exception) when (exception is ConfigurationException or PolicyCompileException
+                                               or PlatformNotSupportedException)
         {
             Console.Error.WriteLine($"check FAIL {path}");
             Console.Error.WriteLine($"       {exception.GetType().Name}: {exception.Message}");
             return 2;
         }
+    }
+
+    private sealed class UnusedProcessPathNormalizer : IProcessPathNormalizer
+    {
+        internal static UnusedProcessPathNormalizer Instance { get; } = new();
+
+        public ProcessPathResolution? Normalize(string path) =>
+            throw new InvalidOperationException(
+                $"规则没有进程选择器，编译器不应调用路径归一化：{path}");
     }
 }

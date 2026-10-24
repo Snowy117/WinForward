@@ -156,14 +156,16 @@ internal static class TransportCases
                 (12, RuleAction.Block, 0))),  // 12 ipv4 udp svchost
 
         Differential.Case(
-            "port-zero-single-not-any",
-            "端口 0..0 是「只有 0 号端口」，不是「任意端口」：没有连接命中",
+            "port-one-single",
+            "端口 1..1：低边界只命中 1 号端口；端口 0 已在编译期拒绝",
             RuleAction.Permit,
             new[]
             {
-                Differential.Rule(RuleAction.Block, ports: new PortRange(0, 0)),
+                Differential.Rule(RuleAction.Block, ports: PortRange.Single(1)),
             },
-            Differential.Expectations(RuleAction.Permit)),
+            Differential.Expectations(
+                RuleAction.Permit,
+                (5, RuleAction.Block, 0))),  // 5 ipv4 10.1.2.3:1 other
 
         Differential.Case(
             "port-max-only",

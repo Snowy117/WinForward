@@ -1,4 +1,5 @@
 using WinForward.Userland.Policy;
+using static WinForward.Userland.Tests.RuleOrderSupport;
 
 namespace WinForward.Userland.Tests;
 
@@ -35,158 +36,92 @@ internal static class RuleOrderTests
         TestRunner.Add("rule-order/兜底 block 与全部 block 规则被接受", FallbackBlockWithOnlyBlocks);
         TestRunner.Add("rule-order/兜底 permit 与混合规则被接受", FallbackPermitWithMixedRules);
         TestRunner.Add("rule-order/进程选择器按 ASCII 折叠比较", AsciiFoldedProcessComparison);
-
     }
 
     private static void FullyOverlappingPermit() =>
-        ExpectRejected(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit), earlier: 0, later: 1);
+        ExpectRejected(Permit(
+            Rule(RuleAction.Permit, ports: Ports(80)),
+            Rule(RuleAction.Block, ports: Ports(80))), earlier: 0, later: 1);
 
     private static void OverlappingPorts() =>
-        ExpectRejected(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, ports: new PortRange(80, 90)),
-                Rule(RuleAction.Block, ports: new PortRange(85, 95)),
-            },
-            RuleAction.Permit), earlier: 0, later: 1);
+        ExpectRejected(Permit(
+            Rule(RuleAction.Permit, ports: Ports(80, 90)),
+            Rule(RuleAction.Block, ports: Ports(85, 95))), earlier: 0, later: 1);
 
     private static void DisjointPorts() =>
-        ExpectAccepted(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, ports: PortRange.Single(81)),
-            },
-            RuleAction.Permit));
+        ExpectAccepted(Permit(
+            Rule(RuleAction.Permit, ports: Ports(80)),
+            Rule(RuleAction.Block, ports: Ports(81))));
 
     private static void DisjointFamilies() =>
-        ExpectAccepted(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, family: RuleAddressFamily.Ipv4, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, family: RuleAddressFamily.Ipv6, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit));
+        ExpectAccepted(Permit(
+            Rule(RuleAction.Permit, families: new[] { RuleAddressFamily.Ipv4 }, ports: Ports(80)),
+            Rule(RuleAction.Block, families: new[] { RuleAddressFamily.Ipv6 }, ports: Ports(80))));
 
     private static void FamilyAnyOverlaps() =>
-        ExpectRejected(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, family: RuleAddressFamily.Ipv6, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit), earlier: 0, later: 1);
+        ExpectRejected(Permit(
+            Rule(RuleAction.Permit, ports: Ports(80)),
+            Rule(RuleAction.Block, families: new[] { RuleAddressFamily.Ipv6 }, ports: Ports(80))), 0, 1);
 
     private static void DisjointNetworks() =>
-        ExpectAccepted(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, network: RemoteNetwork.Parse("10.0.0.0/8")),
-                Rule(RuleAction.Block, network: RemoteNetwork.Parse("192.168.0.0/16")),
-            },
-            RuleAction.Permit));
+        ExpectAccepted(Permit(
+            Rule(RuleAction.Permit, networks: Networks("10.0.0.0/8")),
+            Rule(RuleAction.Block, networks: Networks("192.168.0.0/16"))));
 
     private static void NestedNetworks() =>
-        ExpectRejected(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, network: RemoteNetwork.Parse("10.0.0.0/8")),
-                Rule(RuleAction.Block, network: RemoteNetwork.Parse("10.1.0.0/16")),
-            },
-            RuleAction.Permit), earlier: 0, later: 1);
+        ExpectRejected(Permit(
+            Rule(RuleAction.Permit, networks: Networks("10.0.0.0/8")),
+            Rule(RuleAction.Block, networks: Networks("10.1.0.0/16"))), 0, 1);
 
     private static void NetworkAnyOverlaps() =>
-        ExpectRejected(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, network: RemoteNetwork.Parse("10.0.0.0/8")),
-                Rule(RuleAction.Block),
-            },
-            RuleAction.Permit), earlier: 0, later: 1);
+        ExpectRejected(Permit(
+            Rule(RuleAction.Permit, networks: Networks("10.0.0.0/8")),
+            Rule(RuleAction.Block)), 0, 1);
 
     private static void DisjointProcesses() =>
-        ExpectAccepted(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.AppDos)),
-                Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.OtherDos)),
-            },
-            RuleAction.Permit));
+        ExpectAccepted(Permit(
+            Rule(RuleAction.Permit, processes: Processes(TestAppId.AppDos)),
+            Rule(RuleAction.Block, processes: Processes(TestAppId.OtherDos))));
 
     private static void SameProcess() =>
-        ExpectRejected(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.AppDos)),
-                Rule(RuleAction.Block, process: ProcessSelector.Parse(@"C:\PROGRAM FILES\APP\APP.EXE")),
-            },
-            RuleAction.Permit), earlier: 0, later: 1);
+        ExpectRejected(Permit(
+            Rule(RuleAction.Permit, processes: Processes(TestAppId.AppDos)),
+            Rule(RuleAction.Block, processes: Processes(@"C:\PROGRAM FILES\APP\APP.EXE"))), 0, 1);
 
     private static void ProcessAnyOverlaps() =>
-        ExpectRejected(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.AppDos)),
-                Rule(RuleAction.Block),
-            },
-            RuleAction.Permit), earlier: 0, later: 1);
+        ExpectRejected(Permit(
+            Rule(RuleAction.Permit, processes: Processes(TestAppId.AppDos)),
+            Rule(RuleAction.Block)), 0, 1);
 
     private static void TwoBlockRules() =>
-        ExpectAccepted(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Block, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit));
+        ExpectAccepted(Permit(
+            Rule(RuleAction.Block, ports: Ports(80)),
+            Rule(RuleAction.Block, ports: Ports(80))));
 
     private static void BlockBeforePermit() =>
-        ExpectAccepted(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Block, ports: PortRange.Single(80)),
-                Rule(RuleAction.Permit, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit));
+        ExpectAccepted(Permit(
+            Rule(RuleAction.Block, ports: Ports(80)),
+            Rule(RuleAction.Permit, ports: Ports(80))));
 
     private static void RedirectShadowsBlock() =>
-        ExpectRejected(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Redirect, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit), earlier: 0, later: 1);
+        ExpectRejected(Permit(
+            Rule(RuleAction.Redirect, ports: Ports(80)),
+            Rule(RuleAction.Block, ports: Ports(80))), 0, 1);
 
     private static void FallbackBlockOnly() =>
-        ExpectAccepted(new PolicyTable(Array.Empty<PolicyRule>(), RuleAction.Block));
+        ExpectAccepted(Table(RuleAction.Block));
 
     private static void Ipv6FamilyFromNetwork() =>
-        ExpectRejected(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, network: RemoteNetwork.Parse("2001:db8::/32")),
-                Rule(RuleAction.Block, network: RemoteNetwork.Parse("2001:db8:1::/48")),
-            },
-            RuleAction.Permit), earlier: 0, later: 1);
+        ExpectRejected(Permit(
+            Rule(RuleAction.Permit, networks: Networks("2001:db8::/32")),
+            Rule(RuleAction.Block, networks: Networks("2001:db8:1::/48"))), 0, 1);
 
     private static void MessageMentionsBothRules()
     {
-        PolicyTable table = new(
-            new[]
-            {
-                Rule(RuleAction.Permit, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit);
+        PolicyCompileException? error = Capture(Permit(
+            Rule(RuleAction.Permit, ports: Ports(80)),
+            Rule(RuleAction.Block, ports: Ports(80))));
 
-        PolicyCompileException? error = Capture(table);
         Check.True(error is not null, "重叠规则必须拒绝编译");
         Check.True(error!.Message.Contains("#0", StringComparison.Ordinal), "消息要带更早的规则序号 #0");
         Check.True(error.Message.Contains("#1", StringComparison.Ordinal), "消息要带 block 规则序号 #1");
@@ -196,121 +131,48 @@ internal static class RuleOrderTests
 
     private static void ProtocolPredicate()
     {
-        // 协议判定是数值比较：任一侧为 Any(0) 即相容，具体协议必须相等。这里直接用
-        // 编译后的 blob 条目喂谓词，钉住 UDP(17) 加入后这条判定没有退化。
-        RuleBlobRule permitUdp = new()
-        {
-            Action = (byte)RuleAction.Permit,
-            Protocol = 17,
-            RemotePortStart = 1,
-            RemotePortEnd = 65535,
-        };
-        RuleBlobRule blockTcp = new()
-        {
-            Action = (byte)RuleAction.Block,
-            Protocol = 6,
-            RemotePortStart = 1,
-            RemotePortEnd = 65535,
-        };
+        RuleBlobRule permitUdp = new() { ProtocolMask = RuleBlobLayout.ProtocolUdpBit };
+        RuleBlobRule blockTcp = new() { ProtocolMask = RuleBlobLayout.ProtocolTcpBit };
         RuleBlobRule blockUdp = blockTcp;
-        blockUdp.Protocol = 17;
+        blockUdp.ProtocolMask = RuleBlobLayout.ProtocolUdpBit;
 
         Check.True(!RuleOrderValidator.ProtocolsOverlap(permitUdp, blockTcp), "UDP 与 TCP 不相容");
         Check.True(RuleOrderValidator.ProtocolsOverlap(permitUdp, blockUdp), "同为 UDP 相容");
-        permitUdp.Protocol = (byte)RuleProtocol.Any;
+        permitUdp.ProtocolMask = 0;
         Check.True(RuleOrderValidator.ProtocolsOverlap(permitUdp, blockTcp), "任意协议与 TCP 相容");
     }
 
     private static void TcpAndUdpDoNotOverlap() =>
-        ExpectAccepted(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, protocol: RuleProtocol.Tcp, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, protocol: RuleProtocol.Udp, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit));
+        ExpectAccepted(Permit(
+            Rule(RuleAction.Permit, protocols: new[] { RuleProtocol.Tcp }, ports: Ports(80)),
+            Rule(RuleAction.Block, protocols: new[] { RuleProtocol.Udp }, ports: Ports(80))));
 
     private static void UdpProtocolIsDescribed()
     {
-        PolicyTable table = new(
-            new[]
-            {
-                Rule(RuleAction.Permit, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, protocol: RuleProtocol.Udp, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit);
+        PolicyCompileException? error = Capture(Permit(
+            Rule(RuleAction.Permit, ports: Ports(80)),
+            Rule(RuleAction.Block, protocols: new[] { RuleProtocol.Udp }, ports: Ports(80))));
 
-        PolicyCompileException? error = Capture(table);
         Check.True(error is not null, "任意协议 permit 会遮蔽 UDP block 规则");
-        Check.True(
-            error!.Message.Contains(" udp ", StringComparison.Ordinal),
-            "消息里的 block 规则条件要显示 udp");
+        Check.True(error!.Message.Contains(" udp ", StringComparison.Ordinal), "消息里的 block 规则条件要显示 udp");
     }
 
     private static void UncheckedCompileProducesBlob()
     {
-        PolicyTable table = new(
-            new[]
-            {
-                Rule(RuleAction.Permit, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, ports: PortRange.Single(80)),
-            },
-            RuleAction.Permit);
+        PolicyTable table = Permit(
+            Rule(RuleAction.Permit, ports: Ports(80)),
+            Rule(RuleAction.Block, ports: Ports(80)));
 
         Check.True(Capture(table) is not null, "受检查的编译必须拒绝");
         byte[] blob = RuleBlobCompiler.CompileUnchecked(table, TestAppId.Normalizer);
-        Check.Equal(72, blob.Length, "绕过检查后确实产出 40+16*2 字节的 blob");
-    }
-
-    private static PolicyRule Rule(RuleAction action,
-                                   RuleAddressFamily family = RuleAddressFamily.Any,
-                                   RuleProtocol protocol = RuleProtocol.Any,
-                                   PortRange? ports = null,
-                                   RemoteNetwork? network = null,
-                                   ProcessSelector? process = null) =>
-        new()
-        {
-            Action = action,
-            Family = family,
-            Protocol = protocol,
-            RemotePorts = ports ?? PortRange.Any,
-            RemoteNetwork = network,
-            Process = process,
-        };
-
-    private static void ExpectAccepted(PolicyTable table)
-    {
-        byte[] blob = RuleBlobCompiler.Compile(table, TestAppId.Normalizer);
-        Check.True(blob.Length >= 40, "编译成功且产出 blob");
-        Check.True(Capture(table) is null, "这条规则表不应触发顺序冲突");
-    }
-
-    private static void ExpectRejected(PolicyTable table, int earlier, int later)
-    {
-        PolicyCompileException? error = Capture(table);
-        Check.True(error is not null, $"规则 #.{earlier} 应遮蔽 #.{later}，必须拒绝");
-        Check.True(error!.Message.Contains($"#{earlier}", StringComparison.Ordinal), $"消息缺更早的规则序号 #{earlier}");
-        Check.True(error.Message.Contains($"#{later}", StringComparison.Ordinal), $"消息缺 block 规则序号 #{later}");
-    }
-
-    private static PolicyCompileException? Capture(PolicyTable table, IProcessPathNormalizer? normalizer = null)
-    {
-        try
-        {
-            RuleBlobCompiler.Compile(table, normalizer ?? TestAppId.Normalizer);
-            return null;
-        }
-        catch (PolicyCompileException exception)
-        {
-            return exception;
-        }
+        Check.Equal(128, blob.Length, "绕过检查后确实产出 56+32*2+4*2 字节的 blob");
     }
 
     private static void FallbackBlockWithPermit()
     {
-        PolicyTable table = new(
-            new[] { Rule(RuleAction.Permit, ports: PortRange.Single(80)) },
-            RuleAction.Block);
+        PolicyTable table = Table(
+            RuleAction.Block,
+            Rule(RuleAction.Permit, ports: Ports(80)));
 
         PolicyCompileException? error = Capture(table);
         Check.True(error is not null, "兜底 block 与 permit 规则共存必须拒绝");
@@ -319,37 +181,24 @@ internal static class RuleOrderTests
     }
 
     private static void FallbackBlockWithOnlyBlocks() =>
-        ExpectAccepted(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Block, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, ports: PortRange.Single(81)),
-            },
-            RuleAction.Block));
+        ExpectAccepted(Table(
+            RuleAction.Block,
+            Rule(RuleAction.Block, ports: Ports(80)),
+            Rule(RuleAction.Block, ports: Ports(81))));
 
     private static void FallbackPermitWithMixedRules() =>
-        ExpectAccepted(new PolicyTable(
-            new[]
-            {
-                Rule(RuleAction.Permit, ports: PortRange.Single(80)),
-                Rule(RuleAction.Block, ports: PortRange.Single(81)),
-            },
-            RuleAction.Permit));
+        ExpectAccepted(Permit(
+            Rule(RuleAction.Permit, ports: Ports(80)),
+            Rule(RuleAction.Block, ports: Ports(81))));
 
     private static void AsciiFoldedProcessComparison()
     {
-        // 故意注入不折叠大小写的解析器：规则池里会出现大小写不同的两条串。
-        // matcher 比较连接侧路径时会折叠 ASCII，所以这两条规则会命中同一条连接，
-        // 顺序冲突必须按同一语义判定——只有大小写不同也算重叠。
-        PolicyTable table = new(
-            new[]
-            {
-                Rule(RuleAction.Permit, process: ProcessSelector.Parse(@"C:\APP.EXE")),
-                Rule(RuleAction.Block, process: ProcessSelector.Parse(@"c:\app.exe")),
-            },
-            RuleAction.Permit);
+        PolicyCompileException? error = Capture(
+            Permit(
+                Rule(RuleAction.Permit, processes: Processes(@"C:\APP.EXE")),
+                Rule(RuleAction.Block, processes: Processes(@"c:\app.exe"))),
+            IdentityNormalizer.Instance);
 
-        PolicyCompileException? error = Capture(table, IdentityNormalizer.Instance);
         Check.True(error is not null, "只有大小写不同的进程选择器必须按重叠处理");
         Check.True(error!.Message.Contains("#0", StringComparison.Ordinal), "消息要带更早的规则序号");
     }
@@ -358,7 +207,7 @@ internal static class RuleOrderTests
     {
         internal static IdentityNormalizer Instance { get; } = new();
 
-        public string? Normalize(string path) => path;
+        public ProcessPathResolution? Normalize(string path) =>
+            new(@"\device\harddiskvolume1" + path[2..], isDirectory: false);
     }
 }
-

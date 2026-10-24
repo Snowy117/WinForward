@@ -97,8 +97,8 @@ internal static class PriorityCases
 
 
         Differential.Case(
-            "network-record-dedup-two-rules",
-            "两条规则写同一个 /16 的不同主机位：网段池去重成一条记录，优先级仍按书写顺序",
+            "network-records-per-rule",
+            "两条规则各写一个 /16：v2 按规则追加网段记录、不做跨规则去重，优先级仍按书写顺序",
             RuleAction.Permit,
             new[]
             {

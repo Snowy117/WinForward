@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using WinForward.Userland.Device;
+using WinForward.Userland.Policy;
 
 namespace WinForward.Userland.Tests.Abi;
 
@@ -125,6 +126,12 @@ internal static class AbiConsistencyTests
                     "ProbeIoctl.MaxSelfProcessIds");
         Check.Equal(RequiredConstant("rule_blob_max_size"), ProductConstant("RuleBlobMaxSize"),
                     "ProbeIoctl.RuleBlobMaxSize");
+        Check.Equal(RequiredConstant("max_block_filters"), ProductConstant("MaxBlockFilters"),
+                    "ProbeIoctl.MaxBlockFilters");
+        Check.Equal(RequiredConstant("rule_blob_max_size"), (long)PolicyLimits.RuleBlobMaxSize,
+                    "PolicyLimits.RuleBlobMaxSize");
+        Check.Equal(RequiredConstant("max_block_filters"), (long)PolicyLimits.MaxBlockFilters,
+                    "PolicyLimits.MaxBlockFilters");
         Check.Equal(RequiredConstant("process_path_measure_input_max"), ProductConstant("ProcessPathMeasureInputMax"),
                     "ProbeIoctl.ProcessPathMeasureInputMax");
     }

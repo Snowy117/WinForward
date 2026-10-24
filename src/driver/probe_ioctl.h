@@ -19,6 +19,11 @@ inline constexpr std::uint32_t probe_abi_version = 7;
 // 异常的下发（正常策略是几百字节到几 KB）。
 inline constexpr std::uint32_t rule_blob_max_size = 64 * 1024;
 
+// 一次换表能安装的 ALE_AUTH_CONNECT block filter 总数（V4+V6 合计）。协议展开后一条
+// any 规则最多 2 layer × 2 protocol = 4 条，fallback=block 也要 2 layer × 2 protocol；
+// 超出时整块 blob 被拒绝，避免静默丢弃规则。产品侧镜像见 PolicyLimits.MaxBlockFilters。
+inline constexpr std::uint32_t max_block_filters = 128;
+
 // 防循环闸 4 的 self-PID 集合容量。真实部署里代理进程数远小于这个值。
 inline constexpr std::uint32_t max_self_process_ids = 8;
 

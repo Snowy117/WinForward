@@ -62,12 +62,10 @@ inline constexpr std::uint32_t rule_pool_tag = 'rTfW';
 // 这个值只用于同子层内不依赖引擎默认权重推导；依据见 block_filters.cpp 的 filter 构造处。
 inline constexpr std::uint64_t auth_filter_weight = 0x10;
 
-// 一次最多能编译出多少条 block filter（V4+V6 合计）。协议展开后一条 any 规则最多
-// 2 layer × 2 protocol = 4 条，fallback=block 也要 2 layer × 2 protocol；128 条允许
-// 31 条 any block 规则再加 fallback（31×4+4），或 64 条具体协议规则（64×2）。
-// 超出时整块 blob 被拒绝，避免静默丢弃规则。
+// 一次最多能编译出多少条 block filter（V4+V6 合计）。常量定义在 probe_ioctl.h，
+// 用户态镜像与 ABI 测试都从那里读取；这里锁住驱动使用的数值没有漂移。
 // probe_control.cpp 的栈数组是 128×8B = 1 KiB，只在 PASSIVE 的 IOCTL 路径上使用。
-inline constexpr std::uint32_t max_block_filters = 128;
+static_assert(max_block_filters == 128, "max_block_filters 是控制面 ABI 常量，见 probe_ioctl.h");
 inline constexpr std::uint32_t event_capacity = 64;
 
 // 规则进程池是 UTF-8 字节串（ASCII 大小写折叠，非 ASCII 原样）。连接侧把 ALE_APP_ID 的

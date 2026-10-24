@@ -26,11 +26,11 @@ using winforward::wfp::connection_view;
 using winforward::wfp::match_result;
 using winforward::wfp::rule_action;
 
-constexpr std::size_t expected_case_count = 33;
+constexpr std::size_t expected_case_count = 42;
 constexpr std::size_t expected_connection_count = 15;
 
 // 覆盖维度按名字钉死：空表、优先级、CIDR /0 与 /32、IPv6 对应项、端口端点、
-// 进程串大小写与中文路径、进程 + 网段组合、协议、全任意。
+// 进程文件名 / 精确路径 / 目录前缀、进程与数组的 OR/AND、混合族、多端口、协议数组。
 constexpr auto required_case_names = std::to_array<std::string_view>({
     "empty-table-block",
     "empty-table-redirect",
@@ -47,6 +47,15 @@ constexpr auto required_case_names = std::to_array<std::string_view>({
     "protocol-tcp-excludes-udp",
     "protocol-udp-excludes-tcp",
     "all-any-single-rule",
+    "process-file-name-svchost",
+    "process-file-name-requires-same-segment",
+    "process-directory-system32",
+    "process-array-or",
+    "block-exact-path-array",
+    "array-and-or-matrix",
+    "network-array-mixed-family",
+    "multi-port-array",
+    "protocol-array-tcp-udp",
 });
 
 [[nodiscard]] std::filesystem::path fixture_directory()

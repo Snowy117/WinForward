@@ -5,29 +5,30 @@ namespace WinForward.Userland.Tests;
 
 internal static class CompilerTests
 {
-    private const string Svchost = @"c:\windows\system32\svchost.exe";
-    private const string App = @"c:\program files\app\app.exe";
+    private const string Svchost = TestAppId.SvchostDos;
+    private const string App = TestAppId.AppDos;
 
     internal static void Register()
     {
-        TestRunner.Add("compiler/空规则表只产出 40 字节头部", EmptyTable);
-        TestRunner.Add("compiler/各段起点 4 字节对齐且不重叠", Segments);
-        TestRunner.Add("compiler/规则顺序与字段原样写入", RuleFields);
-        TestRunner.Add("compiler/UDP 协议写成 17", UdpProtocol);
+        TestRunner.Add("compiler/空规则表只产出 56 字节头部", EmptyTable);
+        TestRunner.Add("compiler/五个段起点 4 字节对齐且不重叠", Segments);
+        TestRunner.Add("compiler/规则区间与字段原样写入", RuleFields);
+        TestRunner.Add("compiler/协议与地址族写成位掩码", Masks);
         TestRunner.Add("compiler/进程串小写、去重、NUL 结尾", ProcessPool);
-        TestRunner.Add("compiler/进程索引是池内字节偏移", ProcessIndexes);
-        TestRunner.Add("compiler/网段主机位清零并去重", NetworkPool);
+        TestRunner.Add("compiler/进程串偏移是池内字节偏移", ProcessIndexes);
+        TestRunner.Add("compiler/网段按规则追加且主机位清零", NetworkPool);
         TestRunner.Add("compiler/IPv4 地址只占前 4 字节", NetworkIpv4Padding);
-        TestRunner.Add("compiler/网段索引是 20 的倍数", NetworkIndexes);
-        TestRunner.Add("compiler/任意选择器写成 0xFFFFFFFF", AnySelectors);
+        TestRunner.Add("compiler/网段下标按记录数递增", NetworkIndexes);
+        TestRunner.Add("compiler/任意选择器编码为计数 0 与首下标 0", AnySelectors);
         TestRunner.Add("compiler/兜底动作写入头部", FallbackAction);
-        TestRunner.Add("compiler/规则保留位为 0", ReservedIsZero);
+        TestRunner.Add("compiler/规则与选择器保留位为 0", ReservedIsZero);
+        TestRunner.Add("compiler/端口排序合并相邻与重叠区间", PortMerge);
         TestRunner.Add("compiler/端口区间端点原样写入", PortEndpoints);
+        TestRunner.Add("compiler/显式端口 0 被拒绝", PortZeroRejected);
+        TestRunner.Add("compiler/PortRange.Any 仍表示任意端口", PortAnyAccepted);
         TestRunner.Add("compiler/进程串池末尾是 NUL", ProcessPoolTail);
         TestRunner.Add("compiler/进程串池按 UTF-8 字节计数", ProcessPoolUtf8Bytes);
-        TestRunner.Add("compiler/进程路径归一化可替换", ProcessNormalizerIsReplaceable);
-        TestRunner.Add("compiler/解析不到的 DOS 路径拒绝编译", UnresolvableProcessPathIsRejected);
-        TestRunner.Add("compiler/真实解析器只能在 Windows 上用", WindowsResolverRequiresWindows);
+        TestRunner.Add("compiler/一条配置规则只产出一条 blob 规则", OneRuleOneBlobRule);
     }
 
     private static void EmptyTable()
@@ -35,41 +36,53 @@ internal static class CompilerTests
         byte[] blob = TestAppId.Compile(new PolicyTable(Array.Empty<PolicyRule>(), RuleAction.Block));
         RuleBlobHeader header = BlobReader.Header(blob);
 
-        Check.Equal(40, blob.Length, "空表 blob 长度");
+        Check.Equal(56, blob.Length, "空表 blob 长度");
         Check.Equal(0x31425257U, header.Magic, "magic");
-        Check.Equal((ushort)1, header.Version, "version");
-        Check.Equal((ushort)40, header.HeaderSize, "header_size");
-        Check.Equal(40U, header.TotalSize, "total_size");
+        Check.Equal((ushort)2, header.Version, "version");
+        Check.Equal((ushort)56, header.HeaderSize, "header_size");
+        Check.Equal(56U, header.TotalSize, "total_size");
         Check.Equal(0U, header.RuleCount, "rule_count");
         Check.Equal(1U, header.FallbackAction, "fallback_action");
-        Check.Equal(40U, header.RulesOffset, "rules_offset");
-        Check.Equal(40U, header.ProcessPoolOffset, "process_pool_offset");
+        Check.Equal(56U, header.RulesOffset, "rules_offset");
+        Check.Equal(56U, header.ProcessPoolOffset, "process_pool_offset");
         Check.Equal(0U, header.ProcessPoolSize, "process_pool_size");
-        Check.Equal(40U, header.NetworkPoolOffset, "network_pool_offset");
+        Check.Equal(56U, header.SelectorPoolOffset, "selector_pool_offset");
+        Check.Equal(0U, header.SelectorPoolSize, "selector_pool_size");
+        Check.Equal(56U, header.NetworkPoolOffset, "network_pool_offset");
         Check.Equal(0U, header.NetworkPoolSize, "network_pool_size");
-
-        Check.Equal(40U, header.NetworkPoolOffset, "空表的零长度段落在 total_size 端点");
+        Check.Equal(56U, header.PortPoolOffset, "port_pool_offset");
+        Check.Equal(0U, header.PortPoolSize, "port_pool_size");
     }
 
     private static void Segments()
     {
         byte[] blob = TestAppId.Compile(SampleTable());
         RuleBlobHeader header = BlobReader.Header(blob);
-        int rulesEnd = (int)header.RulesOffset + ((int)header.RuleCount * 16);
+        int rulesEnd = (int)header.RulesOffset + ((int)header.RuleCount * RuleBlobLayout.RuleSize);
         int processEnd = (int)header.ProcessPoolOffset + (int)header.ProcessPoolSize;
+        int selectorEnd = (int)header.SelectorPoolOffset + (int)header.SelectorPoolSize;
         int networkEnd = (int)header.NetworkPoolOffset + (int)header.NetworkPoolSize;
+        int portEnd = (int)header.PortPoolOffset + (int)header.PortPoolSize;
 
         Check.Equal(blob.Length, (int)header.TotalSize, "total_size 等于实际长度");
-        Check.Equal(0, (int)header.RulesOffset % 4, "rules_offset 对齐");
-        Check.Equal(0, (int)header.ProcessPoolOffset % 4, "process_pool_offset 对齐");
-        Check.Equal(0, (int)header.NetworkPoolOffset % 4, "network_pool_offset 对齐");
-        Check.Equal(40, (int)header.RulesOffset, "rules_offset 紧接头部");
+        foreach ((string name, uint offset) in new[]
+                 {
+                     ("rules", header.RulesOffset),
+                     ("process", header.ProcessPoolOffset),
+                     ("selector", header.SelectorPoolOffset),
+                     ("network", header.NetworkPoolOffset),
+                     ("port", header.PortPoolOffset),
+                 })
+        {
+            Check.Equal(0, (int)offset % 4, $"{name}_offset 4 字节对齐");
+        }
+
+        Check.Equal(56, (int)header.RulesOffset, "rules_offset 紧接头部");
         Check.True(rulesEnd <= (int)header.ProcessPoolOffset, "规则数组不越过进程池");
-        Check.True(processEnd <= (int)header.NetworkPoolOffset, "进程池不越过网段池");
-        Check.Equal(blob.Length, networkEnd, "网段池结束于 blob 末尾");
-        Check.True(
-            (int)header.NetworkPoolOffset - processEnd < 4,
-            "进程池与网段池之间只有对齐填充");
+        Check.True(processEnd <= (int)header.SelectorPoolOffset, "进程池不越选择器池");
+        Check.True(selectorEnd <= (int)header.NetworkPoolOffset, "选择器池不越网段池");
+        Check.True(networkEnd <= (int)header.PortPoolOffset, "网段池不越端口池");
+        Check.Equal(blob.Length, portEnd, "端口池结束于 blob 末尾");
     }
 
     private static void RuleFields()
@@ -80,17 +93,17 @@ internal static class CompilerTests
                 new PolicyRule
                 {
                     Name = "first",
-                    Process = ProcessSelector.Parse(Svchost),
-                    RemoteNetwork = RemoteNetwork.Parse("10.1.2.3/32"),
-                    RemotePorts = PortRange.Single(443),
-                    Protocol = RuleProtocol.Tcp,
-                    Family = RuleAddressFamily.Ipv4,
+                    Processes = new[] { ProcessSelector.Parse(Svchost) },
+                    RemoteNetworks = new[] { RemoteNetwork.Parse("10.1.2.3/32") },
+                    RemotePorts = new[] { PortRange.Single(443) },
+                    Protocols = new[] { RuleProtocol.Tcp },
+                    Families = new[] { RuleAddressFamily.Ipv4 },
                     Action = RuleAction.Redirect,
                 },
                 new PolicyRule
                 {
                     Name = "second",
-                    RemotePorts = new PortRange(1000, 2000),
+                    RemotePorts = new[] { new PortRange(1000, 2000) },
                     Action = RuleAction.Block,
                 },
             },
@@ -100,30 +113,49 @@ internal static class CompilerTests
         RuleBlobRule first = BlobReader.Rule(blob, 0);
         RuleBlobRule second = BlobReader.Rule(blob, 1);
 
-        Check.Equal(443, (int)first.RemotePortStart, "规则 0 端口起点");
-        Check.Equal(443, (int)first.RemotePortEnd, "规则 0 端口终点");
-        Check.Equal((byte)6, first.Protocol, "规则 0 协议");
-        Check.Equal((byte)4, first.Family, "规则 0 地址族");
+        Check.Equal(1U, first.ProcessCount, "规则 0 进程数");
+        Check.Equal(1U, first.NetworkCount, "规则 0 网段数");
+        Check.Equal(1U, first.PortCount, "规则 0 端口区间数");
+        Check.Equal(0U, first.ProcessFirst, "规则 0 进程首下标");
+        Check.Equal(0U, first.NetworkFirst, "规则 0 网段首下标");
+        Check.Equal(0U, first.PortFirst, "规则 0 端口首下标");
+        Check.Equal((byte)1, first.ProtocolMask, "规则 0 协议掩码 tcp");
+        Check.Equal((byte)1, first.FamilyMask, "规则 0 地址族掩码 ipv4");
         Check.Equal((byte)2, first.Action, "规则 0 动作");
-        Check.Equal(0U, first.ProcessIndex, "规则 0 的 process_index 指向池首");
-        Check.Equal(0U, first.NetworkIndex, "规则 0 的 network_index 指向池首");
-        Check.Equal(0xFFFFFFFFU, second.NetworkIndex, "规则 1 的 network_index 是任意");
-        Check.Equal(0xFFFFFFFFU, second.ProcessIndex, "规则 1 的 process_index 是任意");
-        Check.Equal(1000, (int)second.RemotePortStart, "规则 1 端口起点");
-        Check.Equal(2000, (int)second.RemotePortEnd, "规则 1 端口终点");
-        Check.Equal((byte)0, second.Protocol, "规则 1 协议默认任意");
+        Check.Equal(0U, second.ProcessCount, "规则 1 进程任意");
+        Check.Equal(0U, second.ProcessFirst, "计数 0 时首下标必须是 0");
+        Check.Equal(0U, second.NetworkCount, "规则 1 网段任意");
+        Check.Equal(0U, second.NetworkFirst, "计数 0 时首下标必须是 0");
+        Check.Equal(1U, second.PortCount, "规则 1 端口区间数");
+        Check.Equal(1U, second.PortFirst, "规则 1 端口首下标接在规则 0 之后");
+        Check.Equal((byte)0, second.ProtocolMask, "规则 1 协议默认任意");
         Check.Equal((byte)1, second.Action, "规则 1 动作");
     }
 
-    private static void UdpProtocol()
+    private static void Masks()
     {
         byte[] blob = TestAppId.Compile(new PolicyTable(
-            new[] { new PolicyRule { Protocol = RuleProtocol.Udp, Action = RuleAction.Block } },
+            new[]
+            {
+                new PolicyRule { Protocols = new[] { RuleProtocol.Tcp } },
+                new PolicyRule { Protocols = new[] { RuleProtocol.Udp } },
+                new PolicyRule { Protocols = new[] { RuleProtocol.Tcp, RuleProtocol.Udp } },
+                new PolicyRule { Protocols = new[] { RuleProtocol.Any, RuleProtocol.Tcp } },
+                new PolicyRule { Families = new[] { RuleAddressFamily.Ipv4 } },
+                new PolicyRule { Families = new[] { RuleAddressFamily.Ipv6 } },
+                new PolicyRule { Families = new[] { RuleAddressFamily.Ipv4, RuleAddressFamily.Ipv6 } },
+                new PolicyRule { Families = new[] { RuleAddressFamily.Any, RuleAddressFamily.Ipv6 } },
+            },
             RuleAction.Permit));
-        RuleBlobRule rule = BlobReader.Rule(blob, 0);
 
-        Check.Equal(17, (int)RuleProtocol.Udp, "UDP 枚举值");
-        Check.Equal((byte)17, rule.Protocol, "UDP 规则协议字节");
+        Check.Equal((byte)1, BlobReader.Rule(blob, 0).ProtocolMask, "tcp 掩码");
+        Check.Equal((byte)2, BlobReader.Rule(blob, 1).ProtocolMask, "udp 掩码");
+        Check.Equal((byte)3, BlobReader.Rule(blob, 2).ProtocolMask, "tcp+udp 掩码");
+        Check.Equal((byte)0, BlobReader.Rule(blob, 3).ProtocolMask, "any 优先于具体值");
+        Check.Equal((byte)1, BlobReader.Rule(blob, 4).FamilyMask, "ipv4 掩码");
+        Check.Equal((byte)2, BlobReader.Rule(blob, 5).FamilyMask, "ipv6 掩码");
+        Check.Equal((byte)3, BlobReader.Rule(blob, 6).FamilyMask, "ipv4+ipv6 掩码");
+        Check.Equal((byte)0, BlobReader.Rule(blob, 7).FamilyMask, "any 优先于具体值");
     }
 
     private static void ProcessPool()
@@ -131,9 +163,9 @@ internal static class CompilerTests
         PolicyTable table = new(
             new[]
             {
-                new PolicyRule { Process = ProcessSelector.Parse(@"C:\Windows\SYSTEM32\SVCHOST.EXE"), Action = RuleAction.Block },
-                new PolicyRule { Process = ProcessSelector.Parse(Svchost), Action = RuleAction.Redirect },
-                new PolicyRule { Process = ProcessSelector.Parse(App), Action = RuleAction.Permit },
+                new PolicyRule { Processes = new[] { ProcessSelector.Parse(@"C:\Windows\SYSTEM32\SVCHOST.EXE") }, Action = RuleAction.Block },
+                new PolicyRule { Processes = new[] { ProcessSelector.Parse(Svchost) }, Action = RuleAction.Redirect },
+                new PolicyRule { Processes = new[] { ProcessSelector.Parse(App) }, Action = RuleAction.Permit },
             },
             RuleAction.Permit);
 
@@ -143,10 +175,12 @@ internal static class CompilerTests
         string expectedPool = TestAppId.SvchostDevice + "\0" + TestAppId.AppDevice + "\0";
         Check.Equal(Encoding.UTF8.GetByteCount(expectedPool), (int)header.ProcessPoolSize, "process_pool_size 是精确串字节数");
         Check.Equal(0, blob[(int)header.ProcessPoolOffset + (int)header.ProcessPoolSize - 1], "池尾是 NUL");
+        Check.Equal(3U, header.SelectorPoolSize / RuleBlobLayout.ProcessSelectorSize, "每条规则各有一条 selector");
 
-        Check.Equal(0U, BlobReader.Rule(blob, 0).ProcessIndex, "规则 0 指向池首");
-        Check.Equal(0U, BlobReader.Rule(blob, 1).ProcessIndex, "大小写不同的同一路径复用同一条串");
-        Check.Equal((uint)Encoding.UTF8.GetByteCount(TestAppId.SvchostDevice) + 1U, BlobReader.Rule(blob, 2).ProcessIndex, "规则 2 指向 app 串首");
+        Check.Equal(0U, BlobReader.Selector(blob, 0).StringOffset, "规则 0 指向池首");
+        Check.Equal(0U, BlobReader.Selector(blob, 1).StringOffset, "大小写不同的同一路径复用同一条串");
+        Check.Equal((uint)Encoding.UTF8.GetByteCount(TestAppId.SvchostDevice) + 1U,
+                    BlobReader.Selector(blob, 2).StringOffset, "规则 2 指向 app 串首");
         Check.Equal(TestAppId.SvchostDevice, BlobReader.ProcessString(blob, 0), "池内是设备路径且已小写");
     }
 
@@ -155,16 +189,16 @@ internal static class CompilerTests
         PolicyTable table = new(
             new[]
             {
-                new PolicyRule { Process = ProcessSelector.Parse(Svchost), Action = RuleAction.Block },
-                new PolicyRule { Process = ProcessSelector.Parse(App), Action = RuleAction.Block },
+                new PolicyRule { Processes = new[] { ProcessSelector.Parse(Svchost) } },
+                new PolicyRule { Processes = new[] { ProcessSelector.Parse(App) } },
             },
             RuleAction.Permit);
 
         byte[] blob = TestAppId.Compile(table);
-        uint second = BlobReader.Rule(blob, 1).ProcessIndex;
+        uint second = BlobReader.Selector(blob, 1).StringOffset;
 
-        Check.Equal((uint)Encoding.UTF8.GetByteCount(TestAppId.SvchostDevice) + 1U, second, "第二条串的索引是池内字节偏移");
-        Check.Equal(TestAppId.AppDevice, BlobReader.ProcessString(blob, second), "索引指向第二条串的串首");
+        Check.Equal((uint)Encoding.UTF8.GetByteCount(TestAppId.SvchostDevice) + 1U, second, "第二条串的偏移是池内字节偏移");
+        Check.Equal(TestAppId.AppDevice, BlobReader.ProcessString(blob, second), "偏移指向第二条串的串首");
     }
 
     private static void NetworkPool()
@@ -172,30 +206,33 @@ internal static class CompilerTests
         PolicyTable table = new(
             new[]
             {
-                new PolicyRule { RemoteNetwork = RemoteNetwork.Parse("10.1.9.77/24"), Action = RuleAction.Block },
-                new PolicyRule { RemoteNetwork = RemoteNetwork.Parse("10.1.9.1/24"), Action = RuleAction.Redirect },
+                new PolicyRule { RemoteNetworks = new[] { RemoteNetwork.Parse("10.1.9.77/24") } },
+                new PolicyRule { RemoteNetworks = new[] { RemoteNetwork.Parse("10.1.9.1/24") } },
             },
             RuleAction.Permit);
 
         byte[] blob = TestAppId.Compile(table);
         RuleBlobHeader header = BlobReader.Header(blob);
 
-        Check.Equal(20U, header.NetworkPoolSize, "两条同网段记录去重后只剩 20 字节");
-        Check.Equal(0U, BlobReader.Rule(blob, 0).NetworkIndex, "规则 0 指向池首");
-        Check.Equal(0U, BlobReader.Rule(blob, 1).NetworkIndex, "规则 1 复用同一条记录");
+        Check.Equal(40U, header.NetworkPoolSize, "v2 按规则追加记录，两条同网段各占 20 字节");
+        Check.Equal(0U, BlobReader.Rule(blob, 0).NetworkFirst, "规则 0 指向池首");
+        Check.Equal(1U, BlobReader.Rule(blob, 1).NetworkFirst, "规则 1 指向第二条记录");
 
-        RuleBlobNetworkPrefix prefix = BlobReader.NetworkPrefix(blob, 0);
-        Check.Equal((byte)24, prefix.PrefixLength, "prefix_length");
-        Check.Equal((byte)4, prefix.Family, "family");
-        Check.Equal((byte)0, prefix.Reserved0, "reserved[0]");
-        Check.Equal((byte)0, prefix.Reserved1, "reserved[1]");
-        Check.BytesEqual(new byte[] { 10, 1, 9, 0 }, BlobReader.NetworkAddress(prefix).AsSpan(0, 4), "主机位已清零");
+        for (int index = 0; index < 2; index++)
+        {
+            RuleBlobNetworkPrefix prefix = BlobReader.NetworkPrefix(blob, index);
+            Check.Equal((byte)24, prefix.PrefixLength, $"记录 {index} 的 prefix_length");
+            Check.Equal((byte)4, prefix.Family, $"记录 {index} 的 family");
+            Check.Equal((byte)0, prefix.Reserved0, $"记录 {index} 的 reserved[0]");
+            Check.Equal((byte)0, prefix.Reserved1, $"记录 {index} 的 reserved[1]");
+            Check.BytesEqual(new byte[] { 10, 1, 9, 0 }, BlobReader.NetworkAddress(prefix).AsSpan(0, 4), $"记录 {index} 主机位已清零");
+        }
     }
 
     private static void NetworkIpv4Padding()
     {
         PolicyTable table = new(
-            new[] { new PolicyRule { RemoteNetwork = RemoteNetwork.Parse("192.168.1.0/24") } },
+            new[] { new PolicyRule { RemoteNetworks = new[] { RemoteNetwork.Parse("192.168.1.0/24") } } },
             RuleAction.Permit);
 
         byte[] blob = TestAppId.Compile(table);
@@ -210,18 +247,18 @@ internal static class CompilerTests
         PolicyTable table = new(
             new[]
             {
-                new PolicyRule { RemoteNetwork = RemoteNetwork.Parse("10.0.0.0/8") },
-                new PolicyRule { RemoteNetwork = RemoteNetwork.Parse("192.168.0.0/16") },
-                new PolicyRule { RemoteNetwork = RemoteNetwork.Parse("2001:db8::/32"), Family = RuleAddressFamily.Ipv6 },
+                new PolicyRule { RemoteNetworks = new[] { RemoteNetwork.Parse("10.0.0.0/8") } },
+                new PolicyRule { RemoteNetworks = new[] { RemoteNetwork.Parse("192.168.0.0/16") } },
+                new PolicyRule { RemoteNetworks = new[] { RemoteNetwork.Parse("2001:db8::/32") } },
             },
             RuleAction.Permit);
 
         byte[] blob = TestAppId.Compile(table);
 
-        Check.Equal(0U, BlobReader.Rule(blob, 0).NetworkIndex, "规则 0");
-        Check.Equal(20U, BlobReader.Rule(blob, 1).NetworkIndex, "规则 1");
-        Check.Equal(40U, BlobReader.Rule(blob, 2).NetworkIndex, "规则 2");
-        Check.Equal(0, (int)BlobReader.Rule(blob, 2).NetworkIndex % 20, "网段索引是 20 的倍数");
+        Check.Equal(0U, BlobReader.Rule(blob, 0).NetworkFirst, "规则 0");
+        Check.Equal(1U, BlobReader.Rule(blob, 1).NetworkFirst, "规则 1");
+        Check.Equal(2U, BlobReader.Rule(blob, 2).NetworkFirst, "规则 2");
+        Check.Equal(3U, BlobReader.Header(blob).NetworkPoolSize / RuleBlobLayout.NetworkPrefixSize, "网段池记录数");
     }
 
     private static void AnySelectors()
@@ -231,10 +268,14 @@ internal static class CompilerTests
             RuleAction.Permit));
         RuleBlobRule rule = BlobReader.Rule(blob, 0);
 
-        Check.Equal(0xFFFFFFFFU, rule.ProcessIndex, "process_index 任意");
-        Check.Equal(0xFFFFFFFFU, rule.NetworkIndex, "network_index 任意");
-        Check.Equal(0, (int)rule.RemotePortStart, "端口起点 0");
-        Check.Equal(0xFFFF, (int)rule.RemotePortEnd, "端口终点 65535");
+        Check.Equal(0U, rule.ProcessCount, "process_count 任意");
+        Check.Equal(0U, rule.ProcessFirst, "process_first 必须是 0");
+        Check.Equal(0U, rule.NetworkCount, "network_count 任意");
+        Check.Equal(0U, rule.NetworkFirst, "network_first 必须是 0");
+        Check.Equal(0U, rule.PortCount, "port_count 任意");
+        Check.Equal(0U, rule.PortFirst, "port_first 必须是 0");
+        Check.Equal((byte)0, rule.ProtocolMask, "protocol_mask 任意");
+        Check.Equal((byte)0, rule.FamilyMask, "family_mask 任意");
     }
 
     private static void FallbackAction()
@@ -253,18 +294,87 @@ internal static class CompilerTests
         for (int index = 0; index < (int)BlobReader.Header(blob).RuleCount; index++)
         {
             Check.Equal((byte)0, BlobReader.Rule(blob, index).Reserved, $"规则 {index} 的 reserved");
+            Check.Equal(0U, BlobReader.Rule(blob, index).Reserved2, $"规则 {index} 的 reserved2");
+        }
+
+        int selectorCount = (int)(BlobReader.Header(blob).SelectorPoolSize / RuleBlobLayout.ProcessSelectorSize);
+        for (int index = 0; index < selectorCount; index++)
+        {
+            RuleBlobProcessSelector selector = BlobReader.Selector(blob, index);
+            Check.Equal((byte)0, selector.Reserved0, $"selector {index} 的 reserved[0]");
+            Check.Equal((byte)0, selector.Reserved1, $"selector {index} 的 reserved[1]");
+        }
+    }
+
+    private static void PortMerge()
+    {
+        byte[] blob = TestAppId.Compile(new PolicyTable(
+            new[]
+            {
+                new PolicyRule
+                {
+                    RemotePorts = new[]
+                    {
+                        new PortRange(443, 443),
+                        new PortRange(80, 90),
+                        new PortRange(85, 100),
+                        new PortRange(1000, 1000),
+                        new PortRange(1001, 1001),
+                    },
+                },
+            },
+            RuleAction.Permit));
+
+        RuleBlobRule rule = BlobReader.Rule(blob, 0);
+        Check.Equal(3U, rule.PortCount, "排序合并后的区间数");
+        (ushort Start, ushort End)[] expected = { (80, 100), (443, 443), (1000, 1001) };
+        for (int index = 0; index < expected.Length; index++)
+        {
+            RuleBlobPortRange range = BlobReader.PortRange(blob, (int)rule.PortFirst + index);
+            Check.Equal(expected[index].Start, range.Start, $"区间 {index} 起点");
+            Check.Equal(expected[index].End, range.End, $"区间 {index} 终点");
         }
     }
 
     private static void PortEndpoints()
     {
         byte[] blob = TestAppId.Compile(new PolicyTable(
-            new[] { new PolicyRule { RemotePorts = new PortRange(2, 65534) } },
+            new[] { new PolicyRule { RemotePorts = new[] { new PortRange(2, 65534) } } },
             RuleAction.Permit));
         RuleBlobRule rule = BlobReader.Rule(blob, 0);
+        RuleBlobPortRange range = BlobReader.PortRange(blob, 0);
 
-        Check.Equal(2, (int)rule.RemotePortStart, "端口起点");
-        Check.Equal(65534, (int)rule.RemotePortEnd, "端口终点");
+        Check.Equal(1U, rule.PortCount, "端口区间数");
+        Check.Equal((ushort)2, range.Start, "端口起点");
+        Check.Equal((ushort)65534, range.End, "端口终点");
+    }
+
+    private static void PortZeroRejected()
+    {
+        PolicyTable single = new(
+            new[] { new PolicyRule { RemotePorts = new[] { PortRange.Single(0) } } },
+            RuleAction.Permit);
+        Check.ThrowsContaining<PolicyCompileException>(
+            () => TestAppId.Compile(single), "端口 0", "单端口 0 必须拒绝");
+
+        PolicyTable range = new(
+            new[] { new PolicyRule { RemotePorts = new[] { new PortRange(0, 80) } } },
+            RuleAction.Permit);
+        Check.ThrowsContaining<PolicyCompileException>(
+            () => TestAppId.Compile(range), "端口 0", "以 0 开头的端口区间必须拒绝");
+    }
+
+    private static void PortAnyAccepted()
+    {
+        byte[] blob = TestAppId.Compile(new PolicyTable(
+            new[] { new PolicyRule { RemotePorts = new[] { PortRange.Any } } },
+            RuleAction.Permit));
+        RuleBlobRule rule = BlobReader.Rule(blob, 0);
+        RuleBlobPortRange range = BlobReader.PortRange(blob, 0);
+
+        Check.Equal(1U, rule.PortCount, "Any 写一条区间记录");
+        Check.Equal((ushort)0, range.Start, "Any 起点 0");
+        Check.Equal(ushort.MaxValue, range.End, "Any 终点 65535");
     }
 
     private static void ProcessPoolTail()
@@ -281,8 +391,8 @@ internal static class CompilerTests
         PolicyTable table = new(
             new[]
             {
-                new PolicyRule { Process = ProcessSelector.Parse(Svchost), Action = RuleAction.Block },
-                new PolicyRule { Process = ProcessSelector.Parse(TestAppId.UnicodeDos), Action = RuleAction.Redirect },
+                new PolicyRule { Processes = new[] { ProcessSelector.Parse(Svchost) } },
+                new PolicyRule { Processes = new[] { ProcessSelector.Parse(TestAppId.UnicodeDos) } },
             },
             RuleAction.Permit);
 
@@ -292,73 +402,61 @@ internal static class CompilerTests
         int expectedSize = firstSize + Encoding.UTF8.GetByteCount(TestAppId.UnicodeDevice) + 1;
 
         Check.Equal(expectedSize, (int)header.ProcessPoolSize, "进程池按 UTF-8 字节计数");
-        Check.Equal((uint)firstSize, BlobReader.Rule(blob, 1).ProcessIndex, "第二条串的索引按 UTF-8 字节算");
+        Check.Equal((uint)firstSize, BlobReader.Selector(blob, 1).StringOffset, "第二条串的偏移按 UTF-8 字节算");
         Check.Equal(TestAppId.UnicodeDevice, BlobReader.ProcessString(blob, (uint)firstSize), "中文设备路径原样落盘");
         Check.True(
             Encoding.UTF8.GetByteCount(TestAppId.UnicodeDevice) > TestAppId.UnicodeDevice.Length,
             "中文串的字节数必须大于 UTF-16 字符数，否则这条用例测不出差别");
     }
 
-
-    private static void ProcessNormalizerIsReplaceable()
+    private static void OneRuleOneBlobRule()
     {
         PolicyTable table = new(
             new[]
             {
-                new PolicyRule { Process = ProcessSelector.Parse(Svchost), Action = RuleAction.Block },
-                new PolicyRule { Process = ProcessSelector.Parse(@"C:\Windows\SYSTEM32\SVCHOST.EXE"), Action = RuleAction.Redirect },
+                new PolicyRule
+                {
+                    Processes = new[] { ProcessSelector.Parse(Svchost), ProcessSelector.Parse(App) },
+                    RemoteNetworks = new[]
+                    {
+                        RemoteNetwork.Parse("10.0.0.0/8"),
+                        RemoteNetwork.Parse("2001:db8::/32"),
+                    },
+                    RemotePorts = new[] { PortRange.Single(80), PortRange.Single(443), new PortRange(8000, 8100) },
+                    Protocols = new[] { RuleProtocol.Tcp, RuleProtocol.Udp },
+                    Families = new[] { RuleAddressFamily.Ipv4, RuleAddressFamily.Ipv6 },
+                    Action = RuleAction.Redirect,
+                },
             },
             RuleAction.Permit);
 
-        // 注入一个把前缀换成 \??\ 的解析器：路径表示只由 normalizer 决定，编译器不写死。
-        FwpmAppIdNormalizer normalizer = new(path => @"\??\" + path);
-        byte[] blob = RuleBlobCompiler.Compile(table, normalizer);
-        RuleBlobHeader header = BlobReader.Header(blob);
-        string expected = @"\??\" + Svchost;
+        byte[] blob = TestAppId.Compile(table);
+        RuleBlobRule rule = BlobReader.Rule(blob, 0);
 
-        Check.Equal(Encoding.UTF8.GetByteCount(expected) + 1, (int)header.ProcessPoolSize, "自定义解析的池长度");
-        Check.Equal(0U, BlobReader.Rule(blob, 0).ProcessIndex, "第一条指向池首");
-        Check.Equal(0U, BlobReader.Rule(blob, 1).ProcessIndex, "大小写不同的同一路径仍去重");
-        Check.Equal(expected, BlobReader.ProcessString(blob, 0), "池内是注入解析器的输出");
+        Check.Equal(1, blob.Length > 0 ? (int)BlobReader.Header(blob).RuleCount : 0, "一条配置规则 = 一条 blob 规则");
+        Check.Equal(2U, rule.ProcessCount, "进程数组");
+        Check.Equal(2U, rule.NetworkCount, "网段数组");
+        Check.Equal(3U, rule.PortCount, "端口数组");
+        Check.Equal((byte)3, rule.ProtocolMask, "协议数组");
+        Check.Equal((byte)3, rule.FamilyMask, "族数组");
     }
-
-    private static void UnresolvableProcessPathIsRejected()
-    {
-        PolicyTable table = new(
-            new[] { new PolicyRule { Process = ProcessSelector.Parse(@"c:\nope\missing.exe") } },
-            RuleAction.Permit);
-
-        Check.Throws<PolicyCompileException>(
-            () => TestAppId.Compile(table), "解析器映射不到时拒绝编译");
-    }
-
-    private static void WindowsResolverRequiresWindows()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            // 真实解析只能在 Windows 上验；这条用例的价值在非 Windows 分支。
-            return;
-        }
-
-        Check.Throws<PlatformNotSupportedException>(
-            () => FwpmAppIdNormalizer.ForWindows(), "非 Windows 上不允许构造真实解析器");
-    }
-
 
     private static PolicyTable SampleTable() => new(
         new[]
         {
             new PolicyRule
             {
-                Process = ProcessSelector.Parse(Svchost),
-                RemoteNetwork = RemoteNetwork.Parse("10.1.2.3/32"),
-                RemotePorts = PortRange.Single(443),
+                Processes = new[] { ProcessSelector.Parse(Svchost) },
+                RemoteNetworks = new[] { RemoteNetwork.Parse("10.1.2.3/32") },
+                RemotePorts = new[] { PortRange.Single(443) },
+                Protocols = new[] { RuleProtocol.Tcp },
+                Families = new[] { RuleAddressFamily.Ipv4 },
                 Action = RuleAction.Redirect,
             },
             new PolicyRule
             {
-                Process = ProcessSelector.Parse(App),
-                Family = RuleAddressFamily.Ipv6,
+                Processes = new[] { ProcessSelector.Parse(App) },
+                Families = new[] { RuleAddressFamily.Ipv6 },
                 Action = RuleAction.Block,
             },
         },

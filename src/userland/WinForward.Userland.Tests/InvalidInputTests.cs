@@ -14,15 +14,22 @@ internal static class InvalidInputTests
         TestRunner.Add("invalid/地址族未知", UnknownFamily);
         TestRunner.Add("invalid/端口区间颠倒", InvertedPorts);
         TestRunner.Add("invalid/规则族与网段族不一致", FamilyMismatch);
+        TestRunner.Add("invalid/五个选择器空数组都拒绝", EmptyArrays);
+        TestRunner.Add("invalid/数组里的 null 元素拒绝", NullElements);
         TestRunner.Add("invalid/进程串为空", EmptyProcess);
-        TestRunner.Add("invalid/进程串含控制字符", ControlCharacterProcess);
+        TestRunner.Add("invalid/进程串含 C0 控制字符", ControlCharacterProcess);
+        TestRunner.Add("invalid/进程串含 DEL", DelProcess);
+        TestRunner.Add("invalid/进程串含 C1 控制字符", C1ControlProcess);
         TestRunner.Add("invalid/进程串含 NUL", NulProcess);
         TestRunner.Add("invalid/进程串含孤立代理项", LoneSurrogateProcess);
         TestRunner.Add("invalid/IPv4 前缀越界", Ipv4PrefixOutOfRange);
         TestRunner.Add("invalid/IPv6 前缀越界", Ipv6PrefixOutOfRange);
         TestRunner.Add("invalid/CIDR 缺少前缀", MissingPrefix);
         TestRunner.Add("invalid/CIDR 地址非法", BadAddress);
-        TestRunner.Add("invalid/归一化结果非法", InvalidNormalizedPath);
+        TestRunner.Add("invalid/归一化结果含 NUL", NulNormalizedPath);
+        TestRunner.Add("invalid/归一化返回 null", NullNormalizedPath);
+        TestRunner.Add("invalid/归一化结果含孤立代理项", LoneSurrogateNormalizedPath);
+        TestRunner.Add("invalid/归一化器为 null", NullNormalizer);
     }
 
     private static void NullTable() =>
@@ -45,18 +52,24 @@ internal static class InvalidInputTests
 
     private static void UnknownProtocol() =>
         Check.Throws<PolicyCompileException>(
-            () => TestAppId.Compile(new PolicyTable(new[] { new PolicyRule { Protocol = (RuleProtocol)18 } }, RuleAction.Permit)),
+            () => TestAppId.Compile(new PolicyTable(
+                new[] { new PolicyRule { Protocols = new[] { (RuleProtocol)18 } } },
+                RuleAction.Permit)),
             "协议 18");
 
     private static void UnknownFamily() =>
         Check.Throws<PolicyCompileException>(
-            () => TestAppId.Compile(new PolicyTable(new[] { new PolicyRule { Family = (RuleAddressFamily)5 } }, RuleAction.Permit)),
+            () => TestAppId.Compile(new PolicyTable(
+                new[] { new PolicyRule { Families = new[] { (RuleAddressFamily)5 } } },
+                RuleAction.Permit)),
             "地址族 5");
 
     private static void InvertedPorts() =>
-        Check.Throws<PolicyCompileException>(
-            () => TestAppId.Compile(new PolicyTable(new[] { new PolicyRule { RemotePorts = new PortRange(500, 400) } }, RuleAction.Permit)),
-            "端口 500..400");
+        Check.ThrowsContaining<PolicyCompileException>(
+            () => TestAppId.Compile(new PolicyTable(
+                new[] { new PolicyRule { RemotePorts = new[] { new PortRange(500, 400) } } },
+                RuleAction.Permit)),
+            "#0", "端口 500..400");
 
     private static void FamilyMismatch() =>
         Check.Throws<PolicyCompileException>(
@@ -65,18 +78,59 @@ internal static class InvalidInputTests
                 {
                     new PolicyRule
                     {
-                        Family = RuleAddressFamily.Ipv4,
-                        RemoteNetwork = RemoteNetwork.Parse("2001:db8::/32"),
+                        Families = new[] { RuleAddressFamily.Ipv4 },
+                        RemoteNetworks = new[] { RemoteNetwork.Parse("2001:db8::/32") },
                     },
                 },
                 RuleAction.Permit)),
             "IPv4 规则配 IPv6 网段");
+
+    private static void EmptyArrays()
+    {
+        (string Field, PolicyRule Rule)[] cases =
+        {
+            ("process", new PolicyRule { Processes = Array.Empty<ProcessSelector>() }),
+            ("remoteNetwork", new PolicyRule { RemoteNetworks = Array.Empty<RemoteNetwork>() }),
+            ("remotePorts", new PolicyRule { RemotePorts = Array.Empty<PortRange>() }),
+            ("protocol", new PolicyRule { Protocols = Array.Empty<RuleProtocol>() }),
+            ("family", new PolicyRule { Families = Array.Empty<RuleAddressFamily>() }),
+        };
+
+        foreach ((string field, PolicyRule rule) in cases)
+        {
+            Check.ThrowsContaining<PolicyCompileException>(
+                () => TestAppId.Compile(new PolicyTable(new[] { rule }, RuleAction.Permit)),
+                field, $"{field} 空数组必须拒绝");
+        }
+    }
+
+    private static void NullElements()
+    {
+        (string Field, PolicyRule Rule)[] cases =
+        {
+            ("process", new PolicyRule { Processes = new ProcessSelector[] { null! } }),
+            ("remoteNetwork", new PolicyRule { RemoteNetworks = new RemoteNetwork[] { null! } }),
+        };
+
+        foreach ((string field, PolicyRule rule) in cases)
+        {
+            Check.ThrowsContaining<PolicyCompileException>(
+                () => TestAppId.Compile(new PolicyTable(new[] { rule }, RuleAction.Permit)),
+                field, $"{field} 的 null 元素必须拒绝");
+        }
+    }
 
     private static void EmptyProcess() =>
         Check.Throws<ArgumentException>(() => ProcessSelector.Parse(string.Empty), "空进程串");
 
     private static void ControlCharacterProcess() =>
         Check.Throws<ArgumentException>(() => ProcessSelector.Parse("c:\\windows\\\tsvchost.exe"), "进程串含制表符");
+
+    private static void DelProcess() =>
+        Check.Throws<ArgumentException>(() => ProcessSelector.Parse("c:\\windows\\\u007Fsvchost.exe"), "进程串含 DEL");
+
+    private static void C1ControlProcess() =>
+        Check.Throws<ArgumentException>(() => ProcessSelector.Parse("c:\\windows\\\u0085svchost.exe"), "进程串含 C1");
 
     private static void NulProcess() =>
         Check.Throws<ArgumentException>(() => ProcessSelector.Parse("c:\\windows\\svchost.exe\0x"), "进程串含 NUL");
@@ -95,50 +149,44 @@ internal static class InvalidInputTests
 
     private static void BadAddress() =>
         Check.Throws<ArgumentException>(() => RemoteNetwork.Parse("10.1.2.999/24"), "地址非法");
-    private static void InvalidNormalizedPath()
-    {
-        PolicyTable table = new(
-            new[] { new PolicyRule { Process = ProcessSelector.Parse(@"c:\windows\system32\svchost.exe") } },
-            RuleAction.Permit);
 
+    private static void NulNormalizedPath()
+    {
         Check.Throws<PolicyCompileException>(
-            () => RuleBlobCompiler.Compile(table, NulNormalizer.Instance), "归一化结果含 NUL");
+            () => RuleBlobCompiler.Compile(Table(), new FixedNormalizer(new ProcessPathResolution("\\device\\a\0b", false))),
+            "归一化结果含 NUL");
+    }
+
+    private static void NullNormalizedPath()
+    {
         Check.Throws<PolicyCompileException>(
-            () => RuleBlobCompiler.Compile(table, EmptyNormalizer.Instance), "归一化结果为空");
+            () => RuleBlobCompiler.Compile(Table(), new FixedNormalizer(null)),
+            "归一化返回 null");
+    }
+
+    private static void LoneSurrogateNormalizedPath()
+    {
         Check.Throws<PolicyCompileException>(
-            () => RuleBlobCompiler.Compile(table, NullNormalizer.Instance), "归一化返回 null");
-        Check.Throws<PolicyCompileException>(
-            () => RuleBlobCompiler.Compile(table, LoneSurrogateNormalizer.Instance), "归一化结果含孤立代理项");
+            () => RuleBlobCompiler.Compile(Table(), new FixedNormalizer(new ProcessPathResolution("\\device\\c:\\\ud800\\svchost.exe", false))),
+            "归一化结果含孤立代理项");
+    }
+
+    private static void NullNormalizer()
+    {
         Check.Throws<ArgumentNullException>(
-            () => RuleBlobCompiler.Compile(table, null!), "归一化器为 null");
+            () => RuleBlobCompiler.Compile(Table(), null!), "归一化器为 null");
     }
 
-    private sealed class NulNormalizer : IProcessPathNormalizer
+    private static PolicyTable Table() => new(
+        new[] { new PolicyRule { Processes = new[] { ProcessSelector.Parse(@"c:\windows\system32\svchost.exe") } } },
+        RuleAction.Permit);
+
+    private sealed class FixedNormalizer : IProcessPathNormalizer
     {
-        internal static NulNormalizer Instance { get; } = new();
+        private readonly ProcessPathResolution? _resolution;
 
-        public string? Normalize(string path) => "a\0b";
+        internal FixedNormalizer(ProcessPathResolution? resolution) => _resolution = resolution;
+
+        public ProcessPathResolution? Normalize(string path) => _resolution;
     }
-
-    private sealed class EmptyNormalizer : IProcessPathNormalizer
-    {
-        internal static EmptyNormalizer Instance { get; } = new();
-
-        public string? Normalize(string path) => string.Empty;
-    }
-
-    private sealed class NullNormalizer : IProcessPathNormalizer
-    {
-        internal static NullNormalizer Instance { get; } = new();
-
-        public string? Normalize(string path) => null;
-    }
-
-    private sealed class LoneSurrogateNormalizer : IProcessPathNormalizer
-    {
-        internal static LoneSurrogateNormalizer Instance { get; } = new();
-
-        public string? Normalize(string path) => "c:\\\ud800\\svchost.exe";
-    }
-
 }

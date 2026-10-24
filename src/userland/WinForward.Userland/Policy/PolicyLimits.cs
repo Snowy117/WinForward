@@ -14,4 +14,20 @@ public static class PolicyLimits
     /// 规则从此静默不命中且不报错 —— 所以必须在这里拒绝，而不是让它进 blob。
     /// </remarks>
     public const int MaxProcessPathBytes = 511;
+
+    /// <summary>
+    /// 一次换表能安装的 <c>ALE_AUTH_CONNECT</c> block filter 总数。
+    /// </summary>
+    /// <remarks>
+    /// 对应 <c>src/driver/probe_ioctl.h</c> 的 <c>max_block_filters = 128</c>。驱动按同一公式
+    /// 展开数组后逐条安装，超限时删除已建 filter 并整块拒绝；编译期先算一遍，避免把
+    /// 注定失败的规则表下发到内核。
+    /// </remarks>
+    public const int MaxBlockFilters = 128;
+
+    /// <summary>
+    /// 规则 blob 的总字节上限。
+    /// </summary>
+    /// <remarks>对应 <c>src/driver/probe_ioctl.h</c> 的 <c>rule_blob_max_size = 64 * 1024</c>。</remarks>
+    public const int RuleBlobMaxSize = 64 * 1024;
 }

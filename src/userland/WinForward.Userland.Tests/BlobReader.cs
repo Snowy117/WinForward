@@ -15,11 +15,32 @@ internal static class BlobReader
         return MemoryMarshal.Read<RuleBlobRule>(blob.AsSpan(offset, RuleBlobLayout.RuleSize));
     }
 
+    internal static RuleBlobProcessSelector Selector(byte[] blob, int index)
+    {
+        RuleBlobHeader header = Header(blob);
+        int offset = (int)header.SelectorPoolOffset + (index * RuleBlobLayout.ProcessSelectorSize);
+        return MemoryMarshal.Read<RuleBlobProcessSelector>(
+            blob.AsSpan(offset, RuleBlobLayout.ProcessSelectorSize));
+    }
+
     internal static RuleBlobNetworkPrefix NetworkPrefix(byte[] blob, int index)
     {
         RuleBlobHeader header = Header(blob);
         int offset = (int)header.NetworkPoolOffset + (index * RuleBlobLayout.NetworkPrefixSize);
         return MemoryMarshal.Read<RuleBlobNetworkPrefix>(blob.AsSpan(offset, RuleBlobLayout.NetworkPrefixSize));
+    }
+
+    internal static RuleBlobPortRange PortRange(byte[] blob, int index)
+    {
+        RuleBlobHeader header = Header(blob);
+        int offset = (int)header.PortPoolOffset + (index * RuleBlobLayout.PortRangeSize);
+        return MemoryMarshal.Read<RuleBlobPortRange>(blob.AsSpan(offset, RuleBlobLayout.PortRangeSize));
+    }
+
+    internal static byte[] ProcessPool(byte[] blob)
+    {
+        RuleBlobHeader header = Header(blob);
+        return blob.AsSpan((int)header.ProcessPoolOffset, (int)header.ProcessPoolSize).ToArray();
     }
 
     internal static string ProcessString(byte[] blob, uint offset)

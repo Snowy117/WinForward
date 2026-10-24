@@ -36,35 +36,69 @@ void push_retired(rule_table* table) noexcept
 namespace
 {
 
-[[nodiscard]] std::uint8_t effective_family(const blob_view& view, const rule& selected) noexcept
+[[nodiscard]] constexpr std::uint8_t family_bit(std::uint8_t family) noexcept
 {
-    if (selected.family != rule_family_any)
+    if (family == rule_family_ipv4)
     {
-        return selected.family;
+        return rule_family_mask_ipv4;
     }
-    if (selected.network_index == rule_pool_index_any)
+    if (family == rule_family_ipv6)
     {
-        return rule_family_any;
+        return rule_family_mask_ipv6;
     }
-    return view.network_pool[selected.network_index / sizeof(network_prefix)].family;
+    return 0;
+}
+
+// 有效族集 = 声明的族掩码（0 视为两者）与规则实际引用网段的族集合之交；没有网段时就是声明的集合。
+// 与 C# RuleOrderValidator.EffectiveFamilies 逐条对应。
+[[nodiscard]] std::uint8_t effective_families(const blob_view& view, const rule& selected) noexcept
+{
+    const std::uint8_t families =
+        selected.family_mask == rule_family_mask_any ? rule_family_mask_all : selected.family_mask;
+    if (selected.network_count == 0)
+    {
+        return families;
+    }
+
+    std::uint8_t network_families = 0;
+    for (std::uint32_t index = 0; index < selected.network_count; ++index)
+    {
+        network_families |= family_bit(view.network_pool[selected.network_first + index].family);
+    }
+    return static_cast<std::uint8_t>(families & network_families);
 }
 
 [[nodiscard]] bool protocols_overlap(const rule& first, const rule& second) noexcept
 {
-    return first.protocol == rule_protocol_any || second.protocol == rule_protocol_any ||
-           first.protocol == second.protocol;
+    return first.protocol_mask == rule_protocol_mask_any || second.protocol_mask == rule_protocol_mask_any ||
+           (first.protocol_mask & second.protocol_mask) != 0;
 }
 
 [[nodiscard]] bool families_overlap(const blob_view& view, const rule& first, const rule& second) noexcept
 {
-    const std::uint8_t first_family = effective_family(view, first);
-    const std::uint8_t second_family = effective_family(view, second);
-    return first_family == rule_family_any || second_family == rule_family_any || first_family == second_family;
+    return (effective_families(view, first) & effective_families(view, second)) != 0;
 }
 
-[[nodiscard]] bool ports_overlap(const rule& first, const rule& second) noexcept
+[[nodiscard]] bool ports_overlap(const blob_view& view, const rule& first, const rule& second) noexcept
 {
-    return first.remote_port_start <= second.remote_port_end && second.remote_port_start <= first.remote_port_end;
+    if (first.port_count == 0 || second.port_count == 0)
+    {
+        return true;
+    }
+
+    for (std::uint32_t left = 0; left < first.port_count; ++left)
+    {
+        const port_range& first_range = view.port_pool[first.port_first + left];
+        for (std::uint32_t right = 0; right < second.port_count; ++right)
+        {
+            const port_range& second_range = view.port_pool[second.port_first + right];
+            if (first_range.start <= second_range.end && second_range.start <= first_range.end)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 [[nodiscard]] bool prefixes_intersect(const network_prefix& first, const network_prefix& second) noexcept
@@ -90,80 +124,41 @@ namespace
 
 [[nodiscard]] bool networks_overlap(const blob_view& view, const rule& first, const rule& second) noexcept
 {
-    if (first.network_index == rule_pool_index_any || second.network_index == rule_pool_index_any)
+    if (first.network_count == 0 || second.network_count == 0)
     {
         return true;
     }
-    return prefixes_intersect(view.network_pool[first.network_index / sizeof(network_prefix)],
-                              view.network_pool[second.network_index / sizeof(network_prefix)]);
+
+    for (std::uint32_t left = 0; left < first.network_count; ++left)
+    {
+        const network_prefix& first_prefix = view.network_pool[first.network_first + left];
+        for (std::uint32_t right = 0; right < second.network_count; ++right)
+        {
+            const network_prefix& second_prefix = view.network_pool[second.network_first + right];
+            if (first_prefix.family == second_prefix.family && prefixes_intersect(first_prefix, second_prefix))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
-// 进程选择器必须是合法 UTF-8，且 UTF-8 字节数 ≤511（不含 NUL）——和 collect_process_path
-// 的边界一致。非法/超长的 selector 在 permit/redirect 规则里会永久静默不命中，必须整块拒绝。
-[[nodiscard]] bool valid_utf8_selector(const char* text) noexcept
+[[nodiscard]] constexpr std::uint8_t fold_ascii(std::uint8_t byte) noexcept
 {
-    std::uint32_t length = 0;
-    while (text[length] != '\0')
-    {
-        ++length;
-    }
-    if (length == 0 || length > 511)
+    return byte >= 'A' && byte <= 'Z' ? static_cast<std::uint8_t>(byte + ('a' - 'A')) : byte;
+}
+
+[[nodiscard]] bool
+ascii_equal(const char* first, std::uint32_t first_length, const char* second, std::uint32_t second_length) noexcept
+{
+    if (first_length != second_length)
     {
         return false;
     }
-
-    std::uint32_t index = 0;
-    while (index < length)
+    for (std::uint32_t index = 0; index < first_length; ++index)
     {
-        const auto lead = static_cast<std::uint8_t>(text[index]);
-        if (lead < 0x80)
-        {
-            ++index;
-            continue;
-        }
-
-        std::uint32_t extra = 0;
-        std::uint32_t code_point = 0;
-        if ((lead & 0xE0U) == 0xC0U)
-        {
-            extra = 1;
-            code_point = lead & 0x1FU;
-            if (code_point < 2)
-            {
-                return false; // overlong
-            }
-        }
-        else if ((lead & 0xF0U) == 0xE0U)
-        {
-            extra = 2;
-            code_point = lead & 0x0FU;
-        }
-        else if ((lead & 0xF8U) == 0xF0U)
-        {
-            extra = 3;
-            code_point = lead & 0x07U;
-        }
-        else
-        {
-            return false;
-        }
-
-        ++index;
-        for (std::uint32_t continuation_index = 0; continuation_index < extra; ++continuation_index)
-        {
-            if (index >= length)
-            {
-                return false;
-            }
-            const auto continuation = static_cast<std::uint8_t>(text[index++]);
-            if ((continuation & 0xC0U) != 0x80U)
-            {
-                return false;
-            }
-            code_point = (code_point << 6) | (continuation & 0x3FU);
-        }
-        if ((extra == 2 && code_point < 0x800) || (extra == 3 && (code_point < 0x10000 || code_point > 0x10FFFF)) ||
-            (code_point >= 0xD800 && code_point <= 0xDFFF))
+        if (fold_ascii(static_cast<std::uint8_t>(first[index])) != fold_ascii(static_cast<std::uint8_t>(second[index])))
         {
             return false;
         }
@@ -171,32 +166,183 @@ namespace
     return true;
 }
 
-[[nodiscard]] std::uint8_t fold_ascii(std::uint8_t byte) noexcept
+// try_open_blob 已保证 selector 指向池内 NUL 结尾串；这里只计算串长。
+[[nodiscard]] const char*
+selector_text(const blob_view& view, const process_selector& selector, std::uint32_t& length) noexcept
 {
-    return byte >= 'A' && byte <= 'Z' ? static_cast<std::uint8_t>(byte + ('a' - 'A')) : byte;
+    const char* text = view.process_pool + selector.string_offset;
+    const std::uint32_t limit = view.process_pool_size - selector.string_offset;
+    length = 0;
+    while (length < limit && text[length] != '\0')
+    {
+        ++length;
+    }
+    return text;
+}
+
+[[nodiscard]] std::uint32_t last_segment_offset(const char* path, std::uint32_t length) noexcept
+{
+    std::uint32_t begin = 0;
+    for (std::uint32_t index = 0; index < length; ++index)
+    {
+        if (path[index] == '\\')
+        {
+            begin = index + 1;
+        }
+    }
+    return begin;
+}
+
+// 文件名 vs 路径：目录可能包含任意文件名；文件只可能命中最后一段。与 C# FileNameMatchesPath 一致。
+[[nodiscard]] bool file_name_matches_path(const char* name,
+                                          std::uint32_t name_length,
+                                          std::uint8_t is_directory,
+                                          const char* path,
+                                          std::uint32_t path_length) noexcept
+{
+    if (is_directory != 0)
+    {
+        return true;
+    }
+    const std::uint32_t begin = last_segment_offset(path, path_length);
+    return ascii_equal(name, name_length, path + begin, path_length - begin);
+}
+
+// matcher 的目录语义：连接路径以「选择器 + \」开头。顺序校验因此对路径选择器保守。
+[[nodiscard]] bool is_path_prefix(const char* candidate,
+                                  std::uint32_t candidate_length,
+                                  const char* path,
+                                  std::uint32_t path_length) noexcept
+{
+    if (candidate_length >= path_length)
+    {
+        return false;
+    }
+    for (std::uint32_t index = 0; index < candidate_length; ++index)
+    {
+        if (fold_ascii(static_cast<std::uint8_t>(candidate[index])) !=
+            fold_ascii(static_cast<std::uint8_t>(path[index])))
+        {
+            return false;
+        }
+    }
+    return path[candidate_length] == '\\';
+}
+
+[[nodiscard]] bool
+selectors_overlap(const blob_view& view, const process_selector& first, const process_selector& second) noexcept
+{
+    std::uint32_t first_length = 0;
+    std::uint32_t second_length = 0;
+    const char* first_text = selector_text(view, first, first_length);
+    const char* second_text = selector_text(view, second, second_length);
+
+    if (first.kind == process_selector_kind::file_name && second.kind == process_selector_kind::file_name)
+    {
+        return ascii_equal(first_text, first_length, second_text, second_length);
+    }
+    if (first.kind == process_selector_kind::file_name)
+    {
+        return file_name_matches_path(first_text, first_length, second.is_directory, second_text, second_length);
+    }
+    if (second.kind == process_selector_kind::file_name)
+    {
+        return file_name_matches_path(second_text, second_length, first.is_directory, first_text, first_length);
+    }
+    return ascii_equal(first_text, first_length, second_text, second_length) ||
+           is_path_prefix(first_text, first_length, second_text, second_length) ||
+           is_path_prefix(second_text, second_length, first_text, first_length);
 }
 
 [[nodiscard]] bool processes_overlap(const blob_view& view, const rule& first, const rule& second) noexcept
 {
-    if (first.process_index == rule_pool_index_any || second.process_index == rule_pool_index_any)
+    if (first.process_count == 0 || second.process_count == 0)
     {
         return true;
     }
-    // 与 matcher 一致：只折叠 ASCII 大小写，避免仅大小写不同的两条规则被判成“不重叠”。
-    const char* first_text = view.process_pool + first.process_index;
-    const char* second_text = view.process_pool + second.process_index;
-    for (std::uint32_t index = 0;; ++index)
+
+    for (std::uint32_t left = 0; left < first.process_count; ++left)
     {
-        if (fold_ascii(static_cast<std::uint8_t>(first_text[index])) !=
-            fold_ascii(static_cast<std::uint8_t>(second_text[index])))
+        const process_selector& first_selector = view.selector_pool[first.process_first + left];
+        for (std::uint32_t right = 0; right < second.process_count; ++right)
         {
-            return false;
-        }
-        if (first_text[index] == '\0')
-        {
-            return true;
+            if (selectors_overlap(view, first_selector, view.selector_pool[second.process_first + right]))
+            {
+                return true;
+            }
         }
     }
+    return false;
+}
+
+// block 规则只允许精确文件路径：WFP 的 ALE_APP_ID 条件只能做完整 EQUAL，文件名/目录前缀
+// 写在 block 规则里会变成「classify 记 block、auth 层拦不住」的假 block。命中时返回 false 并
+// 带回规则序号，由调用方 DbgPrint 后整块拒绝。
+[[nodiscard]] bool block_expression_valid(const blob_view& view, std::uint32_t& rule_index) noexcept
+{
+    for (rule_index = 0; rule_index < view.rule_count; ++rule_index)
+    {
+        const rule& selected = view.rules[rule_index];
+        if (selected.action != rule_action::block)
+        {
+            continue;
+        }
+        for (std::uint32_t index = 0; index < selected.process_count; ++index)
+        {
+            const process_selector& selector = view.selector_pool[selected.process_first + index];
+            if (selector.kind != process_selector_kind::path || selector.is_directory != 0)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] constexpr std::uint32_t block_protocol_count(std::uint8_t protocol_mask) noexcept
+{
+    return protocol_mask == rule_protocol_mask_any || protocol_mask == rule_protocol_mask_all ? 2U : 1U;
+}
+
+[[nodiscard]] bool block_filter_budget_valid(const blob_view& view) noexcept
+{
+    std::uint64_t total = view.fallback_action == rule_action::block ? 4U : 0U;
+    for (std::uint32_t rule_index = 0; rule_index < view.rule_count; ++rule_index)
+    {
+        const rule& selected = view.rules[rule_index];
+        if (selected.action != rule_action::block)
+        {
+            continue;
+        }
+
+        std::uint64_t networks = 0;
+        for (std::uint32_t layer = 0; layer < 2; ++layer)
+        {
+            const std::uint8_t mask_bit = layer == 0 ? rule_family_mask_ipv4 : rule_family_mask_ipv6;
+            const std::uint8_t family = layer == 0 ? rule_family_ipv4 : rule_family_ipv6;
+            if (selected.family_mask != rule_family_mask_any && (selected.family_mask & mask_bit) == 0)
+            {
+                continue;
+            }
+            if (selected.network_count == 0)
+            {
+                ++networks;
+                continue;
+            }
+            for (std::uint32_t index = 0; index < selected.network_count; ++index)
+            {
+                if (view.network_pool[selected.network_first + index].family == family)
+                {
+                    ++networks;
+                }
+            }
+        }
+
+        const std::uint64_t processes = selected.process_count == 0 ? 1U : selected.process_count;
+        const std::uint64_t ports = selected.port_count == 0 ? 1U : selected.port_count;
+        total += networks * block_protocol_count(selected.protocol_mask) * processes * ports;
+    }
+    return total <= max_block_filters;
 }
 
 // 更早的规则若可能与 block 规则命中同一条连接，它的动作会永远先于 block 生效；而 block 是编译
@@ -220,7 +366,7 @@ namespace
                 continue;
             }
             if (protocols_overlap(previous, blocking) && families_overlap(view, previous, blocking) &&
-                ports_overlap(previous, blocking) && networks_overlap(view, previous, blocking) &&
+                ports_overlap(view, previous, blocking) && networks_overlap(view, previous, blocking) &&
                 processes_overlap(view, previous, blocking))
             {
                 return false;
@@ -258,18 +404,21 @@ rule_table* allocate_rule_table(const std::uint8_t* data, std::uint32_t size) no
         return nullptr;
     }
 
-    for (std::uint32_t index = 0; index < table->view.rule_count; ++index)
+    // try_open_blob 已保证 selector 的字节形式合法；block 规则还额外要求 WFP 能精确表达进程条件。
+    std::uint32_t unsupported_block_rule = 0;
+    if (!block_expression_valid(table->view, unsupported_block_rule))
     {
-        const rule& selected = table->view.rules[index];
-        // <mutation id="selector-utf8-guard">
-        if (selected.process_index != rule_pool_index_any &&
-            !valid_utf8_selector(table->view.process_pool + selected.process_index))
-        // </mutation>
-        {
-            DbgPrint("wfprobe: rule %u has an invalid or over-long process selector\n", index);
-            ExFreePoolWithTag(table, rule_pool_tag);
-            return nullptr;
-        }
+        DbgPrint("wfprobe: block rule %u has a process selector an auth filter cannot express\n",
+                 unsupported_block_rule);
+        ExFreePoolWithTag(table, rule_pool_tag);
+        return nullptr;
+    }
+
+    if (!block_filter_budget_valid(table->view))
+    {
+        DbgPrint("wfprobe: block rules need more than %u AUTH_CONNECT filters; blob rejected\n", max_block_filters);
+        ExFreePoolWithTag(table, rule_pool_tag);
+        return nullptr;
     }
 
     // fallback=block 会为 6/17 各生成一条只带协议条件的 block filter（不再是无条件 filter）；

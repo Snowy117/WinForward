@@ -11,4 +11,8 @@
     <ProjectReference Include="../WinForward.Userland/WinForward.Userland.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinForward.Userland.Tests" />
+  </ItemGroup>
+
 </Project>

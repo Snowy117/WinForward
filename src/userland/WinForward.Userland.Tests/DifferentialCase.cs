@@ -18,16 +18,21 @@ internal static class Differential
     internal static PolicyRule Rule(
         RuleAction action,
         string? process = null,
+        string[]? processList = null,
         string? network = null,
+        string[]? networkList = null,
         PortRange? ports = null,
+        PortRange[]? portList = null,
         RuleProtocol protocol = RuleProtocol.Any,
-        RuleAddressFamily family = RuleAddressFamily.Any) => new()
+        RuleProtocol[]? protocolList = null,
+        RuleAddressFamily family = RuleAddressFamily.Any,
+        RuleAddressFamily[]? familyList = null) => new()
         {
-            Process = process is null ? null : ProcessSelector.Parse(process),
-            RemoteNetwork = network is null ? null : RemoteNetwork.Parse(network),
-            RemotePorts = ports ?? PortRange.Any,
-            Protocol = protocol,
-            Family = family,
+            Processes = Select(processList, process),
+            RemoteNetworks = Select(networkList, network, RemoteNetwork.Parse),
+            RemotePorts = portList ?? (ports is null ? null : new[] { ports.Value }),
+            Protocols = protocolList ?? (protocol == RuleProtocol.Any ? null : new[] { protocol }),
+            Families = familyList ?? (family == RuleAddressFamily.Any ? null : new[] { family }),
             Action = action,
         };
 
@@ -66,4 +71,14 @@ internal static class Differential
 
         return expectations;
     }
+
+    private static ProcessSelector[]? Select(string[]? list, string? single) =>
+        list is not null
+            ? list.Select(ProcessSelector.Parse).ToArray()
+            : single is null ? null : new[] { ProcessSelector.Parse(single) };
+
+    private static T[]? Select<T>(string[]? list, string? single, Func<string, T> parse) =>
+        list is not null
+            ? list.Select(parse).ToArray()
+            : single is null ? null : new[] { parse(single) };
 }

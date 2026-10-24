@@ -4,12 +4,12 @@ namespace WinForward.Userland.Tests;
 
 internal static class DifferentialTests
 {
-    internal const int ExpectedCaseCount = 33;
+    internal const int ExpectedCaseCount = 42;
     internal const int ExpectedConnectionCount = 15;
 
     internal static void Register()
     {
-        TestRunner.Add("differential/用例表精确覆盖 33 组 × 15 条连接", VerifyCoverage);
+        TestRunner.Add("differential/用例表精确覆盖 42 组 × 15 条连接", VerifyCoverage);
         TestRunner.Add("differential/夹具落盘且与模型自洽", WriteFixtures);
     }
 
@@ -111,7 +111,8 @@ internal static class DifferentialTests
             RuleBlobHeader header = BlobReader.Header(blob);
             Check.Equal(blob.Length, (int)header.TotalSize, $"{file} 的 total_size");
             Check.Equal(0x31425257U, header.Magic, $"{file} 的 magic");
-            Check.Equal((ushort)40, header.HeaderSize, $"{file} 的 header_size");
+            Check.Equal((ushort)2, header.Version, $"{file} 的 version");
+            Check.Equal((ushort)56, header.HeaderSize, $"{file} 的 header_size");
         }
     }
 

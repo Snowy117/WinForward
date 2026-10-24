@@ -12,9 +12,13 @@ namespace WinForward.Userland.Configuration;
 /// <c>.Forwarded.cs</c> 分部）。<c>Relay/</c> 只认 <see cref="PolicyTable"/>，<c>Control/</c> 还接收
 /// forwarded 表与上游表，不感知序列化形式。
 ///
-/// host 规则只做「结构」校验（字段名、类型、字符串语法），语义校验（端口区间颠倒、规则顺序冲突、
-/// 进程路径超长等）留在 <see cref="RuleBlobCompiler"/>，错误消息统一带规则序号；forwarded 规则
+/// host 规则在配置层做「结构 + 取值」校验（字段名、类型、数组形状、端口语法/CIDR 语法），
+/// 跨字段语义（族与网段一致性、规则顺序冲突、block 表达边界、进程路径解析与长度）留在
+/// <see cref="RuleBlobCompiler"/>，错误消息统一带规则序号；forwarded 规则
 /// 在配置层提前校验 target / adapter / CIDR / 端口，<see cref="ForwardedBlobCompiler"/> 再做最终复核。
+/// 数组字段的约定：同一字段内是 OR、字段之间是 AND；<c>protocol</c> / <c>family</c> 出现
+/// <c>any</c> 时视为不限制（与具体值混写时 <c>any</c> 优先），<c>remotePorts</c> 的 <c>*</c>
+/// 只能单独出现。
 ///
 /// 最小 schema（旧字段保持不变，新增 <c>socks5Servers</c> 与 <c>forwarded</c>）：
 /// <code>
@@ -28,11 +32,11 @@ namespace WinForward.Userland.Configuration;
 ///     {
 ///       "name": "可选的诊断名",
 ///       "action": "permit" | "block" | "redirect",
-///       "protocol": "any" | "tcp" | "udp",
-///       "family": "any" | "ipv4" | "ipv6",
-///       "remotePorts": "*" | "443" | "8000-8100",
-///       "remoteNetwork": "10.0.0.0/8",
-///       "process": "C:\\Tools\\app.exe"
+///       "protocol": "any" | "tcp" | "udp" | ["tcp", "udp"],       // 单值或数组
+///       "family": "any" | "ipv4" | "ipv6" | ["ipv4", "ipv6"],      // 单值或数组
+///       "remotePorts": "*" | "443" | "8000-8100" | ["80", "443"],  // 单值或数组
+///       "remoteNetwork": "10.0.0.0/8" | ["10.0.0.0/8", "fc00::/7"],// 单值或数组
+///       "process": "C:\\Tools\\app.exe" | ["browser.exe", "C:\\Tools\\curl.exe"]
 ///     }
 ///   ],
 ///   "forwarded": {                                      // 可选；不写就是没有 forwarded 规则
@@ -210,21 +214,16 @@ public static partial class PolicyConfigurationDocument
         RejectUnknownProperties(element, path, "name", "action", "protocol", "family", "remotePorts", "remoteNetwork", "process");
         string? name = ReadOptionalString(element, path, "name");
         RuleAction action = ParseAction(element, path + ".action", required: true);
-        RuleProtocol protocol = ParseProtocol(element, path + ".protocol");
-        RuleAddressFamily family = ParseFamily(element, path + ".family");
-        PortRange ports = ParsePorts(element, path + ".remotePorts");
-        RemoteNetwork? network = ParseNetwork(element, path + ".remoteNetwork");
-        ProcessSelector? process = ParseProcess(element, path + ".process");
 
         return new PolicyRule
         {
             Name = name,
             Action = action,
-            Protocol = protocol,
-            Family = family,
-            RemotePorts = ports,
-            RemoteNetwork = network,
-            Process = process,
+            Protocols = ParseProtocolList(element, path + ".protocol"),
+            Families = ParseFamilyList(element, path + ".family"),
+            RemotePorts = ParsePortList(element, path + ".remotePorts"),
+            RemoteNetworks = ParseNetworkList(element, path + ".remoteNetwork"),
+            Processes = ParseProcessList(element, path + ".process"),
         };
     }
 
@@ -316,24 +315,6 @@ public static partial class PolicyConfigurationDocument
         catch (ArgumentException exception)
         {
             throw new ConfigurationException($"{path} 不是合法 CIDR（address/prefix）：「{text}」", exception);
-        }
-    }
-
-    private static ProcessSelector? ParseProcess(JsonElement parent, string path)
-    {
-        string? text = ReadString(parent, path, required: false);
-        if (text is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return ProcessSelector.Parse(text);
-        }
-        catch (ArgumentException exception)
-        {
-            throw new ConfigurationException($"{path} 不是可写进规则池的路径：「{text}」（{exception.Message}）", exception);
         }
     }
 

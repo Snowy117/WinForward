@@ -4,7 +4,8 @@
 # ABI 单一来源（读 C++ 头文本的那组测试）：
 #   - 结构尺寸、字段偏移、枚举取值、IOCTL 功能号、产品常量、夹具版本与夹具枚举；
 # 编译期语义检查：
-#   - 规则顺序冲突的进程谓词、配置层未知字段拒绝。
+#   - 规则顺序冲突的进程谓词、block 表达边界、空数组 / 端口 0 / filter 预算 / blob 上限、
+#     配置层未知字段拒绝。
 #
 # 全部变异只改临时副本或先备份再恢复；脚本退出前一定还原源码。基线（未变异）必须先绿。
 set -euo pipefail
@@ -96,6 +97,11 @@ sed -i 's/redirect_context_magic = 0x31434657U;/redirect_context_magic = 0x31434
 expect_mutation_red "ABI/改 redirect_context 魔数" run_abi_with_root "$tmp"
 reset_header
 
+sed -i 's/inline constexpr std::uint32_t max_block_filters = 128;/inline constexpr std::uint32_t max_block_filters = 129;/' \
+    "$tmp/src/driver/probe_ioctl.h"
+expect_mutation_red "ABI/改 C++ 头的 max_block_filters" run_abi_with_root "$tmp"
+reset_header
+
 sed -i 's/public const uint AbiVersion = 7;/public const uint AbiVersion = 8;/' "$tmp/tools/wfprobe/Protocol.cs"
 expect_mutation_red "ABI/改夹具的 ABI 版本" run_abi_with_root "$tmp"
 reset_header
@@ -116,9 +122,34 @@ cp "$product_ioctl.bak" "$product_ioctl"
 # ---------- 3. 冲突检查镜像 ----------
 backup src/userland/WinForward.Userland/Policy/RuleOrderValidator.cs
 validator="src/userland/WinForward.Userland/Policy/RuleOrderValidator.cs"
-sed -i 's/ProcessesOverlap(earlier, blocking, processPool)/true/' "$validator"
+sed -i 's/ProcessesOverlap(earlier, blocking, processPool, selectors)/true/' "$validator"
 expect_mutation_red "冲突检查/拆掉进程谓词" dotnet run --project "$tests_project" -c Release -- test
 cp "$validator.bak" "$validator"
+
+# ---------- 3.5 编译期语义检查 ----------
+backup src/userland/WinForward.Userland/Policy/RuleBlobCompiler.cs
+compiler="src/userland/WinForward.Userland/Policy/RuleBlobCompiler.cs"
+sed -i 's/if (validatePolicy && action == RuleAction.Block && !compiled.IsExactFile)/if (false)/' "$compiler"
+expect_mutation_red "编译/放行 block 的文件名与目录选择器" dotnet run --project "$tests_project" -c Release -- test
+cp "$compiler.bak" "$compiler"
+
+sed -i 's/if (total > PolicyLimits.MaxBlockFilters)/if (false)/' "$compiler"
+expect_mutation_red "编译/取消 block filter 预算" dotnet run --project "$tests_project" -c Release -- test
+cp "$compiler.bak" "$compiler"
+
+sed -i 's/if (totalSize > PolicyLimits.RuleBlobMaxSize)/if (false)/' "$compiler"
+expect_mutation_red "编译/取消 64 KiB blob 上限" dotnet run --project "$tests_project" -c Release -- test
+cp "$compiler.bak" "$compiler"
+
+backup src/userland/WinForward.Userland/Configuration/PolicyConfigurationDocument.HostSelectors.cs
+host_selectors="src/userland/WinForward.Userland/Configuration/PolicyConfigurationDocument.HostSelectors.cs"
+sed -i 's/if (values.Count == 0)/if (false)/' "$host_selectors"
+expect_mutation_red "配置/接受空选择器数组" dotnet run --project "$tests_project" -c Release -- test
+cp "$host_selectors.bak" "$host_selectors"
+
+sed -i 's/if (port == 0)/if (false)/' "$host_selectors"
+expect_mutation_red "配置/接受端口 0" dotnet run --project "$tests_project" -c Release -- test
+cp "$host_selectors.bak" "$host_selectors"
 
 # ---------- 4. 配置层 ----------
 backup src/userland/WinForward.Userland/Configuration/PolicyConfigurationDocument.cs

@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using WinForward.Userland.Device;
@@ -44,6 +46,7 @@ internal static class VmChecks
                 CheckForwardedLegacySizes(device);
 
                 CheckProcessPathBoundary(device);
+                CheckProcessPathResolution(device);
                 CheckConfigRoundTrip(device);
                 CheckRuleOrderDifferential(device);
             }
@@ -155,6 +158,158 @@ internal static class VmChecks
         (uint chineseLength, string chineseText) = device.MeasureProcessPath(Encoding.Unicode.GetBytes(Chinese));
         Assert("中文路径按 UTF-8 返回", chineseLength == (uint)Encoding.UTF8.GetByteCount(Chinese) && chineseText == Chinese,
                $"长度 {chineseLength} 文本 {chineseText}");
+    }
+
+    private static void CheckProcessPathResolution(WfpDeviceClient device)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Fail("路径归一化真实实现在 Windows 上可用", "当前平台不是 Windows");
+            return;
+        }
+
+        WindowsProcessPathNormalizer normalizer = WindowsProcessPathNormalizer.ForWindows();
+        string executable = Environment.ProcessPath ?? throw new InvalidOperationException("拿不到当前进程路径");
+        string directory = Path.GetDirectoryName(executable) ?? throw new InvalidOperationException("拿不到当前进程目录");
+
+        ProcessPathResolution? file = normalizer.Normalize(executable);
+        ProcessPathResolution? folder = normalizer.Normalize(directory);
+        Assert("当前进程路径解析成设备路径", file is not null, executable);
+        Assert("当前进程目录解析成设备路径", folder is not null, directory);
+        if (file is null || folder is null)
+        {
+            return;
+        }
+
+        int lastSeparator = file.DevicePath.LastIndexOf('\\');
+        Assert("进程设备路径以 \\device\\ 开头",
+               file.DevicePath.StartsWith(@"\device\", StringComparison.OrdinalIgnoreCase), file.DevicePath);
+        Assert("进程设备路径 IsDirectory=false", !file.IsDirectory, $"IsDirectory={file.IsDirectory}");
+        Assert("进程设备路径最后一段是 exe 文件名",
+               file.DevicePath[(lastSeparator + 1)..]
+                   .Equals(Path.GetFileName(executable), StringComparison.OrdinalIgnoreCase),
+               file.DevicePath);
+        Assert("目录设备路径 IsDirectory=true", folder.IsDirectory, $"IsDirectory={folder.IsDirectory}");
+        Assert("目录设备路径以 \\device\\ 开头",
+               folder.DevicePath.StartsWith(@"\device\", StringComparison.OrdinalIgnoreCase), folder.DevicePath);
+        Assert("进程设备路径位于目录之下",
+               file.DevicePath.StartsWith(folder.DevicePath + "\\", StringComparison.OrdinalIgnoreCase),
+               $"{file.DevicePath} via {folder.DevicePath}");
+
+        ApplyBlob(device, Benign());
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var stop = new CancellationTokenSource();
+        Task echoLoop = EchoLoopAsync(listener, stop.Token);
+        try
+        {
+            CheckSelectorHit(device, normalizer, directory, "目录选择器", port);
+            CheckSelectorHit(device, normalizer, executable, "精确路径选择器", port);
+        }
+        finally
+        {
+            stop.Cancel();
+            listener.Stop();
+            try
+            {
+                echoLoop.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+    }
+
+    private static void CheckSelectorHit(WfpDeviceClient device,
+                                         WindowsProcessPathNormalizer normalizer,
+                                         string selector,
+                                         string label,
+                                         int port)
+    {
+        var rule = new PolicyRule
+        {
+            Action = RuleAction.Permit,
+            Processes = new[] { ProcessSelector.Parse(selector) },
+            RemotePorts = new[] { PortRange.Single((ushort)port) },
+        };
+        byte[] blob = RuleBlobCompiler.Compile(new PolicyTable(new[] { rule }, RuleAction.Permit), normalizer);
+
+        device.SetConfig(ProbeConfig.EnabledFor((uint)Environment.ProcessId, 1, Array.Empty<uint>()));
+        try
+        {
+            device.SetRuleBlob(blob);
+            ProbeStats before = device.GetStats();
+            bool echoed = TryEcho(port, "path", 5000, out string detail);
+            ProbeStats after = device.GetStats();
+            Assert($"{label}命中原进程连接", echoed, detail);
+            Assert($"{label}使 matched_permit +1", after.MatchedPermit == before.MatchedPermit + 1,
+                   $"before={before.MatchedPermit} after={after.MatchedPermit}");
+            Assert($"{label}不落到 fallback", after.FallbackPermit == before.FallbackPermit,
+                   $"before={before.FallbackPermit} after={after.FallbackPermit}");
+        }
+        finally
+        {
+            device.SetConfig(ProbeConfig.Disabled());
+        }
+    }
+
+    private static async Task EchoLoopAsync(TcpListener listener, CancellationToken stop)
+    {
+        while (!stop.IsCancellationRequested)
+        {
+            try
+            {
+                using TcpClient client = await listener.AcceptTcpClientAsync(stop);
+                using NetworkStream stream = client.GetStream();
+                byte[] buffer = new byte[64];
+                int read = await stream.ReadAsync(buffer, stop);
+                if (read > 0)
+                {
+                    await stream.WriteAsync(buffer.AsMemory(0, read), stop);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
+            catch (SocketException)
+            {
+                if (stop.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    private static bool TryEcho(int port, string payload, int timeoutMs, out string detail)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            client.Connect(IPAddress.Loopback, port);
+            client.ReceiveTimeout = timeoutMs;
+            using NetworkStream stream = client.GetStream();
+            byte[] data = Encoding.UTF8.GetBytes(payload);
+            stream.Write(data);
+            byte[] buffer = new byte[data.Length];
+            int read = stream.Read(buffer, 0, buffer.Length);
+            detail = $"echo={read}B";
+            return read == data.Length;
+        }
+        catch (Exception exception) when (exception is SocketException or IOException)
+        {
+            detail = $"{exception.GetType().Name}: {exception.Message}";
+            return false;
+        }
     }
 
     private static void CheckConfigRoundTrip(WfpDeviceClient device)
@@ -353,28 +508,56 @@ internal static class VmChecks
             false, 0, -1, "fallbackAction"),
         new("兜底 block 与全部 block 规则",
             new PolicyTable(new[] { Rule(RuleAction.Block, ports: Single(80)) }, RuleAction.Block), true),
+        new("目录前缀 tools 不遮蔽 tools2", Table(
+                Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.ToolsDos)),
+                Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.Tools2ExeDos))), true),
+        new("目录前缀遮蔽后代路径", Table(
+                Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.ToolsDos)),
+                Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.ToolsExeDos))), false, 0, 1),
+        new("多端口数组任一区间相交", Table(
+                Rule(RuleAction.Permit, portArray: PortArray(80, 443)),
+                Rule(RuleAction.Block, portArray: PortArray(443, 8080))), false, 0, 1),
+        new("多端口数组全部不相交", Table(
+                Rule(RuleAction.Permit, portArray: PortArray(80, 443)),
+                Rule(RuleAction.Block, portArray: PortArray(8080, 8443))), true),
+        new("混合族有效族集相交", Table(
+                Rule(RuleAction.Permit,
+                     familyArray: new[] { RuleAddressFamily.Ipv4, RuleAddressFamily.Ipv6 },
+                     networkArray: new[] { Network("10.0.0.0/8"), Network("2001:db8::/32") }),
+                Rule(RuleAction.Block,
+                     familyArray: new[] { RuleAddressFamily.Ipv6 },
+                     networkArray: new[] { Network("2001:db8:1::/48") })), false, 0, 1),
+        new("混合族网段收窄后不相交", Table(
+                Rule(RuleAction.Permit, networkArray: new[] { Network("10.0.0.0/8") }),
+                Rule(RuleAction.Block, familyArray: new[] { RuleAddressFamily.Ipv6 })), true),
 
     };
 
     private static PolicyTable Table(params PolicyRule[] rules) => new(rules, RuleAction.Permit);
 
     private static PolicyRule Rule(RuleAction action,
-                                   RuleAddressFamily family = RuleAddressFamily.Any,
+                                   RuleAddressFamily? family = null,
                                    PortRange? ports = null,
                                    RemoteNetwork? network = null,
-                                   ProcessSelector? process = null) =>
+                                   ProcessSelector? process = null,
+                                   RuleAddressFamily[]? familyArray = null,
+                                   PortRange[]? portArray = null,
+                                   RemoteNetwork[]? networkArray = null,
+                                   ProcessSelector[]? processArray = null) =>
         new()
         {
             Action = action,
-            Family = family,
-            RemotePorts = ports ?? PortRange.Any,
-            RemoteNetwork = network,
-            Process = process,
+            Families = familyArray ?? (family is null ? null : new[] { family.Value }),
+            RemotePorts = portArray ?? (ports is null ? null : new[] { ports.Value }),
+            RemoteNetworks = networkArray ?? (network is null ? null : new[] { network }),
+            Processes = processArray ?? (process is null ? null : new[] { process }),
         };
 
     private static PortRange Single(ushort port) => PortRange.Single(port);
 
     private static PortRange Ports(ushort begin, ushort end) => new(begin, end);
+
+    private static PortRange[] PortArray(params ushort[] ports) => ports.Select(PortRange.Single).ToArray();
 
     private static RemoteNetwork Network(string cidr) => RemoteNetwork.Parse(cidr);
 }

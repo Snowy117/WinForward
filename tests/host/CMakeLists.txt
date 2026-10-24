@@ -6,10 +6,13 @@ add_executable(wf_common_tests
     forwarded_blob_test.cpp
     forwarded_fragment_table_test.cpp
     forwarded_matcher_test.cpp
+    matcher_array_test.cpp
     matcher_test.cpp
+    matcher_test_support.h
     redirect_context_test.cpp
     rule_blob_builder.h
-    rule_blob_test.cpp)
+    rule_blob_test.cpp
+    rule_blob_validation_test.cpp)
 target_link_libraries(wf_common_tests PRIVATE wf_common GTest::gtest GTest::gtest_main)
 
 gtest_discover_tests(wf_common_tests)

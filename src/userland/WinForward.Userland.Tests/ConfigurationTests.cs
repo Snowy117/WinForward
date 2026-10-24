@@ -19,7 +19,7 @@ internal static class ConfigurationTests
         TestRunner.Add("config/非法 CIDR 报错", BadNetwork);
         TestRunner.Add("config/JSON 语法错误报错", BadJson);
         TestRunner.Add("config/根节点必须是对象", RootNotObject);
-        TestRunner.Add("config/端口区间颠倒交给编译器并带序号", ReversedPorts);
+        TestRunner.Add("config/端口区间颠倒报 JSON 路径", ReversedPorts);
         TestRunner.Add("config/从文件读取配置", LoadFromFile);
         TestRunner.Add("config/进程路径含控制字符报错", ControlCharacterPath);
     }
@@ -48,12 +48,12 @@ internal static class ConfigurationTests
         PolicyRule rule = table.Rules[0];
         Check.Equal("web", rule.Name, "name");
         Check.Equal(RuleAction.Redirect, rule.Action, "action");
-        Check.Equal(RuleProtocol.Tcp, rule.Protocol, "protocol");
-        Check.Equal(RuleAddressFamily.Ipv4, rule.Family, "family");
-        Check.Equal((ushort)8000, rule.RemotePorts.Begin, "端口起点");
-        Check.Equal((ushort)8100, rule.RemotePorts.End, "端口终点");
-        Check.Equal("10.1.0.0/16", rule.RemoteNetwork?.ToString() ?? "null", "网段主机位清零");
-        Check.Equal(@"C:\Tools\app.exe", rule.Process?.Path ?? "null", "进程路径");
+        Check.Equal((RuleProtocol.Tcp, 1), (rule.Protocols![0], rule.Protocols.Count), "protocol");
+        Check.Equal((RuleAddressFamily.Ipv4, 1), (rule.Families![0], rule.Families.Count), "family");
+        Check.Equal((ushort)8000, rule.RemotePorts![0].Begin, "端口起点");
+        Check.Equal((ushort)8100, rule.RemotePorts[0].End, "端口终点");
+        Check.Equal("10.1.0.0/16", rule.RemoteNetworks![0].ToString(), "网段主机位清零");
+        Check.Equal(@"C:\Tools\app.exe", rule.Processes![0].Value, "进程路径");
     }
 
     private static void UdpProtocol()
@@ -62,8 +62,9 @@ internal static class ConfigurationTests
             { "fallbackAction": "permit", "rules": [ { "action": "block", "protocol": "udp" } ] }
             """);
 
-        Check.Equal(RuleProtocol.Udp, table.Rules[0].Protocol, "protocol 解析为 udp");
-        Check.Equal((byte)17, (byte)table.Rules[0].Protocol, "UDP 枚举值 17");
+        IReadOnlyList<RuleProtocol> protocols = table.Rules[0].Protocols!;
+        Check.Equal(RuleProtocol.Udp, protocols[0], "protocol 解析为 udp");
+        Check.Equal((byte)17, (byte)protocols[0], "UDP 枚举值 17");
     }
 
     private static void Defaults()
@@ -73,11 +74,11 @@ internal static class ConfigurationTests
             """);
 
         PolicyRule rule = table.Rules[0];
-        Check.Equal(RuleProtocol.Any, rule.Protocol, "协议默认任意");
-        Check.Equal(RuleAddressFamily.Any, rule.Family, "地址族默认任意");
-        Check.True(rule.RemotePorts.IsAny, "端口默认任意");
-        Check.True(rule.RemoteNetwork is null, "网段默认没有");
-        Check.True(rule.Process is null, "进程默认没有");
+        Check.True(rule.Protocols is null, "协议默认任意");
+        Check.True(rule.Families is null, "地址族默认任意");
+        Check.True(rule.RemotePorts is null, "端口默认任意");
+        Check.True(rule.RemoteNetworks is null, "网段默认没有");
+        Check.True(rule.Processes is null, "进程默认没有");
         Check.True(rule.Name is null, "名字默认没有");
         Check.Equal(RuleAction.Block, rule.Action, "动作");
     }
@@ -95,11 +96,13 @@ internal static class ConfigurationTests
             }
             """);
 
-        Check.True(table.Rules[0].RemotePorts.IsAny, "* 是任意端口");
-        Check.Equal((ushort)443, table.Rules[1].RemotePorts.Begin, "单端口起点");
-        Check.Equal((ushort)443, table.Rules[1].RemotePorts.End, "单端口终点");
-        Check.Equal((ushort)1000, table.Rules[2].RemotePorts.Begin, "区间起点");
-        Check.Equal((ushort)2000, table.Rules[2].RemotePorts.End, "区间终点");
+        Check.True(table.Rules[0].RemotePorts is null, "* 是任意端口（数组为 null）");
+        IReadOnlyList<PortRange> single = table.Rules[1].RemotePorts!;
+        IReadOnlyList<PortRange> range = table.Rules[2].RemotePorts!;
+        Check.Equal((ushort)443, single[0].Begin, "单端口起点");
+        Check.Equal((ushort)443, single[0].End, "单端口终点");
+        Check.Equal((ushort)1000, range[0].Begin, "区间起点");
+        Check.Equal((ushort)2000, range[0].End, "区间终点");
     }
 
     private static void UnknownField() =>
@@ -150,22 +153,18 @@ internal static class ConfigurationTests
         Check.ThrowsContaining<ConfigurationException>(
             () => PolicyConfigurationDocument.Parse("[]"), "根节点", "根节点必须是对象");
 
-    private static void ReversedPorts()
-    {
-        PolicyTable table = PolicyConfigurationDocument.Parse("""
-            {
-              "fallbackAction": "permit",
-              "rules": [
-                { "action": "permit" },
-                { "action": "redirect", "remotePorts": "9000-8000" }
-              ]
-            }
-            """);
-
-        Check.Equal((ushort)9000, table.Rules[1].RemotePorts.Begin, "结构层原样保留起点");
-        Check.ThrowsContaining<PolicyCompileException>(
-            () => TestAppId.Compile(table), "#1", "端口区间颠倒必须带规则序号");
-    }
+    private static void ReversedPorts() =>
+        Check.ThrowsContaining<ConfigurationException>(
+            () => PolicyConfigurationDocument.Parse("""
+                {
+                  "fallbackAction": "permit",
+                  "rules": [
+                    { "action": "permit" },
+                    { "action": "redirect", "remotePorts": "9000-8000" }
+                  ]
+                }
+                """),
+            "rules[1].remotePorts", "端口区间颠倒必须带精确 JSON 路径");
 
     private static void LoadFromFile()
     {
@@ -184,10 +183,16 @@ internal static class ConfigurationTests
         }
     }
 
-    private static void ControlCharacterPath() =>
-        Check.ThrowsContaining<ConfigurationException>(
-            () => PolicyConfigurationDocument.Parse("""
-                { "fallbackAction": "permit", "rules": [ { "action": "block", "process": "C:\\bad\u0001path.exe" } ] }
-                """),
-            "rules[0].process", "控制字符无法写进进程池");
+    private static void ControlCharacterPath()
+    {
+        foreach (string code in new[] { "0001", "007F", "0085" })
+        {
+            string json = $$"""
+                { "fallbackAction": "permit", "rules": [ { "action": "block", "process": "C:\\bad\u{{code}}path.exe" } ] }
+                """;
+            Check.ThrowsContaining<ConfigurationException>(
+                () => PolicyConfigurationDocument.Parse(json),
+                "rules[0].process", $"控制字符 U+{code} 无法写进进程池");
+        }
+    }
 }

@@ -152,7 +152,8 @@ try {
         ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reversedPath -Encoding utf8
     $reversedOut = (& $controllerExe check --config $reversedPath 2>&1 | Out-String)
     Assert "端口区间颠倒被拒" ($LASTEXITCODE -ne 0) "exit=$LASTEXITCODE"
-    Assert "端口颠倒报错带规则序号" ($reversedOut -match "#1") $reversedOut.Trim()
+    Assert "端口颠倒报错指向 rules[1].remotePorts（配置层 JSON 路径）" `
+        ($reversedOut -match "rules\[1\]\.remotePorts" -and $reversedOut -match "端口区间颠倒") $reversedOut.Trim()
 
     # ---- 第一次运行 ----
     Remove-Item -LiteralPath $stopFile -ErrorAction SilentlyContinue

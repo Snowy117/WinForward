@@ -28,7 +28,7 @@ internal static class RunCommand
             IAdapterIdResolver? adapterResolver =
                 OperatingSystem.IsWindows() ? new WindowsAdapterIdResolver() : null;
             configuration = PolicyConfigurationDocument.LoadConfiguration(configPath, adapterResolver);
-            blob = RuleBlobCompiler.Compile(configuration.Policy, FwpmAppIdNormalizer.ForWindows());
+            blob = RuleBlobCompiler.Compile(configuration.Policy, WindowsProcessPathNormalizer.ForWindows());
             forwardedBlob = configuration.Forwarded is null
                                 ? null
                                 : ForwardedBlobCompiler.Compile(configuration.Forwarded);

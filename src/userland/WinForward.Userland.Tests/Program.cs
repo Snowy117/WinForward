@@ -10,6 +10,7 @@ if (args[0] == "abi")
 {
     DeviceAbiTests.Register();
     WinForward.Userland.Tests.Abi.AbiConsistencyTests.Register();
+    WinForward.Userland.Tests.Abi.BlobAbiConsistencyTests.Register();
     return TestRunner.RunAll();
 }
 
@@ -38,15 +39,21 @@ static void RegisterAll()
     ForwardedConfigurationTests.Register();
     LayoutTests.Register();
     CompilerTests.Register();
+    CompilerSelectorTests.Register();
+    CompilerLimitTests.Register();
     InvalidInputTests.Register();
     ProcessPathTests.Register();
     DifferentialTests.Register();
     ConfigurationTests.Register();
+    ConfigurationArrayTests.Register();
     RuleOrderTests.Register();
+    RuleOrderProcessTests.Register();
+    ControllerCheckTests.Register();
     DeviceAbiTests.Register();
     Socks5Tests.Register();
     Socks5UdpCodecTests.Register();
     Socks5ConfigurationTests.Register();
     RelayPumpTests.Register();
     WinForward.Userland.Tests.Abi.AbiConsistencyTests.Register();
+    WinForward.Userland.Tests.Abi.BlobAbiConsistencyTests.Register();
 }
