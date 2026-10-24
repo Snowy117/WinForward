@@ -74,7 +74,7 @@ non-zero: they change values, never the key set, so the default tree is the clea
 and the boundary trees (`--window-overflow`, `--undecodable`, `--truncated-*`) are only ever
 asserted against the C# analysis, never diffed between the two implementations.
 
-Two ledgers are generated, as the shipped `start-targets.sh` starts two target instances: the
+Two ledgers are generated, as the campaign's target launcher starts two target instances: the
 proxied rows' traffic goes to `ledger-main.jsonl` (port 40010, dns 53) and the dual phase's
 direct lane to `ledger-direct.jsonl` (port 40011, dns 40054), both beside the raw directory
 rather than inside it. Every run carries its own label, exactly as the orchestrator labels

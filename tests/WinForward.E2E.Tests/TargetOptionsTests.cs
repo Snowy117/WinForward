@@ -11,9 +11,9 @@ namespace WinForward.E2E.Tests;
 /// </summary>
 public sealed class TargetOptionsTests
 {
-    // The campaign's own command line (scripts/start-targets.sh) shares one number between the tcp
-    // and udp ports by design, so the dns collision check must not be a "no two ports may be equal"
-    // rule; this is the regression guard for that.
+    // The campaign's target launcher shares one number between the tcp and udp ports by design, so
+    // the dns collision check must not be a "no two ports may be equal" rule; this is the regression
+    // guard for that.
     [Fact]
     public void TheSameTcpAndUdpPortIsAccepted()
     {

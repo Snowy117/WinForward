@@ -1,3 +1,9 @@
+scripts/campaign.env
+scripts/deploy-campaign.sh
+scripts/start-targets.sh
+scripts/publish-campaign.sh
+scripts/verify-vm.ps1
+
 # Build output and the working directories a run leaves behind.
 bin/
 obj/

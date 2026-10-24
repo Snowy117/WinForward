@@ -151,7 +151,7 @@ negative controls instead. The legacy files stay byte-identical whether or not t
 
 The release path resolves `caliber.path` from the process's working directory and opens `--thresholds`
 from that same directory as spelled; `coverage.json`, when present, is read beside the thresholds file
-and embedded in the verdict. The campaign invocation is
+and embedded in the verdict. The campaign invocation is the machine-local
 `publish-campaign.sh <results-directory> <thresholds.json>` from the repository root: it downloads the
 **full seven-pass tree** and runs
 `--release --thresholds <absolute> --min-passes 6 --discard-pass 1`, so `release-inputs.json` records

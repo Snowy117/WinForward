@@ -72,12 +72,6 @@ plan may accompany it; UDP and DNS arms are refused rather than sent direct.
 | `scripts/configs/` | the six committed product configurations — six of the seven rows, since the Proxifier row's profile is machine-local; the repo-file → row → deployed-path mapping is in "The configs and the plan sets" |
 | `scripts/orchestrator.ps1` | the campaign driver, run on the machine under test |
 | `scripts/clock-probe.py` | the Linux host's half of the preflight clock gate: one TCP connection per probe, one UTC receive instant in reply; see "Preflight: clock and environment" |
-| `scripts/campaign.env` | the campaign driver configuration manifest: variable names only, no machine values; every driver sources it and refuses a missing name |
-| `scripts/wf.sh` | drives the VM's WinRM REPL through tmux: `connect`, `run`, `up`/`down`, `file`, `idle`, `cap`, `key`, `raw` |
-| `scripts/deploy-campaign.sh` | stages the clients, product configurations, release plans and orchestrator on the VM, and writes `<results-root>\deploy.json`; `--dry-run` and `--allow-dirty` |
-| `scripts/start-targets.sh` | starts the two long-lived target instances and their separate ledgers |
-| `scripts/publish-campaign.sh` | downloads a campaign, restores its target ledgers and runs the release analysis on the full seven-pass tree |
-| `scripts/verify-vm.ps1` | read-only VM prerequisite check: layout, builds, sing-box, services, drivers, profile, pwsh 7, release plans and host reachability |
 | `scripts/publish.sh` | build and publish the artifacts |
 | `scripts/selftest.sh` | run the harness against itself on one host |
 | `scripts/jsonl_paths.py` | the one canonical flattener (`join('/', member names)`) the comparator and the fixture-drift guard share |
@@ -87,39 +81,50 @@ plan may accompany it; UDP and DNS arms are refused rather than sent direct.
 | `../../tools/effective-lines.py` | report the `.cs` files above the repository's 400-effective-line limit — a **solution-wide** rule, not this harness's own |
 | `../WinForward.E2E.Analysis/verification/` | the analysis's instruments, beside the frozen tree, the golden, the two contract tables and the row profiles: `oracle-diff.py` (diff this file's frozen reference against the C# output: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance`), `check-fairness.py` (the `not carried` rows, the port-53 carriage labels, the CPU scope and the unattributable `undecodable` token against the analysis's own `tables.md`), `check-boundary-trees.py` (the truncated-TCP, truncated-DNS and zero-denominator trees; the `--undecodable` tree is `check-fairness.py`'s and the `--window-overflow` tree is asserted by no live checker) and `check-fixture-drift.py` |
 
-**One CI job runs two of these scripts, and no test invokes any of them.** `.github/workflows/` holds
-exactly `analyzer-gate.yml` and `release-build.yml` (the product CLI's publishes). `analyzer-gate.yml`'s
+The local campaign drivers — the scripts that deploy to the VM, start the targets, collect a campaign
+and check the VM — are **machine-local glue** and absent from a fresh checkout, listed in `.gitignore`
+instead of the table above: `scripts/campaign.env` (the variable names every driver sources),
+`scripts/deploy-campaign.sh`, `scripts/start-targets.sh`, `scripts/publish-campaign.sh` and
+`scripts/verify-vm.ps1`, plus `AGENTS.local.md` at the harness root. They describe one particular pair
+of machines; the ones that reach the VM do so through the system-level `windows-vm` tool, whose
+connection configuration is outside this repository.
+
+**One CI job runs two of the analysis verification scripts, and no test invokes any of these hand-run
+gates.** `.github/workflows/` holds exactly `analyzer-gate.yml` and `release-build.yml` (the product
+CLI's publishes). `analyzer-gate.yml`'s
 `oracle-regression` job runs `verification/oracle-diff.py` and `verification/check-fairness.py` on
 `ubuntu-latest`; every other gate below is a hand-run command whose output a human has to read, and
 neither workflow mentions the harness, `tools/` or any other Python script.
 
-Machine values are the only thing a fresh checkout cannot supply. They live in `AGENTS.local.md`
-(gitignored): the host and VM addresses, the names of the credential environment variables, the
-ports, roots, seeds and the calibration thresholds path. `scripts/campaign.env` lists those variable
-names and nothing else; each driver sources it, and an unset or empty required name stops the driver
-with exit code 2 and the variable's name. The Proxifier row's `bench.ppx` is a GUI export that is
-machine-local too (see "The configs and the plan sets"). Everything else — the plans, the product
-configurations, the orchestrator and the drivers — is tracked.
+A fresh checkout supplies the harness, the plans, the product configurations and the orchestrator,
+but not the local campaign drivers or the values of one particular machine pair. The values live in
+`AGENTS.local.md` (gitignored) — the host address, the `windows-vm` session name, ports, roots, seeds
+and the calibration thresholds path — and the VM connection settings live in the system-level
+`windows-vm` tool. `scripts/campaign.env` lists the variable names and nothing else; each driver
+sources it, and an unset or empty required name stops the driver with exit code 2 and the variable's
+name. The Proxifier row's `bench.ppx` is a GUI export that is machine-local too (see "The configs and
+the plan sets"). Everything else is tracked.
 
-`deploy-campaign.sh` records what it deployed in `<results-root>\deploy.json`: `commit`, `branch`,
-`dirty`, `dirtySummary` (counts and a bounded sample of `git status --porcelain`), `campaignEnvHash`
-(the campaign variable names and non-secret values; credential values are redacted), `planSet`, the
-five plan files with their source path, SHA-256 and deployed path, and the release `caliber.json`
-hash. A dirty worktree is refused unless `--allow-dirty` is passed; the record then keeps
-`dirty: true`. `--dry-run` writes the local record and prints the staging plan without touching the
-VM. The release plan set is `scripts/plans-release`, staged under `<WF_VM_ROOT>\e2e`;
+The machine-local `deploy-campaign.sh` records what it deployed in `<results-root>\deploy.json`:
+`commit`, `branch`, `dirty`, `dirtySummary` (counts and a bounded sample of `git status --porcelain`),
+`campaignEnvHash` (the campaign variable names and non-secret values; credential values are
+redacted), `planSet`, the five plan files with their source path, SHA-256 and deployed path, and the
+release `caliber.json` hash. A dirty worktree is refused unless `--allow-dirty` is passed; the record
+then keeps `dirty: true`. `--dry-run` writes the local record and prints the staging plan without
+touching the VM. The release plan set is `scripts/plans-release`, staged under `<WF_VM_ROOT>\e2e`;
 `--plan-set canonical` stages `scripts/plans` under `\e2e-canonical`, so the canonical set never
 carries the release label.
 
-`verify-vm.ps1` is the read-only preflight: the `C:\wfbench` layout, the two clients and WinForward
-builds with `ndisapi.dll`, the sing-box `1.14.2-singfix` build, `ProxiFyreService`, `Proxifier`,
-ProxyBridge, `ndisrd`/`ProxifierDrv`/`WinDivert`, `bench.ppx`, pwsh 7, the release plans and
-`caliber.json`, the firewall state as found, and TCP reachability of the targets and the clock probe.
-It prints every missing item by name and exits 1; it makes no change. Run it after
-`deploy-campaign.sh` and after starting the targets:
+The machine-local `verify-vm.ps1` is the read-only preflight: the `C:\wfbench` layout, the two
+clients and WinForward builds with `ndisapi.dll`, the sing-box `1.14.2-singfix` build,
+`ProxiFyreService`, `Proxifier`, ProxyBridge, `ndisrd`/`ProxifierDrv`/`WinDivert`, `bench.ppx`, pwsh 7,
+the release plans and `caliber.json`, the firewall state as found, and TCP reachability of the targets
+and the clock probe. It prints every missing item by name and exits 1; it makes no change. Run it
+after `deploy-campaign.sh` and after starting the targets:
 
 ```bash
-scripts/wf.sh file scripts/verify-vm.ps1 600 -TargetAddress "$WF_HOST_IP"
+windows-vm "$WF_SESSION" up scripts/verify-vm.ps1 'C:\wfbench\verify-vm.ps1'
+windows-vm "$WF_SESSION" run "& 'C:\wfbench\verify-vm.ps1' -TargetAddress '$WF_HOST_IP'"
 ```
 
 Pass `-SkipReachability` to check only the VM; the target ports are expected to be closed before
@@ -241,7 +246,7 @@ WinForward.E2E target [--bind <ip>] [--tcp-port <n>] [--udp-port <n>] [--dns-por
 
 It runs until Ctrl+C or SIGTERM and writes its summary records at shutdown. The campaign runs two
 target instances — one per lane — against two different ports so that a flow to the direct lane is
-attributable; the tracked `scripts/start-targets.sh` starts them at the bind address and ports from `campaign.env`. That launcher labels each instance `target:<port>`,
+attributable; the machine-local `scripts/start-targets.sh` starts them at the bind address and ports from `campaign.env`. That launcher labels each instance `target:<port>`,
 because an instance outlives every run it serves and so cannot be labelled with a run's name: the
 analysis reads a run against the ledger of the target the run's own `run.json` declares, and only
 then bounds it by the arm's UTC window. Sharing one pool of records instead makes the two lanes of a
@@ -340,7 +345,7 @@ holds `environment.json`, `clock.jsonl`, `failures.jsonl` (with its derived `fai
 a `control-post/` block, and one directory per product row. The orchestrator writes each row's
 `proxy-truth.json`, copies the product's effective configuration into the row and writes the
 `environment.json` block; deploying the artifacts, the plans and the product configurations to that
-machine is the tracked `scripts/deploy-campaign.sh`; it also uploads the `deploy.json` record into the campaign root.
+machine is the machine-local `scripts/deploy-campaign.sh`; it also uploads the `deploy.json` record into the campaign root.
 
 #### The `BASE-singbox` calibration control
 
@@ -888,7 +893,7 @@ The flags, the inputs, the aggregation policy and every table are described in
 repository, sharing the harness's contract types, and it writes `plots/SKIPPED.md` instead of the
 charts the previous implementation drew.
 
-The release campaign uses the tracked `scripts/publish-campaign.sh`: it downloads the full
+The release campaign uses the machine-local `scripts/publish-campaign.sh`: it downloads the full
 seven-pass tree, changes to the repository root and runs the release invocation with
 `--release --thresholds <absolute> --min-passes 6 --discard-pass 1`, and prints the `deploy.json`
 provenance it downloaded with the tree. The thresholds file and the optional `coverage.json` beside

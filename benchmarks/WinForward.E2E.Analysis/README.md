@@ -93,11 +93,11 @@ fails the release tests. It is an example, not a calibration record: the calibra
 
 #### The campaign invocation
 
-The release campaign runs this invocation from the repository root; `publish-campaign.sh` is tracked
-and reads the machine paths from `campaign.env`. It downloads the full campaign and runs the release
-analyzer. The downloaded tree carries the `deploy.json` the deploy wrote, and the script prints its
-commit, dirty state, plan set and plan hashes before the analysis. `--legacy` runs the old analyzer
-for diagnostics only.
+The release campaign runs this invocation from the repository root; the machine-local (not tracked)
+`publish-campaign.sh` reads the machine paths from `campaign.env`. It downloads the full campaign and
+runs the release analyzer. The downloaded tree carries the `deploy.json` the deploy wrote, and the
+script prints its commit, dirty state, plan set and plan hashes before the analysis. `--legacy` runs
+the old analyzer for diagnostics only.
 
 ```bash
 bash benchmarks/WinForward.E2E/scripts/publish-campaign.sh \
@@ -350,8 +350,8 @@ Calibration and release are separate nights with separate evidence.
 n = 6 and write `coverage.json` beside it. Archive both files with the calibration tree; they are
 release inputs and are not regenerated from the release data.
 
-**Release night.** Deploy the release caliber with the tracked `scripts/deploy-campaign.sh` (set
-`WF_PLAN_SET=release`; a dirty worktree is refused unless `--allow-dirty`), and run
+**Release night.** Deploy the release caliber with the machine-local `scripts/deploy-campaign.sh` (set
+`WF_PLAN_SET=release`; a dirty worktree is refused unless `--allow-dirty`), and run the machine-local
 `scripts/verify-vm.ps1` before the first pass. Then run seven passes — pass 1 is the discarded
 warm-up, passes 2-7 are measured. From the repository root, run the publisher (it downloads and
 analyses the **whole** campaign):
