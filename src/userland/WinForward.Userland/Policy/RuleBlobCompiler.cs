@@ -14,18 +14,7 @@ namespace WinForward.Userland.Policy;
 /// </remarks>
 public static class RuleBlobCompiler
 {
-    public static byte[] Compile(PolicyTable table, IProcessPathNormalizer processPathNormalizer) =>
-        Build(table, processPathNormalizer, validatePolicy: true);
-
-    /// <summary>
-    /// 测试专用入口：跳过顺序冲突、block 表达边界与 filter 预算检查，用来构造
-    /// 「驱动必须独立拒绝」的负向夹具。布局仍然保持合法。
-    /// 产品路径只用 <see cref="Compile"/>；这个方法由 InternalsVisibleTo 只暴露给测试工程。
-    /// </summary>
-    internal static byte[] CompileUnchecked(PolicyTable table, IProcessPathNormalizer processPathNormalizer) =>
-        Build(table, processPathNormalizer, validatePolicy: false);
-
-    private static byte[] Build(PolicyTable table, IProcessPathNormalizer processPathNormalizer, bool validatePolicy)
+    public static byte[] Compile(PolicyTable table, IProcessPathNormalizer processPathNormalizer)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(processPathNormalizer);
@@ -38,7 +27,7 @@ public static class RuleBlobCompiler
         {
             PolicyRule rule = table.Rules[index]
                 ?? throw Error(index, "规则为 null");
-            entries[index] = CompileRule(index, rule, processPathNormalizer, pools, validatePolicy);
+            entries[index] = CompileRule(index, rule, processPathNormalizer, pools);
         }
 
         byte[] processBytes = pools.ProcessPool.ToBytes();
@@ -46,21 +35,13 @@ public static class RuleBlobCompiler
         RuleBlobNetworkPrefix[] networks = pools.Networks.ToArray();
         RuleBlobPortRange[] ports = pools.Ports.ToArray();
 
-        if (validatePolicy)
-        {
-            ValidateBlockBudget(table.FallbackAction, entries, networks);
-            RuleOrderValidator.ValidateFallback(table.FallbackAction, entries);
-            RuleOrderValidator.Validate(entries, processBytes, selectors, networks, ports);
-        }
-
         return WriteBlob(table.FallbackAction, entries, processBytes, selectors, networks, ports);
     }
 
     private static RuleBlobRule CompileRule(int ruleIndex,
                                             PolicyRule rule,
                                             IProcessPathNormalizer processPathNormalizer,
-                                            BlobPools pools,
-                                            bool validatePolicy)
+                                            BlobPools pools)
     {
         ValidateAction(rule.Action, "动作", ruleIndex);
         byte protocolMask = BuildProtocolMask(ruleIndex, rule.Protocols);
@@ -68,7 +49,7 @@ public static class RuleBlobCompiler
         (uint first, uint count) networks = AddNetworks(ruleIndex, rule.RemoteNetworks, familyMask, pools);
         (uint first, uint count) ports = AddPorts(ruleIndex, rule.RemotePorts, pools);
         (uint first, uint count) processes = AddProcesses(
-            ruleIndex, rule.Processes, processPathNormalizer, pools, rule.Action, validatePolicy);
+            ruleIndex, rule.Processes, processPathNormalizer, pools);
 
         RuleBlobRule entry = default;
         entry.ProcessFirst = processes.count == 0 ? 0 : processes.first;
@@ -221,9 +202,7 @@ public static class RuleBlobCompiler
     private static (uint first, uint count) AddProcesses(int ruleIndex,
                                                           IReadOnlyList<ProcessSelector>? processes,
                                                           IProcessPathNormalizer processPathNormalizer,
-                                                          BlobPools pools,
-                                                          RuleAction action,
-                                                          bool validatePolicy)
+                                                          BlobPools pools)
     {
         if (processes is null)
         {
@@ -241,10 +220,6 @@ public static class RuleBlobCompiler
             }
 
             CompiledProcessSelector compiled = NormalizeSelector(ruleIndex, selector, processPathNormalizer);
-            if (validatePolicy && action == RuleAction.Block && !compiled.IsExactFile)
-            {
-                throw BlockSelectorError(ruleIndex, selector.Value, compiled.Kind);
-            }
 
             string key = $"{(byte)compiled.Kind}/{compiled.Text}";
             if (!seen.Add(key))
@@ -317,67 +292,6 @@ public static class RuleBlobCompiler
         }
 
         return new CompiledProcessSelector(text, kind, isDirectory);
-    }
-
-    private static void ValidateBlockBudget(RuleAction fallbackAction,
-                                             RuleBlobRule[] rules,
-                                             RuleBlobNetworkPrefix[] networks)
-    {
-        long total = fallbackAction == RuleAction.Block ? 4 : 0;
-        for (int index = 0; index < rules.Length; index++)
-        {
-            if ((RuleAction)rules[index].Action != RuleAction.Block)
-            {
-                continue;
-            }
-
-            total += BlockFilterCount(rules[index], networks);
-            if (total > PolicyLimits.MaxBlockFilters)
-            {
-                throw Error(index,
-                            $"block filter 预算超限：算上本条规则共需要 {total} 条 AUTH_CONNECT filter，" +
-                            $"上限是 {PolicyLimits.MaxBlockFilters}（数组会在驱动侧展开成多条 filter）");
-            }
-        }
-    }
-
-    private static long BlockFilterCount(RuleBlobRule rule, RuleBlobNetworkPrefix[] networks)
-    {
-        long protocols = rule.ProtocolMask is 0 or 3 ? 2 : 1;
-        long processes = Math.Max(1L, rule.ProcessCount);
-        long ports = Math.Max(1L, rule.PortCount);
-        long total = 0;
-        total += LayerFilterCount(rule, networks, RuleBlobLayout.FamilyIpv4Bit, (byte)RuleAddressFamily.Ipv4);
-        total += LayerFilterCount(rule, networks, RuleBlobLayout.FamilyIpv6Bit, (byte)RuleAddressFamily.Ipv6);
-        return total * protocols * processes * ports;
-    }
-
-    private static long LayerFilterCount(RuleBlobRule rule,
-                                         RuleBlobNetworkPrefix[] networks,
-                                         byte familyBit,
-                                         byte networkFamily)
-    {
-        byte families = rule.FamilyMask == 0 ? (byte)3 : rule.FamilyMask;
-        if ((families & familyBit) == 0)
-        {
-            return 0;
-        }
-
-        if (rule.NetworkCount == 0)
-        {
-            return 1;
-        }
-
-        long count = 0;
-        for (uint index = 0; index < rule.NetworkCount; index++)
-        {
-            if (networks[rule.NetworkFirst + index].Family == networkFamily)
-            {
-                count++;
-            }
-        }
-
-        return count;
     }
 
     private static byte NetworkBit(int ruleIndex, RemoteNetwork network) => network.Family switch
@@ -484,12 +398,6 @@ public static class RuleBlobCompiler
         }
     }
 
-    private static PolicyCompileException BlockSelectorError(int ruleIndex, string selector, byte kind) =>
-        Error(ruleIndex,
-              $"block 规则不支持{(kind == RuleBlobProcessSelector.KindFileName ? "文件名" : "目录前缀")}进程选择器" +
-              $"「{selector}」；WFP auth filter 只能精确匹配 ALE_APP_ID。" +
-              "请改用精确文件路径，或把该规则改成 permit/redirect。");
-
     private static PolicyCompileException Error(int? ruleIndex, string message) =>
         new(ruleIndex is null ? message : $"规则 #{ruleIndex}：{message}");
 
@@ -518,7 +426,5 @@ public static class RuleBlobCompiler
         internal byte Kind { get; }
 
         internal bool IsDirectory { get; }
-
-        internal bool IsExactFile => Kind == RuleBlobProcessSelector.KindPath && !IsDirectory;
     }
 }

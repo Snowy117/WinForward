@@ -10,12 +10,8 @@ namespace WinForward.Userland.Tests;
 
 /// <summary>
 /// 需要真实驱动的检查：ABI 握手、结构尺寸（用真实 IOCTL 的缓冲区长度判据）、
-/// 进程路径 511/512 边界，以及 C# 顺序冲突检查与驱动 <c>rule_order_valid</c> 的差分矩阵。
+/// 进程路径 511/512 边界，以及 C# 规则表与驱动的换表差分矩阵。
 /// </summary>
-/// <remarks>
-/// 每一条都以「同一个输入，产品与驱动必须给出同一个结论」为准。产品拒绝而驱动接受、
-/// 或反过来，都算失败；产品接受时驱动必须换表成功（generation +1），拒绝时 generation 不能变。
-/// </remarks>
 internal static class VmChecks
 {
     private static int _failures;
@@ -329,85 +325,59 @@ internal static class VmChecks
         ApplyBlob(device, Benign());
         ulong rejectedBefore = device.GetStats().RejectedBlobs;
 
-        foreach (DifferentialCase testCase in Cases())
+        device.SetConfig(ProbeConfig.EnabledFor(
+            (uint)Environment.ProcessId, 1, Array.Empty<uint>(), blockSinkPort: 2));
+        try
         {
-            string productVerdict;
-            bool productAccepted;
-            string message = string.Empty;
-            try
+            foreach (DifferentialCase testCase in Cases())
             {
-                _ = RuleBlobCompiler.Compile(testCase.Table, TestAppId.Normalizer);
-                productAccepted = true;
-                productVerdict = "accept";
-            }
-            catch (PolicyCompileException exception)
-            {
-                productAccepted = false;
-                productVerdict = "reject";
-                message = exception.Message;
-            }
+                byte[] blob;
+                try
+                {
+                    blob = RuleBlobCompiler.Compile(testCase.Table, TestAppId.Normalizer);
+                }
+                catch (PolicyCompileException exception)
+                {
+                    Assert($"rule-order {testCase.Name}：产品编译成功", false, exception.Message);
+                    continue;
+                }
 
-            byte[] blob = RuleBlobCompiler.CompileUnchecked(testCase.Table, TestAppId.Normalizer);
-            uint generationBefore = device.GetRuleInfo().Generation;
-            bool driverAccepted;
-            int error = 0;
-            try
-            {
-                device.SetRuleBlob(blob);
-                driverAccepted = true;
-            }
-            catch (Win32Exception exception)
-            {
-                driverAccepted = false;
-                error = exception.NativeErrorCode;
-            }
+                uint generationBefore = device.GetRuleInfo().Generation;
+                bool driverAccepted;
+                int error = 0;
+                try
+                {
+                    device.SetRuleBlob(blob);
+                    driverAccepted = true;
+                }
+                catch (Win32Exception exception)
+                {
+                    driverAccepted = false;
+                    error = exception.NativeErrorCode;
+                }
 
-            uint generationAfter = device.GetRuleInfo().Generation;
-            string driverVerdict = driverAccepted ? "accept" : "reject";
-
-            Assert($"rule-order {testCase.Name}：产品与驱动结论一致",
-                   productAccepted == driverAccepted && productAccepted == testCase.ExpectedAccepted,
-                   $"expected={(testCase.ExpectedAccepted ? "accept" : "reject")} product={productVerdict} " +
-                   $"driver={driverVerdict} win32={error}");
-
-            if (driverAccepted)
-            {
+                uint generationAfter = device.GetRuleInfo().Generation;
+                Assert($"rule-order {testCase.Name}：产品编译成功、驱动接受", driverAccepted,
+                       $"product=accept driver={(driverAccepted ? "accept" : "reject")} win32={error}");
                 Assert($"rule-order {testCase.Name}：换表 generation +1", generationAfter == generationBefore + 1,
                        $"{generationBefore} -> {generationAfter}");
-            }
-            else
-            {
-                Assert($"rule-order {testCase.Name}：拒绝时 generation 不变", generationAfter == generationBefore,
-                       $"{generationBefore} -> {generationAfter}");
-                Assert($"rule-order {testCase.Name}：驱动用 STATUS_INVALID_PARAMETER 拒绝", error == 87,
-                       $"Win32={error}");
-            }
 
-            if (!productAccepted)
-            {
-                bool messageOk = testCase.MessageFragment is { } fragment
-                                     ? message.Contains(fragment, StringComparison.Ordinal)
-                                     : message.Contains($"#{testCase.Earlier}", StringComparison.Ordinal) &&
-                                       message.Contains($"#{testCase.Later}", StringComparison.Ordinal);
-                Assert($"rule-order {testCase.Name}：报错可诊断", messageOk, message);
-
+                ApplyBlob(device, Benign());
             }
-
-            ApplyBlob(device, Benign());
+        }
+        finally
+        {
+            device.SetConfig(ProbeConfig.Disabled());
         }
 
         ulong rejectedAfter = device.GetStats().RejectedBlobs;
-        long rejectedDelta = (long)(rejectedAfter - rejectedBefore);
-        int expectedRejects = Cases().Count(testCase => !testCase.ExpectedAccepted);
-        Assert("rejected_blobs 精确增加", rejectedDelta == expectedRejects,
-               $"delta={rejectedDelta} expect={expectedRejects}（每条被产品拒绝的用例让驱动再拒绝一次）");
-
+        Assert("rejected_blobs 不增", rejectedAfter == rejectedBefore,
+               $"before={rejectedBefore} after={rejectedAfter}");
     }
 
     private static void ApplyBlob(WfpDeviceClient device, PolicyTable table)
     {
-        byte[] blob = RuleBlobCompiler.CompileUnchecked(table, TestAppId.Normalizer);
-        device.SetRuleBlob(blob);
+        device.SetRuleBlob(RuleBlobCompiler.Compile(table, TestAppId.Normalizer));
     }
 
     private static PolicyTable Benign() => new(Array.Empty<PolicyRule>(), RuleAction.Permit);
@@ -457,79 +427,74 @@ internal static class VmChecks
         Console.WriteLine($"[vm-check] FAIL {what}：{detail}");
     }
 
-    private sealed record DifferentialCase(string Name,
-                                          PolicyTable Table,
-                                          bool ExpectedAccepted,
-                                          int Earlier = -1,
-                                          int Later = -1,
-                                          string? MessageFragment = null);
+    private sealed record DifferentialCase(string Name, PolicyTable Table);
 
     private static IReadOnlyList<DifferentialCase> Cases() => new List<DifferentialCase>
     {
-        new("只有 block 规则", Table(Rule(RuleAction.Block, ports: Single(80))), true),
+        new("只有 block 规则", Table(Rule(RuleAction.Block, ports: Single(80)))),
         new("permit 全重叠后跟 block", Table(Rule(RuleAction.Permit, ports: Single(80)),
-                                           Rule(RuleAction.Block, ports: Single(80))), false, 0, 1),
+                                           Rule(RuleAction.Block, ports: Single(80)))),
         new("端口区间相交", Table(Rule(RuleAction.Permit, ports: Ports(80, 90)),
-                                 Rule(RuleAction.Block, ports: Ports(85, 95))), false, 0, 1),
+                                 Rule(RuleAction.Block, ports: Ports(85, 95)))),
         new("端口不相交", Table(Rule(RuleAction.Permit, ports: Single(80)),
-                               Rule(RuleAction.Block, ports: Single(81))), true),
+                               Rule(RuleAction.Block, ports: Single(81)))),
         new("地址族不相交", Table(Rule(RuleAction.Permit, family: RuleAddressFamily.Ipv4),
-                                 Rule(RuleAction.Block, family: RuleAddressFamily.Ipv6)), true),
+                                 Rule(RuleAction.Block, family: RuleAddressFamily.Ipv6))),
         new("地址族任一侧任意", Table(Rule(RuleAction.Permit),
-                                     Rule(RuleAction.Block, family: RuleAddressFamily.Ipv6)), false, 0, 1),
+                                     Rule(RuleAction.Block, family: RuleAddressFamily.Ipv6))),
         new("网段不相交", Table(Rule(RuleAction.Permit, network: Network("10.0.0.0/8")),
-                               Rule(RuleAction.Block, network: Network("192.168.0.0/16"))), true),
+                               Rule(RuleAction.Block, network: Network("192.168.0.0/16")))),
         new("网段嵌套", Table(Rule(RuleAction.Permit, network: Network("10.0.0.0/8")),
-                             Rule(RuleAction.Block, network: Network("10.1.0.0/16"))), false, 0, 1),
+                             Rule(RuleAction.Block, network: Network("10.1.0.0/16")))),
         new("网段任一侧任意", Table(Rule(RuleAction.Permit, network: Network("10.0.0.0/8")),
-                                   Rule(RuleAction.Block)), false, 0, 1),
+                                   Rule(RuleAction.Block))),
         new("进程选择器不同", Table(Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.AppDos)),
-                                   Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.OtherDos))), true),
+                                   Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.OtherDos)))),
         new("进程选择器不同（含非 ASCII 路径）", Table(Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.AppDos)),
-                                   Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.UnicodeDos))), true),
+                                   Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.UnicodeDos)))),
         new("进程选择器同一条路径", Table(Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.AppDos)),
                                           Rule(RuleAction.Block,
-                                               process: ProcessSelector.Parse(@"C:\PROGRAM FILES\APP\APP.EXE"))),
-            false, 0, 1),
+                                               process: ProcessSelector.Parse(@"C:\PROGRAM FILES\APP\APP.EXE")))),
         new("进程任一侧任意", Table(Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.AppDos)),
-                                   Rule(RuleAction.Block)), false, 0, 1),
+                                   Rule(RuleAction.Block))),
         new("两条 block 规则", Table(Rule(RuleAction.Block, ports: Single(80)),
-                                    Rule(RuleAction.Block, ports: Single(80))), true),
+                                    Rule(RuleAction.Block, ports: Single(80)))),
         new("block 在前 permit 在后", Table(Rule(RuleAction.Block, ports: Single(80)),
-                                           Rule(RuleAction.Permit, ports: Single(80))), true),
-        new("redirect 遮蔽 block", Table(Rule(RuleAction.Redirect, ports: Single(80)),
-                                        Rule(RuleAction.Block, ports: Single(80))), false, 0, 1),
+                                           Rule(RuleAction.Permit, ports: Single(80)))),
+        new("redirect 后跟 block", Table(Rule(RuleAction.Redirect, ports: Single(80)),
+                                        Rule(RuleAction.Block, ports: Single(80)))),
         new("IPv6 网段推出地址族", Table(Rule(RuleAction.Permit, network: Network("2001:db8::/32")),
-                                        Rule(RuleAction.Block, network: Network("2001:db8:1::/48"))), false, 0, 1),
+                                        Rule(RuleAction.Block, network: Network("2001:db8:1::/48")))),
         new("IPv6 与 IPv4 网段不相交", Table(Rule(RuleAction.Permit, network: Network("2001:db8::/32")),
-                                             Rule(RuleAction.Block, network: Network("192.168.0.0/16"))), true),
-        new("兜底动作为 block（无规则）", new PolicyTable(Array.Empty<PolicyRule>(), RuleAction.Block), true),
-        new("兜底 block 与 permit 规则", new PolicyTable(new[] { Rule(RuleAction.Permit, ports: Single(80)) }, RuleAction.Block),
-            false, 0, -1, "fallbackAction"),
+                                             Rule(RuleAction.Block, network: Network("192.168.0.0/16")))),
+        new("兜底动作为 block（无规则）", new PolicyTable(Array.Empty<PolicyRule>(), RuleAction.Block)),
+        new("兜底 block 与 permit 规则", new PolicyTable(new[] { Rule(RuleAction.Permit, ports: Single(80)) }, RuleAction.Block)),
         new("兜底 block 与全部 block 规则",
-            new PolicyTable(new[] { Rule(RuleAction.Block, ports: Single(80)) }, RuleAction.Block), true),
+            new PolicyTable(new[] { Rule(RuleAction.Block, ports: Single(80)) }, RuleAction.Block)),
+        new("block 文件名选择器", Table(Rule(RuleAction.Block, process: ProcessSelector.Parse("svchost.exe")))),
+        new("block 目录前缀选择器", Table(Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.ToolsDos)))),
         new("目录前缀 tools 不遮蔽 tools2", Table(
                 Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.ToolsDos)),
-                Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.Tools2ExeDos))), true),
-        new("目录前缀遮蔽后代路径", Table(
+                Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.Tools2ExeDos)))),
+        new("目录前缀后跟后代路径", Table(
                 Rule(RuleAction.Permit, process: ProcessSelector.Parse(TestAppId.ToolsDos)),
-                Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.ToolsExeDos))), false, 0, 1),
+                Rule(RuleAction.Block, process: ProcessSelector.Parse(TestAppId.ToolsExeDos)))),
         new("多端口数组任一区间相交", Table(
                 Rule(RuleAction.Permit, portArray: PortArray(80, 443)),
-                Rule(RuleAction.Block, portArray: PortArray(443, 8080))), false, 0, 1),
+                Rule(RuleAction.Block, portArray: PortArray(443, 8080)))),
         new("多端口数组全部不相交", Table(
                 Rule(RuleAction.Permit, portArray: PortArray(80, 443)),
-                Rule(RuleAction.Block, portArray: PortArray(8080, 8443))), true),
+                Rule(RuleAction.Block, portArray: PortArray(8080, 8443)))),
         new("混合族有效族集相交", Table(
                 Rule(RuleAction.Permit,
                      familyArray: new[] { RuleAddressFamily.Ipv4, RuleAddressFamily.Ipv6 },
                      networkArray: new[] { Network("10.0.0.0/8"), Network("2001:db8::/32") }),
                 Rule(RuleAction.Block,
                      familyArray: new[] { RuleAddressFamily.Ipv6 },
-                     networkArray: new[] { Network("2001:db8:1::/48") })), false, 0, 1),
+                     networkArray: new[] { Network("2001:db8:1::/48") }))),
         new("混合族网段收窄后不相交", Table(
                 Rule(RuleAction.Permit, networkArray: new[] { Network("10.0.0.0/8") }),
-                Rule(RuleAction.Block, familyArray: new[] { RuleAddressFamily.Ipv6 })), true),
+                Rule(RuleAction.Block, familyArray: new[] { RuleAddressFamily.Ipv6 }))),
 
     };
 

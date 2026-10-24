@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Microsoft.Win32.SafeHandles;
 
@@ -33,7 +34,7 @@ internal static class HostRuleParitySuite
         RunExactPathCases(device, echo, target, appId, sandbox, timeoutMs);
         RunDirectoryCases(device, echo, target, directoryAppId, sandbox, timeoutMs);
         RunArrayCases(device, echo, target, exeName, processId, timeoutMs);
-        RunBlockCases(device, echo, target, exeName, directoryAppId, appId, processId, sandbox, timeoutMs);
+        RunBlockCases(device, echo, target, exe, exeName, directoryAppId, appId, processId, sandbox, timeoutMs);
     }
 
     private static void RunFileNameCases(WfpDevice device, EchoServer echo, IPEndPoint target, string exeName, int timeoutMs)
@@ -214,6 +215,7 @@ internal static class HostRuleParitySuite
     private static void RunBlockCases(WfpDevice device,
                                       EchoServer echo,
                                       IPEndPoint target,
+                                      string exe,
                                       string exeName,
                                       string directoryAppId,
                                       string appId,
@@ -224,9 +226,7 @@ internal static class HostRuleParitySuite
         string copy = sandbox.Copy("block");
         string copyAppId = AppId.ForPath(copy);
 
-        RunBudgetCase(device, echo.Port);
-
-        TestRule block = new()
+        TestRule exactPaths = new()
         {
             Action = Protocol.RuleActionBlock,
             PortStart = (ushort)echo.Port,
@@ -234,10 +234,49 @@ internal static class HostRuleParitySuite
             Protocols = new[] { Protocol.RuleProtocolTcp },
             Processes = new[] { TestProcessSelector.Path(appId), TestProcessSelector.Path(copyAppId) },
         };
-        device.SetRuleBlob(BlobBuilder.Build(new[] { block }, Protocol.RuleActionPermit));
+        device.SetRuleBlob(BlobBuilder.Build(new[] { exactPaths }, Protocol.RuleActionPermit));
         try
         {
-            RunSelfBlockChecks(device, echo, target, copy, exeName, directoryAppId, processId, timeoutMs);
+            RunSelfBlockChecks(device, echo, target, copy, processId, timeoutMs);
+        }
+        finally
+        {
+            ClearRules(device);
+        }
+
+        RunFileNameBlockCase(device, echo, target, copy, exeName, processId, timeoutMs);
+        RunDirectoryBlockCase(device, echo, target, exe, directoryAppId, processId, timeoutMs);
+        RunPermitLoopbackBlockRestCase(device, timeoutMs);
+        RunFallbackBlockWithPermitCase(device, echo, target, timeoutMs);
+    }
+
+    private static void RunSelfBlockChecks(WfpDevice device,
+                                           EchoServer echo,
+                                           IPEndPoint target,
+                                           string copy,
+                                           int processId,
+                                           int timeoutMs) =>
+        ExpectSelfAndChildBlocked(device, echo, target, copy, "block 精确路径数组", 0, processId, timeoutMs);
+
+    private static void RunFileNameBlockCase(WfpDevice device,
+                                             EchoServer echo,
+                                             IPEndPoint target,
+                                             string copy,
+                                             string exeName,
+                                             int processId,
+                                             int timeoutMs)
+    {
+        TestRule rule = new()
+        {
+            Action = Protocol.RuleActionBlock,
+            PortStart = (ushort)echo.Port,
+            PortEnd = (ushort)echo.Port,
+            Processes = new[] { TestProcessSelector.FileName(exeName) },
+        };
+        device.SetRuleBlob(BlobBuilder.Build(new[] { rule }, Protocol.RuleActionPermit));
+        try
+        {
+            ExpectSelfAndChildBlocked(device, echo, target, copy, "block 文件名", 0, processId, timeoutMs);
         }
         finally
         {
@@ -245,152 +284,206 @@ internal static class HostRuleParitySuite
         }
     }
 
-    private static void RunBudgetCase(WfpDevice device, int port)
+    private static void RunDirectoryBlockCase(WfpDevice device,
+                                              EchoServer echo,
+                                              IPEndPoint target,
+                                              string exe,
+                                              string directoryAppId,
+                                              int processId,
+                                              int timeoutMs)
     {
-        var selectors = new List<TestProcessSelector>(65);
-        for (int index = 0; index < 65; index++)
-        {
-            selectors.Add(TestProcessSelector.Path($@"\device\harddiskvolume3\budget\app{index}.exe"));
-        }
-
-        var overBudget = new TestRule
-        {
-            Action = Protocol.RuleActionBlock,
-            PortStart = (ushort)port,
-            PortEnd = (ushort)port,
-            Protocols = new[] { Protocol.RuleProtocolTcp, Protocol.RuleProtocolUdp },
-            Processes = selectors,
-        };
-
-        string message = string.Empty;
-        bool buildRejected = false;
-        try
-        {
-            _ = BlobBuilder.Build(new[] { overBudget }, Protocol.RuleActionPermit);
-        }
-        catch (InvalidOperationException exception)
-        {
-            buildRejected = true;
-            message = exception.Message;
-        }
-        Check.True(buildRejected && message.Contains("预算", StringComparison.Ordinal),
-                   "block filter 预算：65 个精确路径 × 2 层 × 2 协议 = 260 > 128，产品编译期拒绝", message);
-
-        ProbeConfig config = device.GetConfig();
-        ProbeConfig disabled = config;
-        disabled.Enabled = 0;
-        device.SetConfig(disabled);
-        try
-        {
-            ExpectDriverRejected(device, "block filter 预算：enabled=0 时驱动也整块拒绝",
-                                 BlobBuilder.BuildUnchecked(new[] { overBudget }, Protocol.RuleActionPermit));
-        }
-        finally
-        {
-            device.SetConfig(config);
-        }
-    }
-
-    private static void RunSelfBlockChecks(WfpDevice device,
-                                           EchoServer echo,
-                                           IPEndPoint target,
-                                           string copy,
-                                           string exeName,
-                                           string directoryAppId,
-                                           int processId,
-                                           int timeoutMs)
-    {
-        Check.Equal(1, device.GetRuleInfo().RuleCount, "block 精确路径数组：规则数=1");
-
-        ProbeStats beforeBlock = device.GetStats();
-        int acceptedBefore = echo.Accepted;
-        bool parentConnected = SocketHelpers.TryConnect(target, timeoutMs, out Socket? socket, out string error);
-        socket?.Dispose();
-        Check.True(!parentConnected, "block 精确路径数组：原进程连接被拒", error);
-
-        int childExit = RunClient(copy, echo.Port, timeoutMs);
-        Check.True(childExit != 0, "block 精确路径数组：副本连接被拒", $"exit={childExit}");
-        Check.Equal(acceptedBefore, echo.Accepted, "block 精确路径数组：服务器没有 accept");
-
-        ProbeStats afterBlock = device.GetStats();
-        Check.Equal(2, (long)(afterBlock.MatchedBlock - beforeBlock.MatchedBlock),
-                    "block 精确路径数组：两个路径各命中一次 matched_block");
-        Check.Equal(2, (long)(afterBlock.Blocked - beforeBlock.Blocked), "block 精确路径数组：blocked +2");
-        Check.Equal(2, (long)(afterBlock.DeferredBlocks - beforeBlock.DeferredBlocks),
-                    "block 精确路径数组：deferred_blocks +2");
-        Check.True(device.GetEvents(64).Any(e => e.Decision == Protocol.DecisionBlockedRule &&
-                                                 e.MatchedRule == 0 &&
-                                                 e.RemotePort == echo.Port &&
-                                                 e.ProcessId == (uint)processId),
-                   "block 事件带上唯一规则序号 0", $"port={echo.Port}");
-
-        TestRule blockFileName = new()
-        {
-            Action = Protocol.RuleActionBlock,
-            PortStart = (ushort)echo.Port,
-            PortEnd = (ushort)echo.Port,
-            Processes = new[] { TestProcessSelector.FileName(exeName) },
-        };
-        ExpectBuildRejected("block + 文件名：编译期拒绝", blockFileName, "文件名");
-        ExpectDriverRejected(device, "block + 文件名：驱动整块拒绝",
-                             BlobBuilder.BuildUnchecked(new[] { blockFileName }, Protocol.RuleActionPermit));
-
-        TestRule blockDirectory = new()
+        string directory = Path.GetDirectoryName(exe) ?? throw new InvalidOperationException("拿不到当前进程目录");
+        string copy = Path.Combine(directory, $"wfprobe-dir-block-{Guid.NewGuid():N}.exe");
+        File.Copy(exe, copy, true);
+        TestRule rule = new()
         {
             Action = Protocol.RuleActionBlock,
             PortStart = (ushort)echo.Port,
             PortEnd = (ushort)echo.Port,
             Processes = new[] { TestProcessSelector.Directory(directoryAppId) },
         };
-        ExpectBuildRejected("block + 目录前缀：编译期拒绝", blockDirectory, "目录前缀");
-        ExpectDriverRejected(device, "block + 目录前缀：驱动整块拒绝",
-                             BlobBuilder.BuildUnchecked(new[] { blockDirectory }, Protocol.RuleActionPermit));
+        try
+        {
+            device.SetRuleBlob(BlobBuilder.Build(new[] { rule }, Protocol.RuleActionPermit));
+            ExpectSelfAndChildBlocked(device, echo, target, copy, "block 目录前缀", 0, processId, timeoutMs);
+        }
+        finally
+        {
+            ClearRules(device);
+            try
+            {
+                File.Delete(copy);
+            }
+            catch (IOException)
+            {
+                // 子进程可能还持有镜像句柄，清理失败不影响断言。
+            }
+        }
+    }
+
+    private static void RunPermitLoopbackBlockRestCase(WfpDevice device, int timeoutMs)
+    {
+        IPAddress? localAddress = FindLocalIpv4Address();
+        Check.True(localAddress is not null, "permit 127.0.0.0/8 → block 其余：找到本机非环回 IPv4", "none");
+        if (localAddress is null)
+            return;
+
+        using var echo = new EchoServer(IPAddress.Any);
+        var rules = new[]
+        {
+            new TestRule
+            {
+                Action = Protocol.RuleActionPermit,
+                Networks = new[] { "127.0.0.0/8" },
+            },
+            new TestRule
+            {
+                Action = Protocol.RuleActionBlock,
+                Networks = new[] { "0.0.0.0/0" },
+            },
+        };
+        device.SetRuleBlob(BlobBuilder.Build(rules, Protocol.RuleActionPermit));
+        try
+        {
+            Check.Equal(2, device.GetRuleInfo().RuleCount, "permit 127.0.0.0/8 → block 其余：两条规则都被接受");
+
+            var loopbackTarget = new IPEndPoint(IPAddress.Loopback, echo.Port);
+            ProbeStats beforePermit = device.GetStats();
+            bool echoed = TryEcho(loopbackTarget, timeoutMs, out string permitDetail);
+            Check.True(echoed, "permit 127.0.0.0/8 → block 其余：环回目标成功", permitDetail);
+            ProbeStats afterPermit = device.GetStats();
+            Check.Equal(1, (long)(afterPermit.MatchedPermit - beforePermit.MatchedPermit),
+                        "permit 127.0.0.0/8 → block 其余：matched_permit +1");
+            Check.Equal(0, (long)(afterPermit.FallbackPermit - beforePermit.FallbackPermit),
+                        "permit 127.0.0.0/8 → block 其余：命中时不走兜底");
+
+            var otherTarget = new IPEndPoint(localAddress, echo.Port);
+            int acceptedBefore = echo.Accepted;
+            ProbeStats beforeBlock = device.GetStats();
+            bool blocked = SocketHelpers.TryConnect(otherTarget, timeoutMs, out Socket? socket, out string error);
+            socket?.Dispose();
+            Check.True(!blocked, "permit 127.0.0.0/8 → block 其余：非环回目标在连接阶段失败", error);
+            Thread.Sleep(200);
+            Check.Equal(acceptedBefore, echo.Accepted, "permit 127.0.0.0/8 → block 其余：服务器没有 accept");
+            ProbeStats afterBlock = device.GetStats();
+            Check.Equal(1, (long)(afterBlock.MatchedBlock - beforeBlock.MatchedBlock),
+                        "permit 127.0.0.0/8 → block 其余：matched_block +1");
+            Check.Equal(1, (long)(afterBlock.Blocked - beforeBlock.Blocked),
+                        "permit 127.0.0.0/8 → block 其余：blocked +1");
+            Check.Equal(1, (long)(afterBlock.DeferredBlocks - beforeBlock.DeferredBlocks),
+                        "permit 127.0.0.0/8 → block 其余：deferred_blocks +1");
+            Check.True(device.GetEvents(64).Any(e => e.Decision == Protocol.DecisionBlockedRule &&
+                                                     e.MatchedRule == 1 &&
+                                                     e.RemotePort == echo.Port),
+                       "permit 127.0.0.0/8 → block 其余：命中第二条规则", $"port={echo.Port}");
+        }
+        finally
+        {
+            ClearRules(device);
+        }
+    }
+
+    private static void RunFallbackBlockWithPermitCase(WfpDevice device,
+                                                       EchoServer echo,
+                                                       IPEndPoint target,
+                                                       int timeoutMs)
+    {
+        using var fallbackEcho = new EchoServer(IPAddress.Loopback);
+        ProbeRuleInfo before = device.GetRuleInfo();
+        device.SetRuleBlob(BlobBuilder.Build(new[] { PermitAt(echo.Port) }, Protocol.RuleActionBlock));
+        try
+        {
+            ProbeRuleInfo installed = device.GetRuleInfo();
+            Check.Equal(1, installed.RuleCount, "fallback=block + permit：规则数与下发一致");
+            Check.Equal(Protocol.RuleActionBlock, installed.FallbackAction,
+                        "fallback=block + permit：兜底动作与下发一致");
+            Check.Equal(before.Generation + 1, installed.Generation, "fallback=block + permit：generation +1");
+
+            ProbeStats beforePermit = device.GetStats();
+            bool echoed = TryEcho(target, timeoutMs, out string permitDetail);
+            Check.True(echoed, "fallback=block + permit：permit 目标成功", permitDetail);
+            ProbeStats afterPermit = device.GetStats();
+            Check.Equal(1, (long)(afterPermit.MatchedPermit - beforePermit.MatchedPermit),
+                        "fallback=block + permit：matched_permit +1");
+            Check.Equal(0, (long)(afterPermit.FallbackBlock - beforePermit.FallbackBlock),
+                        "fallback=block + permit：命中时不走兜底");
+
+            var fallbackTarget = new IPEndPoint(IPAddress.Loopback, fallbackEcho.Port);
+            int acceptedBefore = fallbackEcho.Accepted;
+            ProbeStats beforeBlock = device.GetStats();
+            bool blocked = SocketHelpers.TryConnect(fallbackTarget, timeoutMs, out Socket? socket, out string error);
+            socket?.Dispose();
+            Check.True(!blocked, "fallback=block + permit：其他目标在连接阶段失败", error);
+            Thread.Sleep(200);
+            Check.Equal(acceptedBefore, fallbackEcho.Accepted, "fallback=block + permit：服务器没有 accept");
+            ProbeStats afterBlock = device.GetStats();
+            Check.Equal(1, (long)(afterBlock.FallbackBlock - beforeBlock.FallbackBlock),
+                        "fallback=block + permit：fallback_block +1");
+            Check.Equal(1, (long)(afterBlock.Blocked - beforeBlock.Blocked),
+                        "fallback=block + permit：blocked +1");
+            Check.Equal(1, (long)(afterBlock.DeferredBlocks - beforeBlock.DeferredBlocks),
+                        "fallback=block + permit：deferred_blocks +1");
+            Check.True(device.GetEvents(64).Any(e => e.Decision == Protocol.DecisionBlockedFallback &&
+                                                     e.RemotePort == fallbackEcho.Port),
+                       "fallback=block + permit：兜底事件", $"port={fallbackEcho.Port}");
+        }
+        finally
+        {
+            ClearRules(device);
+        }
+    }
+
+    private static void ExpectSelfAndChildBlocked(WfpDevice device,
+                                                  EchoServer echo,
+                                                  IPEndPoint target,
+                                                  string childExe,
+                                                  string label,
+                                                  uint ruleIndex,
+                                                  int processId,
+                                                  int timeoutMs)
+    {
+        Check.Equal(1, device.GetRuleInfo().RuleCount, $"{label}：规则数=1");
+        int acceptedBefore = echo.Accepted;
+        ProbeStats before = device.GetStats();
+        bool parentConnected = SocketHelpers.TryConnect(target, timeoutMs, out Socket? socket, out string error);
+        socket?.Dispose();
+        Check.True(!parentConnected, $"{label}：原进程连接被拒", error);
+
+        int childExit = RunClient(childExe, echo.Port, timeoutMs);
+        Check.True(childExit != 0, $"{label}：副本连接被拒", $"exit={childExit}");
+        Thread.Sleep(200);
+        Check.Equal(acceptedBefore, echo.Accepted, $"{label}：服务器没有 accept");
+
+        ProbeStats after = device.GetStats();
+        Check.Equal(2, (long)(after.MatchedBlock - before.MatchedBlock), $"{label}：两次命中 matched_block");
+        Check.Equal(2, (long)(after.Blocked - before.Blocked), $"{label}：blocked +2");
+        Check.Equal(2, (long)(after.DeferredBlocks - before.DeferredBlocks), $"{label}：deferred_blocks +2");
+        Check.True(device.GetEvents(64).Any(e => e.Decision == Protocol.DecisionBlockedRule &&
+                                                 e.MatchedRule == ruleIndex &&
+                                                 e.RemotePort == echo.Port &&
+                                                 e.ProcessId == (uint)processId),
+                   $"{label}：block 事件带上规则序号", $"port={echo.Port}");
+    }
+
+    private static IPAddress? FindLocalIpv4Address()
+    {
+        foreach (NetworkInterface network in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (network.OperationalStatus != OperationalStatus.Up ||
+                network.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                continue;
+            foreach (UnicastIPAddressInformation address in network.GetIPProperties().UnicastAddresses)
+            {
+                if (address.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address.Address))
+                    return address.Address;
+            }
+        }
+
+        return null;
     }
 
     private static void ClearRules(WfpDevice device) =>
         device.SetRuleBlob(BlobBuilder.Build(Array.Empty<TestRule>(), Protocol.RuleActionPermit));
-
-    private static void ExpectBuildRejected(string name, TestRule rule, string kind)
-    {
-        string message = string.Empty;
-        bool rejected = false;
-        try
-        {
-            _ = BlobBuilder.Build(new[] { rule }, Protocol.RuleActionPermit);
-        }
-        catch (InvalidOperationException exception)
-        {
-            rejected = true;
-            message = exception.Message;
-        }
-
-        Check.True(rejected && message.Contains("#0", StringComparison.Ordinal) &&
-                   message.Contains(kind, StringComparison.Ordinal),
-                   name, message);
-    }
-
-    private static void ExpectDriverRejected(WfpDevice device, string name, byte[] blob)
-    {
-        ProbeRuleInfo before = device.GetRuleInfo();
-        ulong rejectedBefore = device.GetStats().RejectedBlobs;
-        bool rejected = false;
-        int error = 0;
-        try
-        {
-            device.SetRuleBlob(blob);
-        }
-        catch (Win32Exception exception)
-        {
-            rejected = true;
-            error = exception.NativeErrorCode;
-        }
-
-        Check.True(rejected && error == 87, name, $"error={error}");
-        ProbeRuleInfo after = device.GetRuleInfo();
-        Check.Equal(before.Generation, after.Generation, $"{name}：generation 不变");
-        Check.Equal(before.RuleCount, after.RuleCount, $"{name}：规则数不变");
-        Check.Equal(1, (long)(device.GetStats().RejectedBlobs - rejectedBefore), $"{name}：rejected_blobs +1");
-    }
 
     private static TestRule PermitAt(int port) => new()
     {

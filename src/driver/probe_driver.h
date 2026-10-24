@@ -62,10 +62,6 @@ inline constexpr std::uint32_t rule_pool_tag = 'rTfW';
 // 这个值只用于同子层内不依赖引擎默认权重推导；依据见 block_filters.cpp 的 filter 构造处。
 inline constexpr std::uint64_t auth_filter_weight = 0x10;
 
-// 一次最多能编译出多少条 block filter（V4+V6 合计）。常量定义在 probe_ioctl.h，
-// 用户态镜像与 ABI 测试都从那里读取；这里锁住驱动使用的数值没有漂移。
-// probe_control.cpp 的栈数组是 128×8B = 1 KiB，只在 PASSIVE 的 IOCTL 路径上使用。
-static_assert(max_block_filters == 128, "max_block_filters 是控制面 ABI 常量，见 probe_ioctl.h");
 inline constexpr std::uint32_t event_capacity = 64;
 
 // 规则进程池是 UTF-8 字节串（ASCII 大小写折叠，非 ASCII 原样）。连接侧把 ALE_APP_ID 的
@@ -90,8 +86,9 @@ struct probe_state
     layer_state v4;
     layer_state v6;
     bool provider_added;
-    // block 规则编译出的 ALE_AUTH_CONNECT 过滤器（V4/V6 混合，按创建顺序记录 id）。
-    UINT64 block_filter_ids[max_block_filters];
+    // block sink 的固定 ALE_AUTH_CONNECT filter（V4/V6 × TCP/UDP，共 block_sink_filter_count 条）。
+    // 它们只认“被改道到 block_sink_port 的连接”，不随规则数展开。
+    UINT64 block_filter_ids[block_sink_filter_count];
     std::uint32_t block_filter_count;
     std::uint32_t block_filter_serial; // 每次都换新 key，避免与仍在生效的旧 filter 撞 key
     KMUTEX rule_mutex; // 串行化「换表 + block filter 增删」，只在 PASSIVE 的 IOCTL 路径上等
@@ -167,9 +164,11 @@ NTSTATUS NTAPI probe_notify_fn(FWPS_CALLOUT_NOTIFY_TYPE notify_type,
                                const GUID* filter_key,
                                FWPS_FILTER1* filter) noexcept;
 
-// block 规则在 ALE_AUTH_CONNECT 上以 FWP_ACTION_BLOCK filter 执行：redirect 层不能阻断连接
-// （research 有实测）。filter 只在规则表里存在 block 规则时创建，规则替换时整组换掉。
-[[nodiscard]] NTSTATUS probe_install_block_filters(const blob_view& view, UINT64* ids, std::uint32_t& count) noexcept;
+// block 在 classify 首个命中后改道到 block_sink_port；真正的拒绝由固定 4 条
+// ALE_AUTH_CONNECT filter 执行（redirect 层不能拦截连接）。条件为协议 + 远端端口 == sink +
+// FLAGS 含 IS_CONNECTION_REDIRECTED，任何一条 add 失败都会删除已建的并返回失败。
+// 调用方在 enable / 换表时按 rule_table::contains_block 决定是否安装。
+[[nodiscard]] NTSTATUS probe_install_block_filters(std::uint16_t sink_port, UINT64* ids, std::uint32_t& count) noexcept;
 void probe_delete_block_filters(UINT64* ids, std::uint32_t& count) noexcept;
 
 // 拆除一个已注册层：filter → callout 定义 → callout 本体（带 BUSY/IN_USE 重试）。host 与

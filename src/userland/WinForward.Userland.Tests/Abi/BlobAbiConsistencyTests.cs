@@ -144,9 +144,6 @@ internal static class BlobAbiConsistencyTests
         Check.Equal(IoctlConstant("rule_blob_max_size"),
                     (long)PolicyLimits.RuleBlobMaxSize, "PolicyLimits.RuleBlobMaxSize");
         Check.Equal(IoctlConstant("rule_blob_max_size"), FixtureConstant("RuleBlobMaxSize"), "夹具 RuleBlobMaxSize");
-        Check.Equal(IoctlConstant("max_block_filters"),
-                    (long)PolicyLimits.MaxBlockFilters, "PolicyLimits.MaxBlockFilters");
-        Check.Equal(IoctlConstant("max_block_filters"), FixtureConstant("MaxBlockFilters"), "夹具 MaxBlockFilters");
     }
 
     private static Dictionary<string, long> ParseCppConstants(string text)

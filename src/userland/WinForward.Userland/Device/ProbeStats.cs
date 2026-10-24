@@ -32,6 +32,7 @@ public struct ProbeStats
     public ulong FallbackPermit;
     public ulong FallbackBlock;
     public ulong FallbackRedirect;
+    /// <summary>block 决策成功改道到 sink 端口的次数（随后交给固定 auth filter 执行）。</summary>
     public ulong DeferredBlocks;
     public ulong ProcessPathMetadataSeen;
     public ulong UdpClassifyCalls;

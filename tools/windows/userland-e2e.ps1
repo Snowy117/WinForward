@@ -133,17 +133,18 @@ try {
         @{ action = "permit"; remotePorts = "$echoPort" },
         @{ action = "block"; remotePorts = "$echoPort" }) } |
         ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $conflictPath -Encoding utf8
+    # block 现在是 classify 的首个命中 + sink 改道，重叠的 permit/block 由顺序决定，编译期接受。
     $conflictOut = (& $controllerExe check --config $conflictPath 2>&1 | Out-String)
-    Assert "歧义配置在编译期被拒" ($LASTEXITCODE -ne 0) "exit=$LASTEXITCODE"
-    Assert "报错带两条规则序号" ($conflictOut -match "#0" -and $conflictOut -match "#1") $conflictOut.Trim()
+    Assert "重叠配置（permit + block 同端口）编译通过" ($LASTEXITCODE -eq 0) `
+        "exit=$LASTEXITCODE out=$($conflictOut.Trim())"
 
     $fallbackPath = Join-Path $work "fallback-block.json"
     @{ fallbackAction = "block"; rules = @(
         @{ action = "permit"; remotePorts = "$echoPort" }) } |
         ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $fallbackPath -Encoding utf8
     $fallbackOut = (& $controllerExe check --config $fallbackPath 2>&1 | Out-String)
-    Assert "兜底 block 与 permit 规则共存被拒" ($LASTEXITCODE -ne 0) "exit=$LASTEXITCODE"
-    Assert "报错指向兜底动作（fallbackAction）" ($fallbackOut -match "fallbackAction") $fallbackOut.Trim()
+    Assert "兜底 block 与 permit 规则共存编译通过" ($LASTEXITCODE -eq 0) `
+        "exit=$LASTEXITCODE out=$($fallbackOut.Trim())"
 
     $reversedPath = Join-Path $work "reversed.json"
     @{ fallbackAction = "permit"; rules = @(
@@ -170,6 +171,10 @@ try {
     $r1 = Read-Text $report1
     Assert "A1 规则数与兜底动作回读一致" ($r1 -match "controller-rules installed=1 .*count=1 fallback=0") $r1.Trim()
     Assert "监听端口已告知驱动" ($r1 -match "controller-config enabled=1 listener_port=$listenerPort") $r1.Trim()
+    $sinkMatch = [regex]::Match($r1, "block-sink-port=(\d+)")
+    $sinkPort = if ($sinkMatch.Success) { [int]$sinkMatch.Groups[1].Value } else { 0 }
+    Assert "block sink 端口已告知驱动且与 listener 不同" `
+        ($sinkPort -ne 0 -and $sinkPort -ne $listenerPort) "sink=$sinkPort listener=$listenerPort"
 
     $client4 = (& $controllerExe client --target "127.0.0.1:$echoPort" --bytes $Bytes --family 4 2>&1 | Out-String)
     Assert "V4 客户端经重定向后回显成功" ($LASTEXITCODE -eq 0 -and $client4 -match "client OK bytes=$Bytes") $client4.Trim()

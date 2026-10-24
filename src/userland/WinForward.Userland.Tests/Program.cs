@@ -46,8 +46,6 @@ static void RegisterAll()
     DifferentialTests.Register();
     ConfigurationTests.Register();
     ConfigurationArrayTests.Register();
-    RuleOrderTests.Register();
-    RuleOrderProcessTests.Register();
     ControllerCheckTests.Register();
     DeviceAbiTests.Register();
     Socks5Tests.Register();

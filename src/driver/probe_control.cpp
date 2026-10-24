@@ -42,7 +42,9 @@ NTSTATUS apply_config(const void* buffer, ULONG input_length) noexcept
     {
         return STATUS_INVALID_PARAMETER;
     }
-    if (candidate.block_sink_port != 0 && candidate.block_sink_port == candidate.listener_port)
+    // sink 端口要写进 FWPM_CONDITION_IP_REMOTE_PORT（UINT16）；超出范围或与 listener 相同都拒绝。
+    if (candidate.block_sink_port > 0xFFFF ||
+        (candidate.block_sink_port != 0 && candidate.block_sink_port == candidate.listener_port))
     {
         return STATUS_INVALID_PARAMETER;
     }
@@ -50,52 +52,64 @@ NTSTATUS apply_config(const void* buffer, ULONG input_length) noexcept
     probe_state& state = probe_state_ref();
     const bool was_enabled = state.config.enabled != 0;
     const bool next_enabled = candidate.enabled != 0;
-    if (was_enabled != next_enabled)
+    if (was_enabled && next_enabled && candidate.block_sink_port != state.config.block_sink_port)
     {
-        // 0↔1 切换要和换表共用一把锁：禁用必须真的撤掉 block filter，启用则按当前表重建。
-        KeWaitForSingleObject(&state.rule_mutex, Executive, KernelMode, FALSE, nullptr);
-        NTSTATUS status = STATUS_SUCCESS;
-        // <mutation id="disable-keeps-block-filters">
-        if (!next_enabled)
-        {
-            probe_delete_block_filters(state.block_filter_ids, state.block_filter_count);
-        }
-        // </mutation>
-        else
-        {
-            UINT64 ids[max_block_filters]{};
-            std::uint32_t count = 0;
-            if (state.rules != nullptr)
-            {
-                status = probe_install_block_filters(state.rules->view, ids, count);
-            }
-            if (NT_SUCCESS(status))
-            {
-                probe_delete_block_filters(state.block_filter_ids, state.block_filter_count);
-                for (std::uint32_t index = 0; index < count; ++index)
-                {
-                    state.block_filter_ids[index] = ids[index];
-                }
-                state.block_filter_count = count;
-            }
-        }
-        if (!NT_SUCCESS(status))
-        {
-            KeReleaseMutex(&state.rule_mutex, FALSE);
-            return status;
-        }
+        // sink 端口在 enabled 期间必须稳定：固定 filter 的端口条件不随运行中的配置换值。
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if (was_enabled == next_enabled)
+    {
+        // 同状态只换 config：enabled 下 sink 端口已校验不变，filter 无需重建；disabled 下不碰 filter。
+        // 「当前表有 block 但 sink 为 0」在 enabled 下不可达：启用与换表都要求 sink 非 0。
         KIRQL old_irql{};
         const bool raised = probe_lock(old_irql);
         state.config = candidate;
         probe_unlock(raised, old_irql);
-        KeReleaseMutex(&state.rule_mutex, FALSE);
         return STATUS_SUCCESS;
     }
 
+    // 0↔1 切换要和换表共用一把锁：禁用必须真的撤掉 block filter，启用则按当前表重建。
+    KeWaitForSingleObject(&state.rule_mutex, Executive, KernelMode, FALSE, nullptr);
+    const bool needs_block = state.rules != nullptr && state.rules->contains_block;
+    if (next_enabled && needs_block && candidate.block_sink_port == 0)
+    {
+        // 表里有 block 却没有 sink 端口：拒绝启用，旧 config 与旧 filter 保持不变。
+        KeReleaseMutex(&state.rule_mutex, FALSE);
+        return STATUS_INVALID_PARAMETER;
+    }
+    NTSTATUS status = STATUS_SUCCESS;
+    // <mutation id="disable-keeps-block-filters">
+    if (!next_enabled)
+    {
+        probe_delete_block_filters(state.block_filter_ids, state.block_filter_count);
+    }
+    // </mutation>
+    else if (needs_block)
+    {
+        UINT64 ids[block_sink_filter_count]{};
+        std::uint32_t count = 0;
+        status = probe_install_block_filters(static_cast<std::uint16_t>(candidate.block_sink_port), ids, count);
+        if (NT_SUCCESS(status))
+        {
+            probe_delete_block_filters(state.block_filter_ids, state.block_filter_count);
+            for (std::uint32_t index = 0; index < count; ++index)
+            {
+                state.block_filter_ids[index] = ids[index];
+            }
+            state.block_filter_count = count;
+        }
+    }
+    if (!NT_SUCCESS(status))
+    {
+        KeReleaseMutex(&state.rule_mutex, FALSE);
+        return status;
+    }
     KIRQL old_irql{};
     const bool raised = probe_lock(old_irql);
     state.config = candidate;
     probe_unlock(raised, old_irql);
+    KeReleaseMutex(&state.rule_mutex, FALSE);
     return STATUS_SUCCESS;
 }
 
@@ -189,14 +203,35 @@ NTSTATUS apply_rule_blob(const void* buffer, ULONG input_length) noexcept
     }
     // </mutation>
 
-    // 换表与 block filter 的增删必须串行：先把新规则的 block filter 挂上，再换表，最后撤掉
+    // 换表与 block filter 的增删必须串行：先把新规则需要的 block filter 挂上，再换表，最后撤掉
     // 旧 filter。任何窗口里都不会出现「规则可见但没人执行」或「filter 常驻但没有对应规则」。
     KeWaitForSingleObject(&state.rule_mutex, Executive, KernelMode, FALSE, nullptr);
 
-    UINT64 new_ids[max_block_filters]{};
-    std::uint32_t new_count = 0;
     const bool enabled = state.config.enabled != 0;
-    NTSTATUS status = enabled ? probe_install_block_filters(table->view, new_ids, new_count) : STATUS_SUCCESS;
+    const bool old_needs_block = state.rules != nullptr && state.rules->contains_block;
+    const bool new_needs_block = table->contains_block;
+    NTSTATUS status = STATUS_SUCCESS;
+    if (enabled && new_needs_block && state.config.block_sink_port == 0)
+    {
+        // 已启用但 sink 未配置：含 block 的表无法执行，整块拒绝，旧表与旧 filter 保持不变。
+        status = STATUS_INVALID_PARAMETER;
+    }
+    else if (enabled && new_needs_block && state.block_filter_count == 0)
+    {
+        // 旧表不需要 filter（否则它已经装着）：按当前 sink 端口先挂上新表的固定 4 条。
+        UINT64 new_ids[block_sink_filter_count]{};
+        std::uint32_t new_count = 0;
+        status =
+            probe_install_block_filters(static_cast<std::uint16_t>(state.config.block_sink_port), new_ids, new_count);
+        if (NT_SUCCESS(status))
+        {
+            for (std::uint32_t index = 0; index < new_count; ++index)
+            {
+                state.block_filter_ids[index] = new_ids[index];
+            }
+            state.block_filter_count = new_count;
+        }
+    }
     if (!NT_SUCCESS(status))
     {
         free_rule_table(table);
@@ -207,12 +242,12 @@ NTSTATUS apply_rule_blob(const void* buffer, ULONG input_length) noexcept
 
     probe_replace_rule_table(table);
     probe_increment(state.stats.rules_replaced);
-    probe_delete_block_filters(state.block_filter_ids, state.block_filter_count);
-    for (std::uint32_t index = 0; index < new_count; ++index)
+    // enabled 期间 sink 端口不变，新旧表都需要 block 时沿用旧 filter；新表不再需要时撤掉。
+    // disabled 下本来就没有 filter，只换表。
+    if (enabled && old_needs_block && !new_needs_block)
     {
-        state.block_filter_ids[index] = new_ids[index];
+        probe_delete_block_filters(state.block_filter_ids, state.block_filter_count);
     }
-    state.block_filter_count = new_count;
     KeReleaseMutex(&state.rule_mutex, FALSE);
     return STATUS_SUCCESS;
 }

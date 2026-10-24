@@ -293,6 +293,7 @@ internal static class Program
         Protocol.DecisionRedirectFailed => "redirect_failed",
         Protocol.DecisionContextAllocFailed => "context_alloc_failed",
         Protocol.DecisionPermittedDeferredBlock => "permitted_deferred_block",
+        Protocol.DecisionBlockEnforcementFailed => "block_enforcement_failed",
         _ => $"unknown({decision})",
     };
 

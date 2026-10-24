@@ -24,4 +24,5 @@ public enum ProbeDecision : byte
     RedirectFailed = 15,
     ContextAllocFailed = 16,
     PermittedDeferredBlock = 17,
+    BlockEnforcementFailed = 18,
 }

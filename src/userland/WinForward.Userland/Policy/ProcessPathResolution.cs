@@ -18,6 +18,6 @@ public sealed class ProcessPathResolution
 
     public string DevicePath { get; }
 
-    /// <summary>只影响 block 表达边界与顺序校验；matcher 对路径型选择器始终带前缀语义。</summary>
+    /// <summary>解析结果标记；matcher 对路径型选择器始终带前缀语义，与 block 表达边界和顺序校验无关。</summary>
     public bool IsDirectory { get; }
 }

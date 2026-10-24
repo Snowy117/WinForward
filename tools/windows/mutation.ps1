@@ -147,13 +147,13 @@ function Set-MutationRegion([string]$Text, [string]$Id, [string]$New) {
 
 $mutations = @(
     @{
-        Name = "block-filter 不创建（block 规则不再阻断）"
+        Name = "固定 block filter 不创建（sink 兜底接管）"
         File = "block_filters.cpp"
         Edits = @(@{
             Id = "block-filter-skip"
-            New = "        if (view.rule_count != 0xFFFFFFFFU || selected.action != rule_action::block)"
+            New = "    for (std::uint32_t layer_index = block_filter_layer_count; layer_index == 0; --layer_index)"
         })
-        Target = @("rules", "--iterations", "3")
+        Target = @("udp-rules", "--only", "U6", "--timeout-ms", "10000")
     },
     @{
         Name = "redirect 分支退化成放行"
@@ -174,20 +174,11 @@ $mutations = @(
         Target = @("rules", "--iterations", "3")
     },
     @{
-        Name = "permit 分支退化成 block"
+        Name = "permit 分支退化成 block（改道 sink）"
         File = "probe_classify.cpp"
         Edits = @(@{
             Id = "permit-branch"
-            New = (@(
-                "    set_block(classify_out);"
-                "    probe_increment(state.stats.blocked);"
-                "    log_decision(facts,"
-                "                 rule_index,"
-                "                 result.matched ? probe_decision::blocked_rule : probe_decision::blocked_fallback,"
-                "                 probe_action::block,"
-                "                 0,"
-                "                 redirect_branch::none);"
-            ) -join "`n")
+            New = "    sink_classification(call, result.matched ? probe_decision::blocked_rule : probe_decision::blocked_fallback);"
         })
         Target = @("rules", "--iterations", "3")
     },
@@ -275,31 +266,15 @@ $mutations = @(
         Target = @("rules", "--iterations", "3")
     },
     @{
-        Name = "规则顺序冲突检测被绕过"
-        File = "rule_table.cpp"
-        Edits = @(@{
-            Id = "rule-order-conflict"
-            New = "    if (table->view.rule_count == 0xFFFFFFFFU && !rule_order_valid(table->view, earlier_rule, blocking_rule))"
-        })
-        Target = @("rules", "--iterations", "3")
-    },
-    @{
-        Name = "fallback=block 冲突检测被绕过"
-        File = "rule_table.cpp"
-        Edits = @(@{
-            Id = "fallback-block-conflict"
-            New = "    if (table->view.rule_count == 0xFFFFFFFFU && table->view.fallback_action == rule_action::block)"
-        })
-        Target = @("rules", "--iterations", "3")
-    },
-    @{
-        Name = "enabled=0 不撤 block filter"
+        Name = "enabled=0 不生效（config 与 block filter 都保留）"
         File = "probe_control.cpp"
         Edits = @(@{
             Id = "disable-keeps-block-filters"
             New = (@(
                 "        if (!next_enabled)"
                 "        {"
+                "            KeReleaseMutex(&state.rule_mutex, FALSE);"
+                "            return STATUS_SUCCESS;"
                 "        }"
             ) -join "`n")
         })
@@ -403,18 +378,13 @@ $mutations = @(
         Target = @("udp-rules", "--only", "U1", "--timeout-ms", "5000")
     },
     @{
-        Name = "any block 只展开 TCP，漏掉 UDP"
+        Name = "固定 block filter 漏掉 UDP 协议"
         File = "block_filters.cpp"
         Edits = @(@{
             Id = "block-filter-protocol"
-            New = (@(
-                "    if (protocol_mask == rule_protocol_mask_any || protocol_mask == rule_protocol_mask_all)"
-                "    {"
-                "        return protocol_expansion{ { rule_protocol_tcp, 0 }, 1 };"
-                "    }"
-            ) -join "`n")
+            New = "            const std::uint8_t protocol = rule_protocol_tcp;"
         })
-        Target = @("udp-rules", "--only", "U7", "--timeout-ms", "5000", "--ping-host", ($Remote -split ':')[0])
+        Target = @("udp-rules", "--only", "U6", "--timeout-ms", "10000")
     }
 
 )

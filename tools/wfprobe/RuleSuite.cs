@@ -22,6 +22,7 @@ internal static class RuleSuite
         Console.WriteLine($"[rules] pid={processId} app-id={appId}");
 
         using var device = new WfpDevice();
+        using var blockSink = new BlockSinkBinding();
         device.ResetStats();
         PoolTagUsage? poolBefore = PoolTags.Find(Protocol.PoolTag);
 
@@ -39,83 +40,117 @@ internal static class RuleSuite
             Enabled = 1,
             ListenerProcessId = (uint)processId,
             ListenerPort = (ushort)listenerPort,
+            BlockSinkPort = (uint)blockSink.Port,
             SelfProcessCount = 0,
         };
         device.SetConfig(config);
         Program.PrintConfig("rules", device.GetConfig());
+        Console.WriteLine($"[rules] block-sink-port={blockSink.Port}");
 
-        // 顺序冲突：更早的 permit 与 block 可能命中同一批连接时，编译与下发都必须拒绝。
+        int redirectedConnections = 0;
+        var permitTarget = new IPEndPoint(IPAddress.Loopback, permitServer.Port);
+        var blockTarget = new IPEndPoint(IPAddress.Loopback, blockServer.Port);
+        var redirectTarget = new IPEndPoint(IPAddress.Loopback, redirectTargetServer.Port);
+        var fallbackTarget = new IPEndPoint(IPAddress.Loopback, fallbackServer.Port);
+
+        // block 参与 classify 的首个命中：permit 在前时连接应被放行，block 不能抢跑。
         {
-            var conflicting = new[]
+            byte[] permitFirstBlob = BlobBuilder.Build(new[]
             {
-                TestRule.PermitPort(50001, appId),
-                TestRule.BlockPort(50001, appId),
-            };
-            bool builderRejected = false;
-            string builderMessage = string.Empty;
-            try
-            {
-                _ = BlobBuilder.Build(conflicting, Protocol.RuleActionPermit);
-            }
-            catch (InvalidOperationException ex)
-            {
-                builderRejected = true;
-                builderMessage = ex.Message;
-            }
-            Check.True(builderRejected && builderMessage.Contains("#0", StringComparison.Ordinal) &&
-                       builderMessage.Contains("#1", StringComparison.Ordinal),
-                       "冲突规则在编译期被拒绝并指出两条规则", builderMessage);
-
-            byte[] uncheckedBlob = BlobBuilder.BuildUnchecked(conflicting, Protocol.RuleActionPermit);
+                TestRule.PermitPort(permitServer.Port, appId),
+                TestRule.BlockPort(permitServer.Port, appId),
+            }, Protocol.RuleActionPermit);
             ProbeRuleInfo before = device.GetRuleInfo();
-            bool driverRejected = false;
-            try
-            {
-                device.SetRuleBlob(uncheckedBlob);
-            }
-            catch (Win32Exception ex)
-            {
-                driverRejected = ex.NativeErrorCode == 87;
-            }
-            Check.True(driverRejected, "冲突 blob 被驱动独立拒绝", "STATUS_INVALID_PARAMETER");
-            Check.Equal(before.Generation, device.GetRuleInfo().Generation, "冲突 blob 不改变 generation");
-            Console.WriteLine($"[rules] conflict: builder-rejected={builderRejected} driver-rejected={driverRejected} " +
-                              $"generation={before.Generation}->{device.GetRuleInfo().Generation}");
+            device.SetRuleBlob(permitFirstBlob);
+            ProbeRuleInfo installed = device.GetRuleInfo();
+            Check.Equal(2, installed.RuleCount, "permit→block 同端口：规则数与下发一致");
+            Check.Equal(before.Generation + 1, installed.Generation, "permit→block 同端口：generation +1");
+
+            ProbeStats beforeStats = device.GetStats();
+            bool connected = SocketHelpers.TryConnect(permitTarget, timeoutMs, out Socket? socket, out string error);
+            string detail = "not-connected";
+            bool echo = connected && SocketHelpers.TryEcho(socket!, "order-permit-first", timeoutMs, out detail);
+            Check.True(echo, "permit→block 同端口：首个命中的 permit 生效", $"{error} {detail}");
+            socket?.Dispose();
+            ProbeStats afterStats = device.GetStats();
+            Check.Equal(1, (long)(afterStats.MatchedPermit - beforeStats.MatchedPermit),
+                        "permit→block 同端口：matched_permit +1");
+            Check.Equal(0, (long)(afterStats.MatchedBlock - beforeStats.MatchedBlock),
+                        "permit→block 同端口：matched_block +0（block 未抢跑）");
+            Check.Equal(0, (long)(afterStats.Blocked - beforeStats.Blocked), "permit→block 同端口：blocked +0");
         }
 
-        // fallback=block 与非 block 规则组合：编译期拒绝 + 驱动独立拒绝。
+        // block 在前时首个命中生效：连接在连接阶段失败，后面的 permit 规则不会生效。
         {
-            var conflictingFallback = new[] { TestRule.PermitPort(50003, appId) };
-            bool builderRejected = false;
-            string builderMessage = string.Empty;
-            try
+            byte[] blockFirstBlob = BlobBuilder.Build(new[]
             {
-                _ = BlobBuilder.Build(conflictingFallback, Protocol.RuleActionBlock);
-            }
-            catch (InvalidOperationException ex)
-            {
-                builderRejected = true;
-                builderMessage = ex.Message;
-            }
-            Check.True(builderRejected && builderMessage.Contains("fallback", StringComparison.OrdinalIgnoreCase),
-                       "fallback=block 冲突：编译期拒绝", builderMessage);
+                TestRule.BlockPort(blockServer.Port, appId),
+                TestRule.PermitPort(blockServer.Port, appId),
+            }, Protocol.RuleActionPermit);
+            ProbeRuleInfo before = device.GetRuleInfo();
+            device.SetRuleBlob(blockFirstBlob);
+            ProbeRuleInfo installed = device.GetRuleInfo();
+            Check.Equal(2, installed.RuleCount, "block→permit 同端口：规则数与下发一致");
+            Check.Equal(before.Generation + 1, installed.Generation, "block→permit 同端口：generation +1");
 
-            byte[] uncheckedBlob = BlobBuilder.BuildUnchecked(conflictingFallback, Protocol.RuleActionBlock);
-            ProbeRuleInfo beforeFallback = device.GetRuleInfo();
-            bool driverRejected = false;
-            try
+            int acceptedBefore = blockServer.Accepted;
+            ProbeStats beforeStats = device.GetStats();
+            bool connected = SocketHelpers.TryConnect(blockTarget, timeoutMs, out Socket? socket, out string error);
+            Check.True(!connected, "block→permit 同端口：首个命中的 block 在连接阶段失败", error);
+            socket?.Dispose();
+            await Task.Delay(200);
+            Check.Equal(acceptedBefore, blockServer.Accepted, "block→permit 同端口：服务器没有 accept");
+            ProbeStats afterStats = device.GetStats();
+            Check.Equal(1, (long)(afterStats.MatchedBlock - beforeStats.MatchedBlock),
+                        "block→permit 同端口：matched_block +1");
+            Check.Equal(0, (long)(afterStats.MatchedPermit - beforeStats.MatchedPermit),
+                        "block→permit 同端口：matched_permit +0");
+            Check.Equal(1, (long)(afterStats.Blocked - beforeStats.Blocked), "block→permit 同端口：blocked +1");
+            Check.Equal(1, (long)(afterStats.DeferredBlocks - beforeStats.DeferredBlocks),
+                        "block→permit 同端口：deferred_blocks +1");
+        }
+
+        // fallback=block 与一条 permit 共存：permit 目标成功，其他目标在连接阶段失败。
+        {
+            byte[] fallbackWithPermit = BlobBuilder.Build(new[]
             {
-                device.SetRuleBlob(uncheckedBlob);
-            }
-            catch (Win32Exception ex)
-            {
-                driverRejected = ex.NativeErrorCode == 87;
-            }
-            Check.True(driverRejected, "fallback=block 冲突 blob 被驱动拒绝", "STATUS_INVALID_PARAMETER");
-            Check.Equal(beforeFallback.Generation, device.GetRuleInfo().Generation, "fallback 冲突 blob 不改变 generation");
-            Console.WriteLine($"[rules] fallback-conflict: builder-rejected={builderRejected} " +
-                              $"driver-rejected={driverRejected} " +
-                              $"generation={beforeFallback.Generation}->{device.GetRuleInfo().Generation}");
+                TestRule.PermitPort(permitServer.Port, appId),
+            }, Protocol.RuleActionBlock);
+            ProbeRuleInfo before = device.GetRuleInfo();
+            device.SetRuleBlob(fallbackWithPermit);
+            ProbeRuleInfo installed = device.GetRuleInfo();
+            Check.Equal(Protocol.RuleActionBlock, installed.FallbackAction,
+                        "fallback=block + permit：兜底动作与下发一致");
+            Check.Equal(before.Generation + 1, installed.Generation, "fallback=block + permit：generation +1");
+
+            ProbeStats beforePermit = device.GetStats();
+            bool connected = SocketHelpers.TryConnect(permitTarget, timeoutMs, out Socket? socket, out string error);
+            string detail = "not-connected";
+            bool echo = connected && SocketHelpers.TryEcho(socket!, "fallback-permit", timeoutMs, out detail);
+            Check.True(echo, "fallback=block + permit：permit 目标成功", $"{error} {detail}");
+            socket?.Dispose();
+            ProbeStats afterPermit = device.GetStats();
+            Check.Equal(1, (long)(afterPermit.MatchedPermit - beforePermit.MatchedPermit),
+                        "fallback=block + permit：matched_permit +1");
+            Check.Equal(0, (long)(afterPermit.FallbackBlock - beforePermit.FallbackBlock),
+                        "fallback=block + permit：命中时不走兜底");
+
+            int acceptedBefore = fallbackServer.Accepted;
+            ProbeStats beforeBlock = device.GetStats();
+            bool blocked = SocketHelpers.TryConnect(fallbackTarget, timeoutMs, out Socket? blockedSocket, out string blockedError);
+            Check.True(!blocked, "fallback=block + permit：其他目标在连接阶段失败", blockedError);
+            blockedSocket?.Dispose();
+            await Task.Delay(200);
+            Check.Equal(acceptedBefore, fallbackServer.Accepted, "fallback=block + permit：服务器没有 accept");
+            ProbeStats afterBlock = device.GetStats();
+            Check.Equal(1, (long)(afterBlock.FallbackBlock - beforeBlock.FallbackBlock),
+                        "fallback=block + permit：fallback_block +1");
+            Check.Equal(1, (long)(afterBlock.Blocked - beforeBlock.Blocked), "fallback=block + permit：blocked +1");
+            Check.Equal(1, (long)(afterBlock.DeferredBlocks - beforeBlock.DeferredBlocks),
+                        "fallback=block + permit：deferred_blocks +1");
+            Check.True(device.GetEvents(64).Any(e => e.Decision == Protocol.DecisionBlockedFallback &&
+                                                     e.RemotePort == fallbackServer.Port),
+                       "fallback=block + permit：兜底事件", $"port={fallbackServer.Port}");
         }
 
         byte[] mainBlob = BlobBuilder.Build(new[]
@@ -124,7 +159,6 @@ internal static class RuleSuite
             TestRule.BlockPort(blockServer.Port),
             TestRule.RedirectPort(redirectTargetServer.Port),
         }, Protocol.RuleActionPermit);
-        // fallback=block 只允许与 block 规则共存（任何非 block 规则都会被整块拒绝）。
         byte[] fallbackBlockBlob = BlobBuilder.Build(new[]
         {
             TestRule.BlockPort(blockServer.Port),
@@ -133,12 +167,6 @@ internal static class RuleSuite
         {
             TestRule.PermitPort(permitServer.Port, AppId.ForPath(@"C:\Windows\System32\notepad.exe")),
         }, Protocol.RuleActionPermit);
-
-        int redirectedConnections = 0;
-        var permitTarget = new IPEndPoint(IPAddress.Loopback, permitServer.Port);
-        var blockTarget = new IPEndPoint(IPAddress.Loopback, blockServer.Port);
-        var redirectTarget = new IPEndPoint(IPAddress.Loopback, redirectTargetServer.Port);
-        var fallbackTarget = new IPEndPoint(IPAddress.Loopback, fallbackServer.Port);
 
         device.SetRuleBlob(mainBlob);
         ProbeRuleInfo info = device.GetRuleInfo();
@@ -360,7 +388,6 @@ internal static class RuleSuite
         }
 
         // 驱动侧 selector 闸：超长/非法 UTF-8 的 permit blob 也必须整块拒绝（不能只靠上游编译器）。
-        // 重叠判定的 ASCII 大小写折叠。
         {
             string longSelector = new string('a', 512);
             byte[] longBlob = BlobBuilder.BuildUnchecked(new[]
@@ -385,23 +412,7 @@ internal static class RuleSuite
             }
             Check.True(longRejected, "超长 selector 的 permit blob 被驱动拒绝", "STATUS_INVALID_PARAMETER");
             Check.Equal(beforeLong.Generation, device.GetRuleInfo().Generation, "超长 selector 不改变 generation");
-
-            const string casePath = @"\device\harddiskvolume3\windows\system32\abc.exe";
-            bool caseRejected = false;
-            try
-            {
-                _ = BlobBuilder.Build(new[]
-                {
-                    TestRule.PermitPort(50005, casePath.ToUpperInvariant()),
-                    TestRule.BlockPort(50005, casePath),
-                }, Protocol.RuleActionPermit);
-            }
-            catch (InvalidOperationException)
-            {
-                caseRejected = true;
-            }
-            Check.True(caseRejected, "仅大小写不同的 selector 视为重叠（编译期）", "case-fold");
-            Console.WriteLine($"[rules] selector-guard: long-rejected={longRejected} case-overlap={caseRejected}");
+            Console.WriteLine($"[rules] selector-guard: long-rejected={longRejected}");
         }
 
         // A3：redirect 规则命中 —— 本地监听端接到连接并读回原始目的地。
@@ -671,10 +682,10 @@ internal static class RuleSuite
         }
 
         HostRuleParitySuite.Run(device, timeoutMs);
-        device.SetRuleBlob(mainBlob);
 
         config.Enabled = 0;
         device.SetConfig(config);
+        device.SetRuleBlob(BlobBuilder.Build(Array.Empty<TestRule>(), Protocol.RuleActionPermit));
         await Task.Delay(settleMs);
 
         // 池标签：每次 TCP 重定向分配一块 36 字节 context，所有权交给 WFP 后由 WFP 释放。

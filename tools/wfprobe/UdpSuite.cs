@@ -52,12 +52,14 @@ internal static class UdpSuite
         device.ResetStats();
 
         using var listener = new RedirectListener();
+        using var blockSink = new BlockSinkBinding();
         var config = new ProbeConfig
         {
             AbiVersion = Protocol.AbiVersion,
             Enabled = 1,
             ListenerProcessId = (uint)processId,
             ListenerPort = (ushort)listener.Port,
+            BlockSinkPort = (uint)blockSink.Port,
             SelfProcessCount = 1,
         };
         unsafe
@@ -67,11 +69,11 @@ internal static class UdpSuite
 
         device.SetConfig(config);
         Program.PrintConfig("udp-rules", device.GetConfig());
-        Console.WriteLine($"[udp-rules] listener dual-mode port={listener.Port}");
+        Console.WriteLine($"[udp-rules] listener dual-mode port={listener.Port} block-sink-port={blockSink.Port}");
 
 
 
-        using var context = new SuiteContext(device, listener, exe, appId, processId, timeoutMs);
+        using var context = new SuiteContext(device, listener, blockSink, exe, appId, processId, timeoutMs);
         try
         {
             if (Run(selected, "U1")) await U1(context);
@@ -92,6 +94,7 @@ internal static class UdpSuite
         }
         finally
         {
+            context.SetBlob(Array.Empty<TestRule>(), Protocol.RuleActionPermit);
             config.Enabled = 0;
             device.SetConfig(config);
         }
@@ -353,6 +356,7 @@ internal static class UdpSuite
         Console.WriteLine("[udp-rules] ===== U6 UDP block =====");
         using var blockedSink = new UdpPeer();
         using var controlSink = new UdpPeer();
+        long sinkBefore = context.BlockSink.Received;
         context.SetBlob(new[] { TestRule.BlockPort(blockedSink.Port, null, Protocol.RuleProtocolUdp) });
         ProbeStats before = context.Begin();
 
@@ -366,6 +370,7 @@ internal static class UdpSuite
         Check.Contains(blockedOutput, "recv-failed", "U6: 应用侧 recv 超时（静默丢包）");
         Check.True(!blockedSink.TryReceive(300, out _), "U6: 被 block 的端口没有收到 datagram", "auth 层丢弃");
         Check.True(!context.Listener.TryReceive(200, out _), "U6: listener 没有收到包", "");
+        Check.Equal(sinkBefore, context.BlockSink.Received, "U6: 固定 auth filter 命中（sink 没有收到 datagram）");
 
         ProbeStats afterBlock = context.Device.GetStats();
         CheckUdpInvariant(before, afterBlock, "U6 block");
@@ -389,18 +394,19 @@ internal static class UdpSuite
         CheckUdpInvariant(before, afterControl, "U6 控制组");
         await control.WaitForExitAsync(context.TimeoutMs);
 
-        Check.Equal(1, (long)(afterControl.UdpPermitted - before.UdpPermitted), "U6: 未 block 端口走 permit");
+        Check.AtLeast(1, (long)(afterControl.UdpPermitted - before.UdpPermitted),
+                      "U6: 未 block 端口走 permit");
         ProbeEvent[] controlEvents = context.Device.GetEvents(64);
         Check.True(controlEvents.Any(e => e.Decision == Protocol.DecisionPermittedFallback &&
                                           e.Protocol == 17 && e.RemotePort == controlSink.Port &&
                                           e.ProcessId == (uint)control.Pid),
                    "U6: 控制组 datagram 记录为 permitted_fallback",
                    $"port={controlSink.Port} pid={control.Pid}");
-        // fallback_permit 是跨协议全局计数，后台 TCP 也会 +1；UDP 决策已由事件与 udp_permitted 精确断言。
+        // fallback_permit 是跨协议全局计数，后台 TCP 也会 +1；UDP 控制组决策已由上面的 (pid, port) 事件断言。
         Check.AtLeast(1, (long)(afterControl.FallbackPermit - before.FallbackPermit), "U6: fallback_permit 至少 +1");
 
-        Check.Equal(2, (long)(afterControl.UdpClassifyCalls - before.UdpClassifyCalls),
-                    "U6: block 与控制组各 classify 一次");
+        Check.AtLeast(2, (long)(afterControl.UdpClassifyCalls - before.UdpClassifyCalls),
+                      "U6: block 与控制组至少各 classify 一次（背景 UDP 关联可能增加 calls）");
     }
 
     private static async Task U7(SuiteContext context, string pingHost)
@@ -410,6 +416,7 @@ internal static class UdpSuite
         using var blockedTcp = new EchoServer(IPAddress.Loopback, blockedSink.Port);
         using var controlTcp = new EchoServer(IPAddress.Loopback);
         using var controlSink = new UdpPeer();
+        long sinkBefore = context.BlockSink.Received;
 
         context.SetBlob(new[] { TestRule.BlockPort(blockedSink.Port, null, Protocol.RuleProtocolAny) });
         ProbeStats before = context.Begin();
@@ -423,11 +430,13 @@ internal static class UdpSuite
         Check.Contains(udpOutput, "sent=6B", "U7: UDP send 返回成功");
         Check.Contains(udpOutput, "recv-failed", "U7: UDP 应用侧超时");
         Check.True(!blockedSink.TryReceive(300, out _), "U7: any block 覆盖 UDP", "对端收不到");
+        Check.Equal(sinkBefore, context.BlockSink.Received,
+                    "U7: any block 的固定 auth filter 命中（sink 没有收到 datagram）");
 
         (bool tcpConnected, SocketError tcpError, string tcpDetail) =
-            TryTcpConnect(new IPEndPoint(IPAddress.Loopback, blockedSink.Port), context.TimeoutMs);
-        Check.True(!tcpConnected && tcpError == SocketError.AccessDenied,
-                   "U7: any block 覆盖 TCP（AccessDenied）", tcpDetail);
+            TryTcpConnectAsNonSelf(context, new IPEndPoint(IPAddress.Loopback, blockedSink.Port), context.TimeoutMs);
+        Check.True(!tcpConnected, "U7: any block 覆盖 TCP（连接阶段失败）", tcpDetail);
+        Console.WriteLine($"[udp-rules] U7 any-block tcp: error={tcpError} detail={tcpDetail}");
 
         bool controlConnected = SocketHelpers.TryConnect(new IPEndPoint(IPAddress.Loopback, controlTcp.Port),
                                                          context.TimeoutMs, out Socket? controlSocket, out string controlError);
@@ -448,16 +457,20 @@ internal static class UdpSuite
         await controlUdp.WaitForExitAsync(context.TimeoutMs);
 
         Check.Equal(1, (long)(afterBlock.UdpBlocked - before.UdpBlocked), "U7: udp_blocked +1");
-        Check.Equal(1, (long)(afterBlock.DeferredBlocks - before.DeferredBlocks), "U7: deferred_blocks +1");
-        Check.Equal(1, (long)(afterBlock.UdpPermitted - before.UdpPermitted), "U7: 控制组 UDP permit +1");
+        Check.AtLeast(2, (long)(afterBlock.DeferredBlocks - before.DeferredBlocks),
+                      "U7: UDP 关联与 TCP 对照各改道一次（deferred_blocks +2）");
+        Check.AtLeast(1, (long)(afterBlock.UdpPermitted - before.UdpPermitted),
+                      "U7: 控制组 UDP permit 至少 +1（背景 UDP 关联可能增加）");
         Check.True(context.Device.GetEvents(64).Any(e => e.Decision == Protocol.DecisionPermittedFallback &&
                                                          e.Protocol == 17 &&
                                                          e.ProcessId == (uint)controlUdp.Pid &&
                                                          e.RemotePort == controlSink.Port),
                    "U7: 控制组 datagram 记录为 permitted_fallback",
                    $"port={controlSink.Port} pid={controlUdp.Pid}");
-        // fallback_permit 是跨协议全局计数，后台 TCP 也会 +1；UDP 决策已由事件与 udp_permitted 精确断言。
+        // fallback_permit 是跨协议全局计数，后台 TCP 也会 +1；UDP 决策已由事件精确断言。
         Check.AtLeast(1, (long)(afterBlock.FallbackPermit - before.FallbackPermit), "U7: fallback_permit 至少 +1");
+        Check.AtLeast(2, (long)(afterBlock.UdpClassifyCalls - before.UdpClassifyCalls),
+                      "U7: block 与控制组至少各 classify 一次（背景 UDP 关联可能增加 calls）");
 
 
         CheckPing($"U7: any block（端口规则）下 ICMP ping 仍通（{pingHost}）", pingHost);
@@ -490,14 +503,16 @@ internal static class UdpSuite
             Check.Equal(0, fullExit, "U7: 全端口 any block 下 UDP send 成功");
             Check.Contains(fullOutput, "recv-failed", "U7: 全端口 any block 下 UDP 应用侧超时");
             Check.True(!controlSink.TryReceive(300, out _), "U7: 全端口 any block 覆盖 UDP", "对端收不到");
+            Check.Equal(sinkBefore, context.BlockSink.Received,
+                        "U7: 全端口 any block 的固定 auth filter 命中（sink 没有收到 datagram）");
         }
 
         (bool fullTcp, SocketError fullTcpError, string fullTcpDetail) =
-            TryTcpConnect(new IPEndPoint(IPAddress.Loopback, controlTcp.Port), context.TimeoutMs);
-        Check.True(!fullTcp && fullTcpError == SocketError.AccessDenied,
-                   "U7: 全端口 any block 覆盖 TCP（AccessDenied）", fullTcpDetail);
+            TryTcpConnectAsNonSelf(context, new IPEndPoint(IPAddress.Loopback, controlTcp.Port), context.TimeoutMs);
+        Check.True(!fullTcp, "U7: 全端口 any block 覆盖 TCP（连接阶段失败）", fullTcpDetail);
+        Console.WriteLine($"[udp-rules] U7 full-block tcp: error={fullTcpError} detail={fullTcpDetail}");
 
-        // fallback=block：没有规则时仍只装 6/17 两条 filter，ICMP 不被误拦。
+        // fallback=block：固定 auth filter 只写协议 6/17，ICMP 不被误拦。
         context.SetBlob(Array.Empty<TestRule>(), Protocol.RuleActionBlock);
         CheckPing($"U7: fallback block 下 ICMP ping 仍通（{pingHost}）", pingHost);
         context.SetBlob(Array.Empty<TestRule>(), Protocol.RuleActionPermit);
@@ -908,9 +923,12 @@ internal static class UdpSuite
         context.SetBlob(new[] { TestRule.BlockPort(port, null, Protocol.RuleProtocolUdp) });
         context.Device.ResetStats();
         client.SendCommand("send hot-2");
+        Check.True(permitPeer.TryReceive(context.TimeoutMs, out PeerDatagram secondDatagram),
+                   "U13: 已存在的 UDP 关联保持旧 permit 决策", "");
+        EqualText("hot-2", Encoding.UTF8.GetString(secondDatagram.Payload), "U13: 旧关联 payload");
+        permitPeer.Send(secondDatagram.Payload, secondDatagram.Source);
         string second = await client.WaitForLineAsync("send#1", context.TimeoutMs);
-        Check.Contains(second, "recv-failed", "U13: 换 block 后旧关联 datagram 没有回包");
-        Check.True(!permitPeer.TryReceive(400, out _), "U13: 旧关联 datagram 被 auth 层丢弃", "");
+        Check.Contains(second, "recv=5B", "U13: 旧关联换表后仍收到回包");
 
         ProbeStats oldAssociation = context.Device.GetStats();
         CheckUdpInvariant(default, oldAssociation, "U13 旧关联");
@@ -927,10 +945,13 @@ internal static class UdpSuite
         client.SendCommand("new");
         await client.WaitForLineAsync("new", context.TimeoutMs);
         context.Device.ResetStats();
+        long sinkBefore = context.BlockSink.Received;
         client.SendCommand("send hot-3");
         string third = await client.WaitForLineAsync("send#2", context.TimeoutMs);
         Check.Contains(third, "recv-failed", "U13: 新关联按新 blob 被 block");
         Check.True(!permitPeer.TryReceive(400, out _), "U13: 新关联 datagram 对端收不到", "");
+        Check.Equal(sinkBefore, context.BlockSink.Received,
+                    "U13: 新关联的固定 auth filter 命中（sink 没有收到 datagram）");
 
         ProbeStats newAssociation = context.Device.GetStats();
         CheckUdpInvariant(default, newAssociation, "U13 新关联");
@@ -1060,6 +1081,27 @@ internal static class UdpSuite
     }
 
 
+    // 套件进程自己登记在 self_process_ids 里（listener 回包闸）；验证 block 规则时先临时
+    // 取消 self-PID，让这条连接真正进入规则匹配，结束后恢复原配置。
+    private static unsafe (bool Connected, SocketError Error, string Detail) TryTcpConnectAsNonSelf(
+        SuiteContext context, IPEndPoint target, int timeoutMs)
+    {
+        ProbeConfig saved = context.Device.GetConfig();
+        ProbeConfig withoutSelf = saved;
+        withoutSelf.SelfProcessCount = 0;
+        for (int index = 0; index < Protocol.MaxSelfProcessIds; index++)
+            withoutSelf.SelfProcessIds[index] = 0;
+        context.Device.SetConfig(withoutSelf);
+        try
+        {
+            return TryTcpConnect(target, timeoutMs);
+        }
+        finally
+        {
+            context.Device.SetConfig(saved);
+        }
+    }
+
     private static (bool Connected, SocketError Error, string Detail) TryTcpConnect(IPEndPoint target, int timeoutMs)
     {
         using var socket = new Socket(target.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
@@ -1107,6 +1149,7 @@ internal static class UdpSuite
 
         public SuiteContext(WfpDevice device,
                             RedirectListener listener,
+                            BlockSinkBinding blockSink,
                             string exe,
                             string appId,
                             int processId,
@@ -1114,6 +1157,7 @@ internal static class UdpSuite
         {
             Device = device;
             this.listener = listener;
+            BlockSink = blockSink;
             Exe = exe;
             AppId = appId;
             ProcessId = processId;
@@ -1123,6 +1167,8 @@ internal static class UdpSuite
         public WfpDevice Device { get; }
 
         public RedirectListener Listener => listener;
+
+        public BlockSinkBinding BlockSink { get; }
 
         public string Exe { get; }
 

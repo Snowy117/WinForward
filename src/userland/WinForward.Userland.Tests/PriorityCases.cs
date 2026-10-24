@@ -55,7 +55,7 @@ internal static class PriorityCases
 
         Differential.Case(
             "priority-specific-rule-first",
-            "把具体规则（443）放在前面：443 命中 redirect，8080 命中后面的 block（block 规则必须收窄到与更早规则不相交的端口，否则编译期会拒绝歧义配置）",
+            "把具体规则（443）放在前面：443 命中 redirect，8080 命中后面的 block；规则数组顺序即优先级，block 参与首个命中",
             RuleAction.Permit,
             new[]
             {
@@ -72,7 +72,7 @@ internal static class PriorityCases
 
         Differential.Case(
             "mixed-rules-report-rule-index",
-            "三条互不相同的规则 + 兜底 permit：block 写在最前（写在 redirect 之后会构成歧义配置，编译期拒绝），逐条连接检查命中的规则序号",
+            "三条互不相同的规则 + 兜底 permit：block 写在最前，逐条连接检查命中的规则序号",
             RuleAction.Permit,
             new[]
             {

@@ -13,8 +13,8 @@ internal static class CompilerSelectorTests
         TestRunner.Add("compiler-selector/带尾斜杠的目录与不带斜杠去重", DirectoryTrailingSlash);
         TestRunner.Add("compiler-selector/路径解析失败带规则序号与原文", ResolutionFailure);
         TestRunner.Add("compiler-selector/block 规则接受精确路径数组", BlockExactPathArray);
-        TestRunner.Add("compiler-selector/block 规则拒绝文件名选择器", BlockFileNameRejected);
-        TestRunner.Add("compiler-selector/block 规则拒绝目录前缀选择器", BlockDirectoryRejected);
+        TestRunner.Add("compiler-selector/block 规则接受文件名选择器", BlockFileNameAccepted);
+        TestRunner.Add("compiler-selector/block 规则接受目录前缀选择器", BlockDirectoryAccepted);
         TestRunner.Add("compiler-selector/block 规则允许不写进程选择器", BlockAnyProcess);
         TestRunner.Add("compiler-selector/同一规则内进程选择器去重", SelectorDeduplication);
     }
@@ -123,19 +123,35 @@ internal static class CompilerSelectorTests
         Check.Equal((byte)0, BlobReader.Selector(blob, 1).IsDirectory, "两条都不是目录");
     }
 
-    private static void BlockFileNameRejected() =>
-        Check.ThrowsContaining<PolicyCompileException>(
-            () => TestAppId.Compile(new PolicyTable(
-                new[] { new PolicyRule { Processes = new[] { ProcessSelector.Parse("svchost.exe") }, Action = RuleAction.Block } },
-                RuleAction.Permit)),
-            "文件名", "block 规则不能写文件名选择器");
+    private static void BlockFileNameAccepted()
+    {
+        byte[] blob = TestAppId.Compile(new PolicyTable(
+            new[] { new PolicyRule { Processes = new[] { ProcessSelector.Parse("svchost.exe") }, Action = RuleAction.Block } },
+            RuleAction.Permit));
 
-    private static void BlockDirectoryRejected() =>
-        Check.ThrowsContaining<PolicyCompileException>(
-            () => TestAppId.Compile(new PolicyTable(
-                new[] { new PolicyRule { Processes = new[] { ProcessSelector.Parse(TestAppId.MyAppDos) }, Action = RuleAction.Block } },
-                RuleAction.Permit)),
-            "目录前缀", "block 规则不能写目录前缀选择器");
+        RuleBlobRule rule = BlobReader.Rule(blob, 0);
+        RuleBlobProcessSelector selector = BlobReader.Selector(blob, 0);
+        Check.Equal((byte)RuleAction.Block, rule.Action, "动作是 block");
+        Check.Equal(1U, rule.ProcessCount, "block 接受文件名选择器");
+        Check.Equal(RuleBlobProcessSelector.KindFileName, selector.Kind, "kind = 文件名");
+        Check.Equal((byte)0, selector.IsDirectory, "文件名选择器的 is_directory 是 0");
+        Check.Equal("svchost.exe", BlobReader.ProcessString(blob, selector.StringOffset), "只折叠 ASCII 大小写");
+    }
+
+    private static void BlockDirectoryAccepted()
+    {
+        byte[] blob = TestAppId.Compile(new PolicyTable(
+            new[] { new PolicyRule { Processes = new[] { ProcessSelector.Parse(TestAppId.MyAppDos) }, Action = RuleAction.Block } },
+            RuleAction.Permit));
+
+        RuleBlobRule rule = BlobReader.Rule(blob, 0);
+        RuleBlobProcessSelector selector = BlobReader.Selector(blob, 0);
+        Check.Equal((byte)RuleAction.Block, rule.Action, "动作是 block");
+        Check.Equal(1U, rule.ProcessCount, "block 接受目录前缀选择器");
+        Check.Equal(RuleBlobProcessSelector.KindPath, selector.Kind, "kind = 路径");
+        Check.Equal((byte)1, selector.IsDirectory, "目录标记");
+        Check.Equal(TestAppId.MyAppDevice, BlobReader.ProcessString(blob, selector.StringOffset), "目录按设备路径落盘");
+    }
 
     private static void BlockAnyProcess()
     {

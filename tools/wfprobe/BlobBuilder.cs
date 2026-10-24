@@ -64,13 +64,10 @@ internal static class BlobBuilder
 {
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-    public static byte[] Build(IReadOnlyList<TestRule> rules, uint fallbackAction)
-    {
-        List<FixtureRule> compiled = Compile(rules, validateSelectors: true);
-        RuleBlobOrder.Validate(compiled, fallbackAction);
-        return Write(compiled, fallbackAction);
-    }
+    public static byte[] Build(IReadOnlyList<TestRule> rules, uint fallbackAction) =>
+        Write(Compile(rules, validateSelectors: true), fallbackAction);
 
+    // 与 Build 共用同一套布局；只跳过 selector 的 UTF-8 上限，供驱动侧闸门夹具使用。
     public static byte[] BuildUnchecked(IReadOnlyList<TestRule> rules, uint fallbackAction) =>
         Write(Compile(rules, validateSelectors: false), fallbackAction);
 

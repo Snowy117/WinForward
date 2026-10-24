@@ -21,6 +21,8 @@ internal static class CompilerTests
         TestRunner.Add("compiler/网段下标按记录数递增", NetworkIndexes);
         TestRunner.Add("compiler/任意选择器编码为计数 0 与首下标 0", AnySelectors);
         TestRunner.Add("compiler/兜底动作写入头部", FallbackAction);
+        TestRunner.Add("compiler/内网 permit 后 block 其余被接受", PermitInternalThenBlockRest);
+        TestRunner.Add("compiler/兜底 block 与 permit 规则共存被接受", FallbackBlockWithRules);
         TestRunner.Add("compiler/规则与选择器保留位为 0", ReservedIsZero);
         TestRunner.Add("compiler/端口排序合并相邻与重叠区间", PortMerge);
         TestRunner.Add("compiler/端口区间端点原样写入", PortEndpoints);
@@ -285,6 +287,56 @@ internal static class CompilerTests
             RuleAction.Redirect));
 
         Check.Equal(2U, BlobReader.Header(blob).FallbackAction, "fallback_action 写进头部");
+    }
+
+    private static void PermitInternalThenBlockRest()
+    {
+        PolicyTable table = new(
+            new[]
+            {
+                new PolicyRule
+                {
+                    RemoteNetworks = new[] { RemoteNetwork.Parse("10.0.0.0/8") },
+                    Action = RuleAction.Permit,
+                },
+                new PolicyRule { Action = RuleAction.Block },
+            },
+            RuleAction.Permit);
+
+        byte[] blob = TestAppId.Compile(table);
+        RuleBlobHeader header = BlobReader.Header(blob);
+        RuleBlobRule permit = BlobReader.Rule(blob, 0);
+        RuleBlobRule block = BlobReader.Rule(blob, 1);
+
+        Check.Equal(0U, header.FallbackAction, "兜底仍是 permit");
+        Check.Equal(2U, header.RuleCount, "两条规则都保留");
+        Check.Equal((byte)RuleAction.Permit, permit.Action, "规则 0 是 permit");
+        Check.Equal(1U, permit.NetworkCount, "规则 0 保留 10.0.0.0/8");
+        Check.Equal((byte)RuleAction.Block, block.Action, "规则 1 是 block");
+        Check.Equal(0U, block.NetworkCount, "规则 1 不限网段");
+    }
+
+    private static void FallbackBlockWithRules()
+    {
+        PolicyTable table = new(
+            new[]
+            {
+                new PolicyRule
+                {
+                    RemotePorts = new[] { PortRange.Single(443) },
+                    Action = RuleAction.Permit,
+                },
+            },
+            RuleAction.Block);
+
+        byte[] blob = TestAppId.Compile(table);
+        RuleBlobHeader header = BlobReader.Header(blob);
+        RuleBlobRule permit = BlobReader.Rule(blob, 0);
+
+        Check.Equal(1U, header.FallbackAction, "兜底动作是 block");
+        Check.Equal(1U, header.RuleCount, "permit 规则保留");
+        Check.Equal((byte)RuleAction.Permit, permit.Action, "规则 0 是 permit");
+        Check.Equal(1U, permit.PortCount, "规则 0 保留 443 端口");
     }
 
     private static void ReservedIsZero()

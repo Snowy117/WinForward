@@ -15,13 +15,19 @@ internal static class BlockProbe
         IPEndPoint remote = Program.ParseEndPoint(options.Require("remote"));
 
         using var device = new WfpDevice();
+        using var blockSink = new BlockSinkBinding();
         device.ResetStats();
         ProbeConfig config = device.GetConfig();
         config.AbiVersion = Protocol.AbiVersion;
-        config.Enabled = 1;
+        config.Enabled = 0;
         config.ListenerProcessId = (uint)Environment.ProcessId;
         config.ListenerPort = (ushort)options.GetInt("port", 19090);
+        config.BlockSinkPort = (uint)blockSink.Port;
         config.SelfProcessCount = 0;
+        device.SetConfig(config);
+
+        device.SetRuleBlob(BlobBuilder.Build(Array.Empty<TestRule>(), Protocol.RuleActionPermit));
+        config.Enabled = 1;
         device.SetConfig(config);
 
         // rulePort == 0 时不放 block 规则：auth 层 filter 不挂，用来做“防火墙是否被截胡”的对照。
@@ -36,9 +42,9 @@ internal static class BlockProbe
 
         ProbeStats stats = device.GetStats();
         ConfigOff(device);
-        Console.WriteLine($"[blockprobe] remote={remote} rule-port={rulePort} connected={connected} " +
-                          $"elapsed={watch.ElapsedMilliseconds}ms blocked={stats.Blocked} " +
-                          $"matched_block={stats.MatchedBlock} error={error}");
+        Console.WriteLine($"[blockprobe] remote={remote} rule-port={rulePort} sink-port={blockSink.Port} " +
+                          $"connected={connected} elapsed={watch.ElapsedMilliseconds}ms blocked={stats.Blocked} " +
+                          $"matched_block={stats.MatchedBlock} sink-received={blockSink.Received} error={error}");
         return Task.FromResult(0);
     }
 

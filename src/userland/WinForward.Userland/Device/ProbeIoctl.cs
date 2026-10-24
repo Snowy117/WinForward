@@ -22,9 +22,6 @@ public static class ProbeIoctl
     /// <summary>单块规则 blob 的上限。</summary>
     public const uint RuleBlobMaxSize = 64 * 1024;
 
-    /// <summary>一次换表能安装的 ALE_AUTH_CONNECT block filter 总数。</summary>
-    public const uint MaxBlockFilters = 128;
-
     /// <summary>诊断接口 <see cref="MeasureProcessPathCode"/> 的输入上限（UTF-16 字节数）。</summary>
     public const uint ProcessPathMeasureInputMax = 2048;
 

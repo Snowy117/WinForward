@@ -19,10 +19,9 @@ inline constexpr std::uint32_t probe_abi_version = 8;
 // 异常的下发（正常策略是几百字节到几 KB）。
 inline constexpr std::uint32_t rule_blob_max_size = 64 * 1024;
 
-// 一次换表能安装的 ALE_AUTH_CONNECT block filter 总数（V4+V6 合计）。协议展开后一条
-// any 规则最多 2 layer × 2 protocol = 4 条，fallback=block 也要 2 layer × 2 protocol；
-// 超出时整块 blob 被拒绝，避免静默丢弃规则。产品侧镜像见 PolicyLimits.MaxBlockFilters。
-inline constexpr std::uint32_t max_block_filters = 128;
+// block sink 的固定 auth filter 条数（V4/V6 × TCP/UDP 各一条）。固定的条数让 block 的
+// 执行成本与规则数、选择器数组都无关。
+inline constexpr std::uint32_t block_sink_filter_count = 4;
 
 // 防循环闸 4 的 self-PID 集合容量。真实部署里代理进程数远小于这个值。
 inline constexpr std::uint32_t max_self_process_ids = 8;
@@ -249,6 +248,7 @@ enum class probe_decision : std::uint8_t
     redirect_failed = 15,
     context_alloc_failed = 16,
     permitted_deferred_block = 17,
+    block_enforcement_failed = 18, // block 命中但改道 sink 失败：按 fail-open 放行，不计 blocked
 };
 
 // 最终动作，与 src/common/rule_blob.h 的 rule_action 数值一致（编译期断言在 classify 里）。
@@ -295,7 +295,7 @@ struct probe_stats
 {
     std::uint64_t classify_calls;
     std::uint64_t permitted;
-    std::uint64_t blocked;
+    std::uint64_t blocked; // block 决策成功改道到 sink 的次数；改道失败不计入（见 redirect_failures）
     std::uint64_t redirected;
     std::uint64_t rules_replaced;
     std::uint64_t rejected_blobs;
@@ -319,7 +319,7 @@ struct probe_stats
     std::uint64_t fallback_permit;
     std::uint64_t fallback_block;
     std::uint64_t fallback_redirect;
-    std::uint64_t deferred_blocks; // redirect 层放行、交给 AUTH_CONNECT block filter 的次数
+    std::uint64_t deferred_blocks; // block 决策成功改道到 sink、交给固定 auth filter 执行的次数
     std::uint64_t process_path_metadata_seen; // 诊断：redirect 层是否给出 PROCESS_PATH（预期 0）
     std::uint64_t udp_classify_calls; // classify 层决策数：进入 classify 且协议为 UDP
     std::uint64_t udp_permitted; // UDP 最终放行（含 redirect 失败后的 fail-open）

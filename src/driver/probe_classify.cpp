@@ -229,10 +229,40 @@ void set_permit(FWPS_CLASSIFY_OUT0* classify_out) noexcept
     classify_out->rights &= ~FWPS_RIGHT_ACTION_WRITE;
 }
 
-void set_block(FWPS_CLASSIFY_OUT0* classify_out) noexcept
+// 匹配之后一次 classify 的输入与输出；rule_index 已确定为命中规则下标或 0xFFFFFFFF。
+struct classify_call
 {
-    classify_out->actionType = FWP_ACTION_BLOCK;
-    classify_out->rights &= ~FWPS_RIGHT_ACTION_WRITE;
+    probe_state& state;
+    const probe_config& config;
+    const connection_facts& facts;
+    std::uint32_t rule_index;
+    const void* classify_context;
+    const FWPS_FILTER1* filter;
+    FWPS_CLASSIFY_OUT0* classify_out;
+};
+
+// redirect 层不执行拦截，改道失败的真实效果是直连；按 PERMIT 记账，并用 redirect_failures
+// 与独立 decision 暴露这次失败，不让计数假装拦住了。
+struct redirect_failure
+{
+    probe_decision decision;
+    std::uint16_t port;
+    redirect_branch branch;
+    std::uint32_t status; // acquire / apply 的 NTSTATUS；0 表示还没走到改道
+};
+
+void record_redirect_failure(const classify_call& call, const redirect_failure& failure) noexcept
+{
+    probe_increment(call.state.stats.redirect_failures);
+    probe_increment(call.state.stats.permitted);
+    count_udp_permit(call.state, call.facts.protocol);
+    if (failure.status != 0)
+    {
+        probe_increment(call.state.stats.apply_failures);
+        call.state.stats.last_status = failure.status;
+    }
+    log_decision(call.facts, call.rule_index, failure.decision, probe_action::permit, failure.port, failure.branch);
+    set_permit(call.classify_out);
 }
 
 void permit_classification(probe_state& state,
@@ -249,123 +279,126 @@ void permit_classification(probe_state& state,
 
 // 依据 FwpsAcquireWritableLayerDataPointer0 的 Remarks：该函数会把 classifyOut->actionType 置为
 // FWP_ACTION_BLOCK、清掉 FWPS_RIGHT_ACTION_WRITE，并且每次调用都必须配对一次
-// FwpsApplyModifiedLayerData0。我们的 filter 是 FWP_ACTION_CALLOUT_TERMINATING，不存在
-// 「留给低权重 callout 再改」的需求，所以放行和拒绝都直接写终态。
-void finish_classify(UINT64 classify_handle, void* writable_data, FWPS_CLASSIFY_OUT0* classify_out, bool block) noexcept
+// FwpsApplyModifiedLayerData0。classify 是 terminating，redirect 层又不执行拦截，
+// 所以终态只可能是 PERMIT。apply 之前失败时 context 仍归调用方。
+[[nodiscard]] NTSTATUS
+apply_redirect(const classify_call& call, const SOCKADDR_STORAGE& target, redirect_context* context) noexcept
 {
-    if (block)
+    UINT64 classify_handle = 0;
+    NTSTATUS status = FwpsAcquireClassifyHandle0(const_cast<void*>(call.classify_context), 0, &classify_handle);
+    if (!NT_SUCCESS(status))
     {
-        set_block(classify_out);
+        return status;
     }
-    else
+
+    void* writable_data = nullptr;
+    status = FwpsAcquireWritableLayerDataPointer0(
+        classify_handle, call.filter->filterId, 0, &writable_data, call.classify_out);
+    if (!NT_SUCCESS(status) || writable_data == nullptr)
     {
-        set_permit(classify_out);
+        FwpsReleaseClassifyHandle0(classify_handle);
+        return NT_SUCCESS(status) ? STATUS_UNSUCCESSFUL : status;
     }
-    FwpsApplyModifiedLayerData0(classify_handle, writable_data, 0);
+
+    auto* request = static_cast<FWPS_CONNECT_REQUEST0*>(writable_data);
+    request->localRedirectTargetPID = call.config.listener_process_id;
+    request->localRedirectHandle = call.state.redirect_handle;
+    request->localRedirectContext = context;
+    request->localRedirectContextSize = context == nullptr ? 0 : sizeof(redirect_context);
+    RtlCopyMemory(&request->remoteAddressAndPort, &target, sizeof(target));
+
+    set_permit(call.classify_out);
+    FwpsApplyModifiedLayerData0(classify_handle, request, 0);
     FwpsReleaseClassifyHandle0(classify_handle);
+    return STATUS_SUCCESS;
 }
 
-void redirect_classification(probe_state& state,
-                             const probe_config& config,
-                             const connection_facts& facts,
-                             std::uint32_t rule_index,
-                             const void* classify_context,
-                             const FWPS_FILTER1* filter,
-                             FWPS_CLASSIFY_OUT0* classify_out) noexcept
+void redirect_classification(const classify_call& call) noexcept
 {
-    if (config.listener_port == 0 || state.redirect_handle == nullptr)
+    const probe_config& config = call.config;
+    if (config.listener_port == 0 || call.state.redirect_handle == nullptr)
     {
-        // 重定向失败 = 直连（fail-open）：ALE_CONNECT_REDIRECT 不执行拦截，返回 BLOCK 也不会
-        // 真的阻断，只会让计数和事实不符。这里记 permit + redirect_failures。
-        probe_increment(state.stats.redirect_failures);
-        probe_increment(state.stats.permitted);
-        count_udp_permit(state, facts.protocol);
-        log_decision(
-            facts, rule_index, probe_decision::redirect_failed, probe_action::permit, 0, redirect_branch::none);
-        set_permit(classify_out);
+        const redirect_failure failure{ probe_decision::redirect_failed, 0, redirect_branch::none, 0 };
+        record_redirect_failure(call, failure);
         return;
     }
 
-    const auto* remote = reinterpret_cast<const SOCKADDR*>(&facts.remote);
-    const auto* local = reinterpret_cast<const SOCKADDR*>(&facts.local);
+    const auto* remote = reinterpret_cast<const SOCKADDR*>(&call.facts.remote);
+    const auto* local = reinterpret_cast<const SOCKADDR*>(&call.facts.local);
     SOCKADDR_STORAGE target{};
     redirect_branch branch = redirect_branch::none;
     probe_build_redirect_target(remote, local, config.listener_port, target, branch);
 
-    UINT64 classify_handle = 0;
-    NTSTATUS status = FwpsAcquireClassifyHandle0(const_cast<void*>(classify_context), 0, &classify_handle);
-    if (!NT_SUCCESS(status))
-    {
-        probe_increment(state.stats.apply_failures);
-        probe_increment(state.stats.redirect_failures);
-        probe_increment(state.stats.permitted);
-        count_udp_permit(state, facts.protocol);
-        state.stats.last_status = static_cast<std::uint32_t>(status);
-        log_decision(facts, rule_index, probe_decision::redirect_failed, probe_action::permit, 0, branch);
-        set_permit(classify_out);
-        return;
-    }
-
-    void* writable_data = nullptr;
-    status = FwpsAcquireWritableLayerDataPointer0(classify_handle, filter->filterId, 0, &writable_data, classify_out);
-    if (!NT_SUCCESS(status) || writable_data == nullptr)
-    {
-        // 拿不到写副本时 classifyOut 可能已经被引擎改成 BLOCK；但这个层不执行拦截，实际效果是
-        // 直连。显式恢复成 PERMIT，让 classifyOut、事件与真实行为一致（fail-open）。
-        FwpsReleaseClassifyHandle0(classify_handle);
-        probe_increment(state.stats.apply_failures);
-        probe_increment(state.stats.redirect_failures);
-        probe_increment(state.stats.permitted);
-        count_udp_permit(state, facts.protocol);
-        state.stats.last_status = static_cast<std::uint32_t>(status);
-        set_permit(classify_out);
-        log_decision(facts, rule_index, probe_decision::redirect_failed, probe_action::permit, 0, branch);
-        return;
-    }
-
-    auto* request = static_cast<FWPS_CONNECT_REQUEST0*>(writable_data);
-
+    // 拿不到 context 就带不回原始目的地；此时还没 acquire，直接按 fail-open 放行。
     auto* context =
         static_cast<redirect_context*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(redirect_context), pool_tag));
     if (context == nullptr)
     {
-        // 分配不到 context 就带不回原始目的地；仍然配对 apply（此时数据还没改），然后放行——
-        // 这个层不执行拦截，BLOCK 只会让计数与“连接实际直连”不符（fail-open）。
-        finish_classify(classify_handle, writable_data, classify_out, false);
-        probe_increment(state.stats.context_alloc_failures);
-        probe_increment(state.stats.redirect_failures);
-        probe_increment(state.stats.permitted);
-        count_udp_permit(state, facts.protocol);
-        log_decision(facts,
-                     rule_index,
-                     probe_decision::context_alloc_failed,
-                     probe_action::permit,
-                     config.listener_port,
-                     branch);
+        probe_increment(call.state.stats.context_alloc_failures);
+        const redirect_failure failure{ probe_decision::context_alloc_failed, config.listener_port, branch, 0 };
+        record_redirect_failure(call, failure);
         return;
     }
-    probe_increment(state.stats.contexts_allocated);
+    probe_increment(call.state.stats.contexts_allocated);
 
     original_destination destination{};
-    destination.family = facts.family == AF_INET6 ? address_family::ipv6 : address_family::ipv4;
-    destination.protocol = facts.protocol == IPPROTO_UDP ? transport_protocol::udp : transport_protocol::tcp;
-    destination.port = facts.remote_port;
+    destination.family = call.facts.family == AF_INET6 ? address_family::ipv6 : address_family::ipv4;
+    destination.protocol = call.facts.protocol == IPPROTO_UDP ? transport_protocol::udp : transport_protocol::tcp;
+    destination.port = call.facts.remote_port;
     std::uint32_t address_length = 0;
     copy_address(remote, destination.address, address_length);
-    *context = make_redirect_context(destination, facts.process_id, rule_index);
+    *context = make_redirect_context(destination, call.facts.process_id, call.rule_index);
 
-    // 从 Windows 8 起，这三个字段是本地重定向的全部硬要求：目标的 PID、redirect handle，
-    // 以及一块由 ExAllocatePoolWithTag 分配、所有权随后交给 WFP 的 context。
-    request->localRedirectTargetPID = config.listener_process_id;
-    request->localRedirectHandle = state.redirect_handle;
-    request->localRedirectContext = context;
-    request->localRedirectContextSize = sizeof(redirect_context);
-    RtlCopyMemory(&request->remoteAddressAndPort, &target, sizeof(target));
+    const NTSTATUS status = apply_redirect(call, target, context);
+    if (!NT_SUCCESS(status))
+    {
+        // apply 之前失败：所有权没转给 WFP，context 由驱动释放。
+        ExFreePoolWithTag(context, pool_tag);
+        const redirect_failure failure{
+            probe_decision::redirect_failed, 0, branch, static_cast<std::uint32_t>(status)
+        };
+        record_redirect_failure(call, failure);
+        return;
+    }
 
-    finish_classify(classify_handle, writable_data, classify_out, false);
-    probe_increment(state.stats.redirected);
-    count_udp_redirect(state, facts.protocol);
-    log_decision(facts, rule_index, probe_decision::redirected, probe_action::redirect, config.listener_port, branch);
+    probe_increment(call.state.stats.redirected);
+    count_udp_redirect(call.state, call.facts.protocol);
+    log_decision(
+        call.facts, call.rule_index, probe_decision::redirected, probe_action::redirect, config.listener_port, branch);
+}
+
+// block 命中后把连接改道到 block_sink_port：redirect 层不执行拦截，拒绝由 AUTH_CONNECT 上
+// 的固定 filter（协议 + 远端端口 == sink + IS_CONNECTION_REDIRECTED）完成。
+void sink_classification(const classify_call& call, probe_decision decision) noexcept
+{
+    const auto sink_port = static_cast<std::uint16_t>(call.config.block_sink_port);
+    if (sink_port == 0 || call.state.redirect_handle == nullptr)
+    {
+        const redirect_failure failure{ probe_decision::block_enforcement_failed, 0, redirect_branch::none, 0 };
+        record_redirect_failure(call, failure);
+        return;
+    }
+
+    const auto* remote = reinterpret_cast<const SOCKADDR*>(&call.facts.remote);
+    const auto* local = reinterpret_cast<const SOCKADDR*>(&call.facts.local);
+    SOCKADDR_STORAGE target{};
+    redirect_branch branch = redirect_branch::none;
+    probe_build_redirect_target(remote, local, sink_port, target, branch);
+
+    const NTSTATUS status = apply_redirect(call, target, nullptr);
+    if (!NT_SUCCESS(status))
+    {
+        const redirect_failure failure{
+            probe_decision::block_enforcement_failed, sink_port, branch, static_cast<std::uint32_t>(status)
+        };
+        record_redirect_failure(call, failure);
+        return;
+    }
+
+    probe_increment(call.state.stats.blocked);
+    probe_increment(call.state.stats.deferred_blocks);
+    count_udp_block(call.state, call.facts.protocol);
+    log_decision(call.facts, call.rule_index, decision, probe_action::block, sink_port, branch);
 }
 
 // 规则表的引用守卫：classify 的每个返回路径都要归还引用，交给析构而不是手写 release。
@@ -455,9 +488,11 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
         return;
     }
 
-    // 闸 1：目标端口就是监听端口。监听端接到入站连接后转发时若再指向自己，会形成回环。
+    // 闸 1：目标端口是 listener 或 block sink 端口。监听端接到入站连接后转发时若再指向自己，
+    // 会形成回环；sink 端口上的连接已经过改道，不能再进入 classify。
     // <mutation id="gate-listener-port">
-    const bool listener_port_hit = config.listener_port != 0 && facts.remote_port == config.listener_port;
+    const bool listener_port_hit = (config.listener_port != 0 && facts.remote_port == config.listener_port) ||
+                                   (config.block_sink_port != 0 && facts.remote_port == config.block_sink_port);
     // </mutation>
     if (listener_port_hit)
     {
@@ -533,6 +568,7 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
 
     const match_result result = match(rules->view, connection);
     const std::uint32_t rule_index = result.matched ? result.rule_index : invalid_rule_index;
+    const classify_call call{ state, config, facts, rule_index, classify_context, filter, classify_out };
     // <mutation id="classify-redirect-branch">
     const bool redirect_wanted = result.action == rule_action::redirect;
     // </mutation>
@@ -543,24 +579,15 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
     if (redirect_wanted)
     {
         probe_increment(result.matched ? state.stats.matched_redirect : state.stats.fallback_redirect);
-        redirect_classification(state, config, facts, rule_index, classify_context, filter, classify_out);
+        redirect_classification(call);
         return;
     }
     if (block_wanted)
     {
-        // FWP_ACTION_BLOCK 在 ALE_CONNECT_REDIRECT 不生效（实测见 research）。决策在这里下、
-        // 执行由 ALE_AUTH_CONNECT 的 block filter 完成，所以计数与事件留在这一层。
+        // block 的执行在 ALE_AUTH_CONNECT 的固定 sink filter；redirect 层只负责把连接改道到
+        // block_sink_port，blocked / deferred_blocks 只在改道成功时增长。
         probe_increment(result.matched ? state.stats.matched_block : state.stats.fallback_block);
-        probe_increment(state.stats.blocked);
-        probe_increment(state.stats.deferred_blocks);
-        count_udp_block(state, facts.protocol);
-        log_decision(facts,
-                     rule_index,
-                     result.matched ? probe_decision::blocked_rule : probe_decision::blocked_fallback,
-                     probe_action::block,
-                     0,
-                     redirect_branch::none);
-        set_permit(classify_out);
+        sink_classification(call, result.matched ? probe_decision::blocked_rule : probe_decision::blocked_fallback);
         return;
     }
 

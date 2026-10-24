@@ -20,7 +20,7 @@ struct rule_table
     blob_view view; // 指向 data，不拥有内存
     volatile LONG references; // 正在使用本表的 classify 数量
     rule_table* retired_next; // 引用迟迟不归零时挂到退役链
-    bool contains_block; // 表里是否有 block 规则（含兜底），决定 auth 层 filter 是否存在
+    bool contains_block; // 是否需要固定 sink filter：fallback = block，或任一规则 action = block
 };
 
 static_assert(sizeof(rule_table) % 4 == 0, "blob 副本必须紧跟在结构体后面且保持 4 字节对齐");

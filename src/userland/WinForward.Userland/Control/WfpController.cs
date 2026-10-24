@@ -27,6 +27,7 @@ public sealed class WfpController : IAsyncDisposable
     private readonly ForwardedUdpRelay? _udpRelay;
     private readonly IReadOnlyList<ProbeForwardedIngress> _forwardedIngresses;
     private readonly bool _forwardedIngressMode;
+    private readonly BlockSink _blockSink;
     private bool _stopped;
 
 
@@ -39,6 +40,7 @@ public sealed class WfpController : IAsyncDisposable
                           ForwardedUdpRelay? udpRelay,
                           IReadOnlyList<ProbeForwardedIngress> forwardedIngresses,
                           bool forwardedIngressMode,
+                          BlockSink blockSink,
                           TextWriter report)
     {
         _device = device;
@@ -46,6 +48,7 @@ public sealed class WfpController : IAsyncDisposable
         _udpRelay = udpRelay;
         _forwardedIngresses = forwardedIngresses;
         _forwardedIngressMode = forwardedIngressMode;
+        _blockSink = blockSink;
         _report = report;
 
     }
@@ -61,6 +64,7 @@ public sealed class WfpController : IAsyncDisposable
         WfpDeviceClient device = WfpDeviceClient.Open();
         RelayServer? relay = null;
         ForwardedUdpRelay? udpRelay = null;
+        BlockSink? blockSink = null;
         IReadOnlyList<ProbeForwardedIngress> ingresses = Array.Empty<ProbeForwardedIngress>();
         bool ingressMode = settings.Forwarded is not null;
 
@@ -81,6 +85,9 @@ public sealed class WfpController : IAsyncDisposable
                             .Select(entry => ProbeForwardedIngress.For(entry.Address, (ushort)listeners.Port, entry.IfIndex))
                             .ToArray();
 
+            // 先保留 sink 端口再下发 blob：驱动要求 enabled 期间 sink 端口稳定，
+            // 且含 block 的表必须有非 0 端口才能启用。
+            blockSink = BlockSink.Bind(listeners.Port);
 
             relay = RelayServer.Start(listeners,
                                        settings.Report,
@@ -135,8 +142,8 @@ public sealed class WfpController : IAsyncDisposable
             }
 
             uint processId = (uint)Environment.ProcessId;
-            device.SetConfig(ProbeConfig.EnabledFor(processId, (ushort)relay.Port, new[] { processId }));
-            VerifyConfig(device, relay.Port);
+            device.SetConfig(ProbeConfig.EnabledFor(processId, (ushort)relay.Port, new[] { processId }, (uint)blockSink.Port));
+            VerifyConfig(device, relay.Port, blockSink.Port);
             ReportConfig(device, settings.Report);
             // 就绪信号必须在规则与配置都生效之后发：E2E 拿它当「可以建连了」的信号，
             // 提前打印会留下「进程说 ready、驱动还没启用」的窗口，门禁偶发失败就来自这里。
@@ -148,7 +155,7 @@ public sealed class WfpController : IAsyncDisposable
             Report(settings.Report, $"controller-ready pid={Environment.ProcessId} port={relay.Port} " +
                                     $"listener={DescribeListeners(listeners)}");
 
-            return new WfpController(device, relay, udpRelay, ingresses, ingressMode, settings.Report);
+            return new WfpController(device, relay, udpRelay, ingresses, ingressMode, blockSink, settings.Report);
         }
         catch
         {
@@ -184,6 +191,7 @@ public sealed class WfpController : IAsyncDisposable
                        $"controller-forwarded-clear-error {exception.GetType().Name}: {exception.Message}");
             }
 
+            blockSink?.Dispose();
             if (udpRelay is not null)
             {
                 udpRelay.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -229,6 +237,10 @@ public sealed class WfpController : IAsyncDisposable
         {
             Report(_report, $"controller-disable-error {exception.GetType().Name}: {exception.Message}");
         }
+
+        // 驱动 disabled 之后 sink 端口才允许释放；反过来的话，驱动仍会把 block 命中改道到
+        // 一个已经没人接的端口。
+        _blockSink.Dispose();
 
         // 先停监听、等会话收尾，再报计数：否则 controller-stop 里的 bytes 可能还是 0。
         if (_udpRelay is not null)
@@ -335,19 +347,20 @@ public sealed class WfpController : IAsyncDisposable
     {
         ProbeConfig config = device.GetConfig();
         Report(report, $"controller-config enabled={config.Enabled} listener_port={config.ListenerPort} " +
-                       $"listener_pid={config.ListenerProcessId} self_count={config.SelfProcessCount}");
+                       $"listener_pid={config.ListenerProcessId} self_count={config.SelfProcessCount} block-sink-port={config.BlockSinkPort}");
 
     }
 
-    private static void VerifyConfig(WfpDeviceClient device, int port)
+    private static void VerifyConfig(WfpDeviceClient device, int port, int blockSinkPort)
     {
         ProbeConfig config = device.GetConfig();
         if (config.Enabled != 1 || config.ListenerPort != (ushort)port ||
-            config.ListenerProcessId != (uint)Environment.ProcessId || config.SelfProcessCount != 1)
+            config.ListenerProcessId != (uint)Environment.ProcessId || config.SelfProcessCount != 1 ||
+            config.BlockSinkPort != (uint)blockSinkPort)
         {
             throw new InvalidOperationException(
                 $"驱动回读配置与下发的不同：enabled={config.Enabled} port={config.ListenerPort} " +
-                $"pid={config.ListenerProcessId} self={config.SelfProcessCount}");
+                $"pid={config.ListenerProcessId} self={config.SelfProcessCount} block_sink_port={config.BlockSinkPort} expected={blockSinkPort}");
         }
     }
 

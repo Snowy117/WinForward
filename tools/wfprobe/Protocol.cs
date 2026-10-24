@@ -59,7 +59,6 @@ internal static class Protocol
 
     public const uint MaxSelfProcessIds = 8;
     public const uint RuleBlobMaxSize = 64 * 1024;
-    public const uint MaxBlockFilters = 128;
 
     public const uint RuleBlobMagic = 0x31425257;
     public const ushort RuleBlobVersion = 2;
@@ -119,6 +118,7 @@ internal static class Protocol
     public const byte DecisionRedirectFailed = 15;
     public const byte DecisionContextAllocFailed = 16;
     public const byte DecisionPermittedDeferredBlock = 17;
+    public const byte DecisionBlockEnforcementFailed = 18;
 
     public const byte ActionPermit = 0;
     public const byte ActionBlock = 1;
@@ -168,7 +168,7 @@ internal struct ProbeStats
     public ulong FallbackPermit;
     public ulong FallbackBlock;
     public ulong FallbackRedirect;
-    public ulong DeferredBlocks;
+    public ulong DeferredBlocks; // block 决策成功改道到 sink 的次数（交给固定 auth filter 执行）
     public ulong ProcessPathMetadataSeen;
     public ulong UdpClassifyCalls;
     public ulong UdpPermitted;
