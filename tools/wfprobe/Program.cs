@@ -89,7 +89,7 @@ internal static class Program
     {
         Console.WriteLine(@"用法:
   wfprobe control [--enabled 0|1] [--port N] [--listener-pid PID]
-                  [--self-pid PID]... [--clear-self]
+                  [--block-sink-port N] [--self-pid PID]... [--clear-self]
   wfprobe stats | reset | pooltag [--tag WfPr]
   wfprobe events [--count N]
   wfprobe appid [--path FILE]
@@ -164,7 +164,7 @@ internal static class Program
         }
         Console.WriteLine($"[{prefix}] config: abi={config.AbiVersion} enabled={config.Enabled} " +
                           $"listener-pid={config.ListenerProcessId} port={config.ListenerPort} " +
-                          $"self-pids=[{string.Join(",", ids)}]");
+                          $"block-sink-port={config.BlockSinkPort} self-pids=[{string.Join(",", ids)}]");
     }
 
     internal static int Control(Options options)
@@ -179,6 +179,8 @@ internal static class Program
             config.ListenerPort = (ushort)options.GetUInt("port", 0);
         if (options.Has("listener-pid"))
             config.ListenerProcessId = options.GetUInt("listener-pid", 0);
+        if (options.Has("block-sink-port"))
+            config.BlockSinkPort = options.GetUInt("block-sink-port", 0);
         if (options.Has("clear-self"))
         {
             config.SelfProcessCount = 0;

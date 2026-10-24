@@ -16,6 +16,7 @@ public struct ProbeConfig
     public ushort Reserved0;
     public uint SelfProcessCount;
     public ProcessIdSlots SelfProcessIds;
+    public uint BlockSinkPort;
     public ReservedSlots Reserved;
 
     [InlineArray(8)]
@@ -24,7 +25,7 @@ public struct ProbeConfig
         private uint _element0;
     }
 
-    [InlineArray(3)]
+    [InlineArray(2)]
     public struct ReservedSlots
     {
         private uint _element0;
@@ -37,7 +38,10 @@ public struct ProbeConfig
     /// 构造启用状态的控制面配置。校验与驱动 <c>apply_config</c> 的接收条件一致，
     /// 让非法组合在本进程内先失败，而不是变成一个 Win32 错误码。
     /// </summary>
-    public static ProbeConfig EnabledFor(uint listenerProcessId, ushort listenerPort, ReadOnlySpan<uint> selfProcessIds)
+    public static ProbeConfig EnabledFor(uint listenerProcessId,
+                                         ushort listenerPort,
+                                         ReadOnlySpan<uint> selfProcessIds,
+                                         uint blockSinkPort = 0)
     {
         if (listenerProcessId == 0)
         {
@@ -47,6 +51,11 @@ public struct ProbeConfig
         if (listenerPort == 0)
         {
             throw new ArgumentOutOfRangeException(nameof(listenerPort), listenerPort, "监听端口不能为 0");
+        }
+
+        if (blockSinkPort != 0 && blockSinkPort == listenerPort)
+        {
+            throw new ArgumentOutOfRangeException(nameof(blockSinkPort), blockSinkPort, "block sink 端口不能与监听端口相同");
         }
 
         if (selfProcessIds.Length > ProbeIoctl.MaxSelfProcessIds)
@@ -60,6 +69,7 @@ public struct ProbeConfig
         config.Enabled = 1;
         config.ListenerProcessId = listenerProcessId;
         config.ListenerPort = listenerPort;
+        config.BlockSinkPort = blockSinkPort;
         config.SelfProcessCount = (uint)selfProcessIds.Length;
         for (int index = 0; index < selfProcessIds.Length; index++)
         {

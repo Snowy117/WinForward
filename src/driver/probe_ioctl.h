@@ -1,6 +1,6 @@
 #pragma once
 
-// 驱动与测试程序之间的控制面 ABI（v7）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
+// 驱动与测试程序之间的控制面 ABI（v8）。C# 侧在 tools/wfprobe/Protocol.cs 里逐字节镜像，
 // 两侧都有布局断言。任何字段调整都必须同时提升 probe_abi_version。
 //
 // 与 src/common/redirect_context.h 的分工：那个头定义的是“用途数据”（随连接走、用户态用
@@ -13,7 +13,7 @@
 namespace winforward::wfp::probe
 {
 
-inline constexpr std::uint32_t probe_abi_version = 7;
+inline constexpr std::uint32_t probe_abi_version = 8;
 
 // 单块规则 blob 的上限。METHOD_BUFFERED 会替我们复制一份输入，这个上限只用于拒绝明显
 // 异常的下发（正常策略是几百字节到几 KB）。
@@ -275,7 +275,8 @@ struct probe_config
     std::uint16_t reserved0;
     std::uint32_t self_process_count; // 防循环闸 4：这些 PID 的出站连接一律放行
     std::uint32_t self_process_ids[max_self_process_ids];
-    std::uint32_t reserved[3];
+    std::uint32_t block_sink_port; // block 改道目标端口；0 = 未配置 sink
+    std::uint32_t reserved[2]; // 必须为 0
 };
 
 static_assert(sizeof(probe_config) == 64, "probe_config 是对外 ABI");
@@ -283,6 +284,8 @@ static_assert(offsetof(probe_config, listener_process_id) == 8);
 static_assert(offsetof(probe_config, listener_port) == 12);
 static_assert(offsetof(probe_config, self_process_count) == 16);
 static_assert(offsetof(probe_config, self_process_ids) == 20);
+static_assert(offsetof(probe_config, block_sink_port) == 52);
+static_assert(offsetof(probe_config, reserved) == 56);
 
 // 计数器。无锁累加（InterlockedIncrement64），IOCTL 回读快照。
 //   permitted / blocked / redirected 是最终动作的总数；

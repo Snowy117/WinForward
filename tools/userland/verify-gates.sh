@@ -102,7 +102,7 @@ sed -i 's/inline constexpr std::uint32_t max_block_filters = 128;/inline constex
 expect_mutation_red "ABI/改 C++ 头的 max_block_filters" run_abi_with_root "$tmp"
 reset_header
 
-sed -i 's/public const uint AbiVersion = 7;/public const uint AbiVersion = 8;/' "$tmp/tools/wfprobe/Protocol.cs"
+sed -i 's/public const uint AbiVersion = 8;/public const uint AbiVersion = 9;/' "$tmp/tools/wfprobe/Protocol.cs"
 expect_mutation_red "ABI/改夹具的 ABI 版本" run_abi_with_root "$tmp"
 reset_header
 

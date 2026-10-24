@@ -34,11 +34,15 @@ NTSTATUS apply_config(const void* buffer, ULONG input_length) noexcept
             return STATUS_INVALID_PARAMETER;
         }
     }
-    if (candidate.reserved[0] != 0 || candidate.reserved[1] != 0 || candidate.reserved[2] != 0)
+    if (candidate.reserved[0] != 0 || candidate.reserved[1] != 0)
     {
         return STATUS_INVALID_PARAMETER;
     }
     if (candidate.enabled != 0 && (candidate.listener_port == 0 || candidate.listener_process_id == 0))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (candidate.block_sink_port != 0 && candidate.block_sink_port == candidate.listener_port)
     {
         return STATUS_INVALID_PARAMETER;
     }

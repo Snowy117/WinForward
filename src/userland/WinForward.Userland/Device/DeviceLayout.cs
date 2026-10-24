@@ -62,7 +62,8 @@ public static class DeviceLayout
         CheckOffset<ProbeConfig>(nameof(ProbeConfig.Reserved0), 14);
         CheckOffset<ProbeConfig>(nameof(ProbeConfig.SelfProcessCount), 16);
         CheckOffset<ProbeConfig>(nameof(ProbeConfig.SelfProcessIds), 20);
-        CheckOffset<ProbeConfig>(nameof(ProbeConfig.Reserved), 52);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.BlockSinkPort), 52);
+        CheckOffset<ProbeConfig>(nameof(ProbeConfig.Reserved), 56);
     }
 
     private static void VerifyProbeStats()

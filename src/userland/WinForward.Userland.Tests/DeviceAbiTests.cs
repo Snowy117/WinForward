@@ -27,7 +27,7 @@ internal static class DeviceAbiTests
 
     private static void ConfigRoundTrip()
     {
-        ProbeConfig config = ProbeConfig.EnabledFor(4242, 51000, new[] { 7u, 4242u });
+        ProbeConfig config = ProbeConfig.EnabledFor(4242, 51000, new[] { 7u, 4242u }, 4242);
         byte[] bytes = new byte[DeviceLayout.ProbeConfigSize];
         MemoryMarshal.Write(bytes, in config);
 
@@ -40,6 +40,12 @@ internal static class DeviceAbiTests
         Check.Equal(7U, BitConverter.ToUInt32(bytes, 20), "self_process_ids[0] 在偏移 20");
         Check.Equal(4242U, BitConverter.ToUInt32(bytes, 24), "self_process_ids[1] 紧随其后");
         Check.Equal(0U, BitConverter.ToUInt32(bytes, 28), "未使用的 self pid 槽位必须是 0");
+        Check.Equal(4242U, BitConverter.ToUInt32(bytes, 52), "block_sink_port 在偏移 52");
+        Check.Equal(0U, BitConverter.ToUInt32(bytes, 56), "reserved[0] 必须是 0");
+        Check.Equal(0U, BitConverter.ToUInt32(bytes, 60), "reserved[1] 必须是 0");
+
+        ProbeConfig restored = MemoryMarshal.Read<ProbeConfig>(bytes);
+        Check.Equal(4242U, restored.BlockSinkPort, "block_sink_port 往返");
     }
 
     private static void EnabledConfigValidation()
@@ -49,6 +55,8 @@ internal static class DeviceAbiTests
         Check.Throws<ArgumentOutOfRangeException>(
             () => ProbeConfig.EnabledFor(1, 1234, new uint[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 }), "self-PID 超过 8 个");
         Check.Throws<ArgumentOutOfRangeException>(() => ProbeConfig.EnabledFor(1, 1234, new uint[] { 0 }), "self-PID 为 0");
+        Check.Throws<ArgumentOutOfRangeException>(
+            () => ProbeConfig.EnabledFor(1, 1234, Array.Empty<uint>(), 1234), "block sink 端口与监听端口相同");
     }
 
     private static void DisabledConfig()
@@ -58,6 +66,7 @@ internal static class DeviceAbiTests
         Check.Equal(0U, config.Enabled, "enabled = 0");
         Check.Equal(0U, config.SelfProcessCount, "没有 self-PID");
         Check.Equal(0U, config.ListenerPort, "没有监听端口");
+        Check.Equal(0U, config.BlockSinkPort, "没有 block sink 端口");
     }
 
     private static void IoctlCodes()

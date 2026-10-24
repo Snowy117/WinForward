@@ -3,10 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace WinForward.Probe;
 
-// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v7）。
+// 与 src/driver/probe_ioctl.h 逐字节对应的控制面 ABI（v8）。
 internal static class Protocol
 {
-    public const uint AbiVersion = 7;
+    public const uint AbiVersion = 8;
 
 
     // CTL_CODE(FILE_DEVICE_UNKNOWN, function, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -135,7 +135,8 @@ internal unsafe struct ProbeConfig
     public ushort Reserved0;
     public uint SelfProcessCount;
     public fixed uint SelfProcessIds[8];
-    public fixed uint Reserved[3];
+    public uint BlockSinkPort;
+    public fixed uint Reserved[2];
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
