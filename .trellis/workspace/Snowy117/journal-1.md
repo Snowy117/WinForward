@@ -215,3 +215,25 @@ blob v2、数组选择器、文件名/精确路径/目录前缀、block 边界�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: Host block classify sink
+<!-- trellis-session: v=2 fp=1bbd7821a12da21f -->
+
+**Date**: 2026-10-24
+**Task**: Host block classify sink
+**Branch**: `feat/block-sink`
+
+### Summary
+
+block 改为 classify 首命中 + sink 端口，固定 4 条 auth filter；删除顺序/表达/预算；Linux 8/8 + WinLTSC gate PASS；TCP 10013、UDP 静默、U13 sink 0 包
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `53255e5` | feat(block): block 改为 classify 改道 sink，固定 4 条 auth filter |
+
+### Status
+
+[OK] **Completed**

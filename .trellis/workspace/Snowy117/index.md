@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
+- **Total Sessions**: 7
 - **Last Active**: 2026-10-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~217 | Active |
+| `journal-1.md` | ~239 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-10-24 | Host block classify sink | `53255e5` | `feat/block-sink` |
 | 6 | 2026-10-24 | Host 规则数组与进程选择器 parity | `3a73653` | `feat/host-rule-arrays-process-match` |
 | 4 | 2026-10-21 | Host UDP 路线 A 实验验证 | `c3ce6bf` | `main` |
 | 3 | 2026-10-21 | 质量收尾：池标签断言与 CodeQL 基线清零 | `3e162a7`, `50ea622`, `b25c6fe`, `af7fe77`, `8e4e70b` | `main` |
