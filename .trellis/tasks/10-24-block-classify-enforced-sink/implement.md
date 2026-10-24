@@ -84,8 +84,9 @@ Windows：`Build-Driver` 0 warning；安装后用现有 `wfprobe rules` / `appid
 
 **具体落点（按此顺序改）**
 
-1. `probe_ioctl.h`：删除 `max_block_filters`；需要时加 `block_sink_filter_count = 4`；
-   `probe_decision` 末尾加 `block_enforcement_failed = 18`。
+1. `probe_ioctl.h`：**保留 `max_block_filters` 到 Batch 3**（`BlobAbiConsistencyTests`
+   仍锁它）；本批只加 `block_sink_filter_count = 4` 与
+   `probe_decision::block_enforcement_failed = 18`。
 2. `probe_driver.h`：`block_filter_ids[4]`；`probe_install_block_filters(std::uint16_t sink_port,
    UINT64* ids, std::uint32_t& count)`；删除 128 断言；`contains_block` 注释改为“是否需要
    固定 sink filter”。
@@ -139,7 +140,9 @@ tools/windows/firewall-check.ps1
   `RuleOrderProcessTests.cs`。
 - `RuleBlobCompiler.cs`：删除 `ValidateBlockBudget` / `ValidateFallback` /
   `BlockSelectorError`；`CompileUnchecked` 语义更新。
-- `PolicyLimits.MaxBlockFilters`、`ProbeIoctl.MaxBlockFilters` 删除。
+- `PolicyLimits.MaxBlockFilters`、`ProbeIoctl.MaxBlockFilters`、C++ 头
+  `max_block_filters`、`probe_driver.h` 的 128 断言与 `verify-gates.sh` 的
+  `max_block_filters` 变异一并删除（本批是它们的最终移除点）。
 - 测试：`CompilerSelectorTests`（文件名/目录改为接受）、`CompilerLimitTests`（预算用例
   删除）、`CompilerTests`（fallback=block）、`AbiConsistencyTests`、
   `BlobAbiConsistencyTests`、`PriorityCases` / `NetworkCases` 的描述。
