@@ -1,22 +1,22 @@
 # WFP 重定向驱动（规则表版）
 
 WDM 驱动，在 `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4/V6` 上挂 callout，按用户态下发的规则 blob
-决定放行 / 重定向；block 规则由 `FWPM_LAYER_ALE_AUTH_CONNECT_V4/V6` 上的 `FWP_ACTION_BLOCK`
-filter 执行。host TCP 与 host UDP 共用同一套 callout、四道闸与规则匹配：TCP 每连接 classify
-一次，UDP 每关联（本地端点 + 远端目的地）classify 一次，不按 datagram 重复分类。Phase 0 的
-硬编码探针行为已被规则表取代。
+决定放行 / 重定向 / 改道到 block sink；block 的真实拒绝由 `ALE_AUTH_CONNECT_V4/V6` 上固定
+4 条 `FWP_ACTION_BLOCK` filter 执行。host TCP 与 host UDP 共用同一套 callout、四道闸与规则
+匹配：TCP 每连接 classify 一次，UDP 每关联（本地端点 + 远端目的地）classify 一次，不按
+datagram 重复分类。Phase 0 的硬编码探针行为已被规则表取代。
 
 ## 文件
 
 | 文件 | 内容 |
 |---|---|
-| `probe_ioctl.h` | 控制面 ABI v7：IOCTL 码、配置、计数、host 规则表回读、forwarded 表/ingress 回读、事件 |
-| `rule_table.h/.cpp` | 规则 blob 的池内存副本、block 表达边界 / filter 预算 / fallback 冲突 / 顺序冲突校验、引用计数、原子替换与退役链（字节级布局校验在 `try_open_blob`） |
+| `probe_ioctl.h` | 控制面 ABI v8：IOCTL 码、配置（含 `block_sink_port`）、计数、host 规则表回读、forwarded 表/ingress 回读、事件 |
+| `rule_table.h/.cpp` | 规则 blob 的池内存副本、`contains_block`、引用计数、原子替换与退役链（字节级布局校验在 `try_open_blob`；不再做顺序 / 表达边界 / 预算校验） |
 | `probe_driver.h` | 驱动内部共享面（状态、锁、窄接口、callout 原型、include 顺序约束） |
 | `probe_driver.cpp` | `DriverEntry`/卸载、设备、WFP provider/callout/filter 的注册与拆除 |
-| `block_filters.cpp` | 把 block 规则按 layer × protocol × process × port × network 展开成 ALE_AUTH_CONNECT 的 `FWP_ACTION_BLOCK` filter（显式 6/17 条件；预算 128；增删/滚动替换） |
-| `probe_control.cpp` | IOCTL 处理：配置（含 0↔1 切换时 block filter 的挂/摘）、规则下发、计数、事件、调用者校验 |
-| `probe_classify.cpp` | classify：facts、四道防循环闸、matcher、三个动作、重定向 |
+| `block_filters.cpp` | block sink 的固定 4 条 ALE_AUTH_CONNECT `FWP_ACTION_BLOCK` filter（V4/V6 × TCP/UDP；协议 + 远端端口 == sink + `IS_CONNECTION_REDIRECTED`；增删/滚动替换） |
+| `probe_control.cpp` | IOCTL 处理：配置（含 sink 端口校验与 0↔1 切换时固定 filter 的挂/摘）、规则下发、计数、事件、调用者校验 |
+| `probe_classify.cpp` | classify：facts、四道防循环闸、matcher、三个动作、重定向 / block 改道 sink |
 | `process_path.cpp` | `ALE_APP_ID` 的 UTF-16 → UTF-8 转换（511 字节边界、代理对）与 0x807 诊断 |
 | `probe_forwarded.h/.cpp` | MAC 帧层（`INBOUND/OUTBOUND_MAC_FRAME_NATIVE`）的 forwarded 规则表、blob 校验、generation、IOCTL 面；callout / filter 的注册与注销 |
 | `probe_forwarded_classify.cpp` | NBL 解析（VLAN/IPv4/IPv6/TCP/UDP）、方向映射、防环、`match_forwarded`、pass/block 与计数 |
@@ -28,12 +28,14 @@ filter 执行。host TCP 与 host UDP 共用同一套 callout、四道闸与规�
 - `ioctl_set_rule_blob`：下发整块 `rule_blob`（`src/common/rule_blob.h`）。校验失败返回
   `STATUS_INVALID_PARAMETER`，当前规则表保持不变；成功则原子替换并 `generation++`。
 - `ioctl_get_rule_info`：规则数、兜底动作、总长、generation。
-- `ioctl_get_config` / `ioctl_set_config`：启用开关、监听端口 / PID、self-PID 集合。
+- `ioctl_get_config` / `ioctl_set_config`：启用开关、监听端口 / PID、self-PID 集合、
+  `block_sink_port`（ABI v8；0 = 未配置，enabled 期间不能变）。
 - `ioctl_get_stats` / `ioctl_reset_stats`：classify 次数、各动作计数、被拒绝的 blob 数、
   context 分配/失败、四道闸的细分计数、block 决策计数，以及四个 UDP 计数器
   `udp_classify_calls` / `udp_permitted` / `udp_blocked` / `udp_redirected`。
   对任意一次 reset 之后的增量，`udp_classify_calls == udp_permitted + udp_blocked + udp_redirected`。
-  `udp_blocked` 是 classify 层的 block 决策数，不是实际被丢掉的 datagram 数；`udp_permitted` 包含
+  `blocked` / `deferred_blocks` / `udp_blocked` 只统计成功改道到 sink 的 block 决策；改道失败
+  记 `redirect_failures` 与 `block_enforcement_failed` 事件，不增加它们。`udp_permitted` 包含
   redirect 失败后的 fail-open；listener 用同一个 socket 回包时复用入站重定向关联，不重新
   classify，`udp_classify_calls` 不增；中继新开 socket 的出站才是新关联，会再计入一次
   `udp_classify_calls` / `udp_permitted`。
@@ -88,11 +90,11 @@ Host blob 当前是 **v2**：56 字节头 + 32 字节规则；进程指向 8 字
 selector_pool | network_pool | port_pool`。每个选择器都是「池下标 + 数量」区间：同字段内 OR、
 字段之间 AND，数量 0 表示任意；协议 / 地址族用位掩码（0 = 任意，1 / 2 = 单个，3 = 两者）。
 `protocol=any`（掩码 0）同时覆盖 TCP 与 UDP（相对旧版“any 只匹配 TCP”的行为变化）。
-`rule_blob_version` 是 2，v1 blob 被整块拒绝，不存在新旧混跑窗口；控制面 IOCTL 仍是 v7。
+`rule_blob_version` 是 2，v1 blob 被整块拒绝，不存在新旧混跑窗口；控制面 IOCTL 是 v8。
 
 classify 依次检查：
 
-1. 目标端口等于配置的监听端口 → 放行（闸 1）；
+1. 目标端口等于 listener 或 block sink 端口 → 放行（闸 1）；
 2. `previousVersion->localRedirectHandle` 非空（别的 callout 已改写）→ 放行；
 3. `FwpsQueryConnectionRedirectState0` 报告 BY_SELF / PREVIOUSLY_BY_SELF → 放行（闸 2）；
 4. 条件标志含 `IS_CONNECTION_REDIRECTED` 或 `IS_PROXY_CONNECTION` → 放行（闸 3）；
@@ -101,9 +103,8 @@ classify 依次检查：
 UDP 的 connected 路径（`connect` + `send`）与 unconnected `sendto` 也会走到这个层；四道闸、规则匹配和三个动作与 TCP 共用。
 同一客户端 socket 对同一远端的后续 datagram 复用第一次的决策与 redirect context。
 
-`block` 决策在 redirect 层只记账并放行；真正的拒绝由 auth 层的 block filter 完成。TCP 客户端
-通常看到 RST（`AccessDenied(10013)`），UDP 则是静默丢包，详见下一节。TCP 侧的背景见
-`.trellis/tasks/10-20-wfp-driver-rules/research/findings.md` §2。
+`block` 决策在 classify 首命中后把连接 / 关联改道到 `block_sink_port`；真正的拒绝由 auth 层
+固定 4 条 filter 完成。TCP 客户端通常看到 RST（`AccessDenied(10013)`），UDP 则是静默丢包。
 
 ### 进程选择器
 
@@ -111,8 +112,8 @@ Host blob v2 的进程选择器有两种 kind、三种语义：
 
 - 文件名（不含 `/`、`\`）：比较连接路径最后一个 `\` 之后的部分，`dns` 不命中 `dns.exe`；
 - 精确文件路径：完整路径相等，或连接路径以「选择器 + `\`」开头；
-- 目录前缀：同样是「相等或前缀 + `\`」，命中直接子文件与任意深度后代；`is_directory` 只用于
-  block 表达边界与顺序校验，不改变 matcher 的前缀语义。
+- 目录前缀：同样是「相等或前缀 + `\`」，命中直接子文件与任意深度后代；`is_directory` 只保留
+  为解析结果标记，不改变 matcher 的前缀语义。
 
 路径型选择器的串必须是 `\device\` 开头（ASCII 大小写不敏感）、不以 `\` 结尾的设备路径；
 两种形态都只折叠 ASCII 大小写。连接侧 `process_path.cpp` 把 `ALE_APP_ID` 的 UTF-16LE 转成
@@ -121,23 +122,17 @@ UTF-8，上限 511 字节（不含 NUL，缓冲区 512 含 NUL），超限或孤
 selector 的字节级校验（串首 / NUL 终止、UTF-8、1..511 字节、控制字符 C0 / DEL / C1、文件名
 不含分隔符、路径 `\device\` 前缀且不以 `\` 结尾、kind / is_directory / reserved、`count == 0`
 时 `first == 0`）全部在 `src/common/rule_blob.h` 的 `try_open_blob` 里；`rule_table.cpp` 只保留
-block 表达边界、filter 预算、fallback 冲突与顺序校验。变异脚本的 `selector-utf8-guard` 标记
-因此位于 `rule_blob.h`。
+blob 复制、`try_open_blob`、`contains_block`、引用计数与退役。变异脚本的
+`selector-utf8-guard` 标记因此位于 `rule_blob.h`。
 
-### block filter 的展开与预算
+### block 的 sink 端口与固定 filter
 
-block 规则由 `block_filters.cpp` 按 layer × protocol × process × port × network 展开：
-WFP 同一字段的多个条件是 AND，表达不了数组的 OR，所以每条组合生成一条 filter。协议掩码 0 / 3
-展开 TCP(6) + UDP(17)；端口与网段按层过滤；进程条件只能写 `FWPM_CONDITION_ALE_APP_ID` 的
-`FWP_MATCH_EQUAL`（UTF-16LE），因此 block 规则的进程选择器只允许精确文件路径（路径型且
-`is_directory = 0`，可写数组）。文件名 / 目录前缀在编译期带规则序号拒绝，`allocate_rule_table`
-对同形 blob 整块拒绝——否则会出现「classify 记 block、auth 层拦不住」的假 block。
-
-总数（含 `fallback=block` 的 2 层 × 2 协议 = 4 条）超过 `max_block_filters = 128` 时，
-`allocate_rule_table` 与 `probe_install_block_filters` 都拒绝，旧表与旧 filter 保持不变。
-`rule_order_valid` 按集合掩码、端口 / 网段数组、进程文件名 / 路径前缀语义逐条比对更早的非
-block 规则；任何可能重叠都整块拒绝，与 C# `RuleOrderValidator` 同算法。展开公式见
-`.trellis/spec/backend/host-rule-blob.md` §8。
+block 不再按规则展开 filter。classify 命中 block 后把连接 / 关联 local redirect 到
+`block_sink_port`（不分配 `redirect_context`）；`block_filters.cpp` 只装固定 4 条
+（V4/V6 × TCP/UDP），条件为协议 + 远端端口 == sink + `IS_CONNECTION_REDIRECTED`。
+filter 只在当前表 `contains_block` 时安装，换表时按新旧表增删；没有 128 预算。
+sink 端口不能等于 listener 端口，enabled 期间不能变；用户态 `BlockSink` 用 UDP 丢弃 /
+TCP bind-not-listen 兜底。实测 TCP 10013、UDP 静默；U13 证明 filter 命中且 sink 收到 0 包。
 
 ## Host UDP
 
@@ -169,20 +164,16 @@ cmsg level 0（`IPPROTO_IP`）与 41（`IPPROTO_IPV6`），以及 `sockaddr_in6`
 
 ### block
 
-UDP block 规则编译成 `ALE_AUTH_CONNECT_V4/V6` 上的 `FWP_ACTION_BLOCK` filter。应用侧是
-**静默丢包**：`connect` / `send` / `sendto` 返回成功，对端收不到，`recv` 最终超时；没有可用的
-socket 错误码路径。TCP 对照仍是 `AccessDenied(10013)`。
+classify 命中 block 后把 UDP 关联改道到 `block_sink_port`；真正的拒绝由固定 4 条
+`ALE_AUTH_CONNECT` filter 执行。应用侧是**静默丢包**：`connect` / `send` / `sendto` 返回成功，
+对端收不到，`recv` 最终超时；没有可用的 socket 错误码路径。TCP 对照仍是
+`AccessDenied(10013)`。
 
-`protocol=any` 与 `fallback_action=block` 都按 6 和 17 各生成一条 filter（IPv4 / IPv6 每层一对），
-每条都显式写 `FWPM_CONDITION_IP_PROTOCOL`，不使用无条件 filter；这样 ICMP 等非 TCP/UDP 协议
-不会被误拦。`max_block_filters` 为 128。
+`udp_blocked` 统计成功改道 sink 的 UDP 关联数。规则热替换后，已存在的 UDP 关联保持旧决策
+（U13：旧 permit 关联换 block 表后仍收到回包），只有新关联才按新 blob 分类。
 
-`udp_blocked` 只统计 classify 层的 block 决策。规则热替换后，旧 UDP 关联的后续 datagram 会在
-auth 层被新 filter 丢弃，但不会重新进入 `ALE_CONNECT_REDIRECT`，因此 `udp_classify_calls` /
-`udp_blocked` 不增加，也没有新事件；只有新关联才按新 blob 分类。
-
-与 TCP 相同，block 规则若没有进程选择器，也会拦到中继自己的上游 UDP 流量。需要放行中继出站时，
-用进程选择器收窄 block 规则。
+中继自身出站由 `self_process_ids` 闸放行；没有配置 self-PID 时，无进程选择器的 block 规则会
+把中继上游 UDP 流量一起拦。
 
 ### 生命周期
 
@@ -627,11 +618,10 @@ pwsh -File tools/windows/gate.ps1 -Remote <测试目标地址:端口>
 `System32\drivers`、创建/启动/停止/删除服务。不要手工复制 `.sys` 或直接改服务，避免门禁与
 手工操作的状态不一致；完整流程用 `gate.ps1`，临时调试用 `load-driver.ps1`。
 
-- block 规则编译成独立的 auth 层 filter；`protocol=any` 与 `fallback_action=block` 按 6/17 各一条
-  （IPv4 / IPv6 各一对）。block 的进程条件只能是精确 `ALE_APP_ID`，所以只接受精确文件路径数组；
-  文件名 / 目录前缀在编译期与 `allocate_rule_table` 都被拒绝。凡是“更早的非 block 规则可能与
-  它重叠”的配置会在换表时整块拒绝（`rule_order_valid`），绝不让 filter 抢掉 blob 里本应首个
-  命中的 permit/redirect；filter 总数超过 128 同样整块拒绝。
+- block 在 classify 首命中后改道到 `block_sink_port`；auth 层只装固定 4 条 filter（V4/V6 ×
+  TCP/UDP，协议 + 远端端口 == sink + `IS_CONNECTION_REDIRECTED`）。文件名 / 目录前缀 / 精确
+  路径 / 数组都可以写在 block 规则里；没有顺序冲突、表达边界或 128 预算。sink 端口不能等于
+  listener 端口，enabled 期间不能变。
 - 进程选择器是 `ALE_APP_ID` 的 UTF-16 device path → UTF-8（ASCII 大小写折叠，代理对按标准
   展开）。上限是 **UTF-8 511 字节（不含 NUL）**，缓冲区 512 字节含 NUL；超限 / 非法代理项整条
   不匹配、不截断。中文路径与 511/512 边界都已实测。
@@ -648,10 +638,12 @@ pwsh -File tools/windows/gate.ps1 -Remote <测试目标地址:端口>
   host 同 remote、产品 reject；自动 prepare/cleanup，CI 禁止 `--no-verify`。
 - `gate.ps1` 不包含需要外部 Linux 客户端的 forwarded 数据面阶段（原因与替代见
   `tools/linux/forwarded_gate.md` 和任务 `verification.md` §14）。
-- 已知 fail 阶段边界：ABI v7 config disabled 时过滤器不进入 classify，B6a 的 `no_config` 断言
-  在 v7 不成立；Linux 门禁默认跳过，`--include-fail` 仅诊断。未改数据面语义。
+- 已知 fail 阶段边界：B6c 验收时 ABI v7 下 config disabled 时过滤器不进入 classify，B6a 的
+  `no_config` 断言在 v7 不成立；当前控制面已升到 v8，该 fail 阶段未在 v8 复验；Linux 门禁默认
+  跳过，`--include-fail` 仅诊断。未改数据面语义。
 - A5 仅为含 C# suite 中继的量级采样（1MiB TCP 0.8–4.5 MB/s，200×64B UDP burst 209pps；
   host 12.9 MB/s/1590pps），不设 kill criteria，详见 `verification/a5-cost.md`。
-- 驱动 SHA-256：`EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`（ABI v7）。
+- B6b 验收时驱动 SHA-256：`EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`
+  （ABI v7）；当前 ABI v8 的驱动 SHA 以各批次 `verification.md` 为准。
   这是 B6c 收口的历史构建（Host 规则 blob 尚未升到 v2 的时期），保留作记录；Host 规则数组 /
   blob v2 批次的最终驱动 SHA 见 `.trellis/tasks/10-24-host-rule-arrays-process-match/verification.md`。

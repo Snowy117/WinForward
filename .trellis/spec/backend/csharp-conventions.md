@@ -86,7 +86,7 @@ C# 的 ABI 镜像结构用 `public` 字段（而不是属性）：`MemoryMarshal
 - 断言消息必须同时给出**期望值与实际值**（`Check` 已经这么做了，别绕开它）。
 - ABI 镜像结构必须有布局断言：`Marshal.SizeOf`、逐字段 `Marshal.OffsetOf`、
   `Unsafe.SizeOf` 一致、`Pack == 4`，数值直接照抄 `src/common/rule_blob.h`；
-  `BlobAbiConsistencyTests` 再从源码文本把版本、尺寸、掩码与 511 / 64 KiB / 128 三个上限
+  `BlobAbiConsistencyTests` 再从源码文本把版本、尺寸、掩码与 511 / 64 KiB 两个上限
   与 `PolicyLimits`、`tools/wfprobe/Protocol.cs` 互锁。
 - 测试的通过原因必须就是它的名字（见 [cpp-conventions.md §9](./cpp-conventions.md)）；
   计数类断言写精确值，不写「非空即过」。

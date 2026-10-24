@@ -69,9 +69,10 @@ C# 工具链由 devShell 提供（`flake.nix` 的 `dotnet-sdk_10`，目标框架
   有意行为变化），需要旧行为时显式写 `tcp`。
 - 未知字段直接报错（带 JSON 路径），不静默忽略；空数组、空元素、非字符串元素也带 JSON 路径拒绝。
 - host 规则的解析层做结构 + 取值校验（字段名 / 类型 / 数组形状 / 端口语法、端口区间颠倒、端口 0、
-  CIDR 语法，错误带 JSON 路径）；跨字段语义（规则顺序冲突、block 表达边界 / 预算、进程路径
-  解析与长度、兜底动作矛盾）统一在 `RuleBlobCompiler` 里做，错误消息带规则序号。forwarded
-  规则在配置层提前校验 target / adapter / CIDR / 端口，最后由 `ForwardedBlobCompiler` 复核。
+  CIDR 语法，错误带 JSON 路径）；跨字段语义（进程路径解析与长度、端口 0、族与网段一致等）统一在
+  `RuleBlobCompiler` 里做，错误消息带规则序号。规则顺序 / block 表达边界 / filter 预算不再拒绝：
+  block 参与 classify 首命中，执行由 sink 端口上的固定 4 条 filter 完成。forwarded 规则在配置层
+  提前校验 target / adapter / CIDR / 端口，最后由 `ForwardedBlobCompiler` 复核。
 
 ## Forwarded 规则与多上游（B2）
 
@@ -128,30 +129,27 @@ IPv4（`atyp=1`）、IPv6（`atyp=4`）、域名（`atyp=3`，ASCII，最长 255
 端到端脚本见 `tools/windows/userland-socks5-e2e.ps1`，形态是「客户端 → 驱动重定向 → 控制器 →
 SOCKS5（VM loopback）→ 跨机 target」。
 
+## Block sink
+
+Host block 命中后驱动把连接 / 关联改道到控制器保留的 sink 端口。`Relay/BlockSink.cs` 在
+v4/v6 × UDP/TCP 上保留同一端口：UDP 收到即丢、TCP 只 bind 不 listen；端口写进
+`ProbeConfig.EnabledFor(..., blockSinkPort)`，`enabled` 期间不变。控制器停止时先 disable
+driver，再释放 sink。`userland-e2e` 断言回读的 `block-sink-port` 非 0 且与 listener 不同。
+
 ## 编译期语义检查
 
-用户态是唯一能给出可诊断信息的时刻——驱动只会整块拒绝。这里的检查和驱动的最后一道闸同语义：
+用户态是唯一能给出可诊断信息的时刻——驱动只会整块拒绝。这里的检查：
 
-- **规则顺序冲突**（`RuleOrderValidator`，镜像 `rule_table.cpp` 的 `rule_order_valid`）：
-  对每条 `block` 规则，若存在更早的非 block 规则在协议掩码、有效地址族、端口区间、网段前缀、
-  进程选择器上都可能命中同一条连接，整份规则表拒绝。集合按「任一对元素相交」判断，进程按
-  文件名 / 精确路径 / 目录前缀的重叠语义判断；驱动把 block 编译成独立的 AUTH_CONNECT 过滤器、
-  不参与「首个命中」顺序，这种配置的语义与作者本意相反。
-- **兜底动作矛盾**：`fallbackAction = block` 且表里存在 permit/redirect 规则 → 拒绝。
-  驱动会按 TCP(6) / UDP(17) 各创建协议过滤器（IPv4 / IPv6 每层一对），让那些规则命中的
-  TCP/UDP 连接变成死规则，而 classify 计数器仍会记「放行」；过滤器只写 6/17，不会误拦 ICMP。
 - **进程选择器**：文件名型不得含 `/`、`\`；路径型必须解析成 `\device\` 开头、不以 `\` 结尾的
   设备路径，且要求编译期路径存在（文件或目录）。只折叠 ASCII 大小写，非 ASCII 原样比较；
   控制字符（C0 / DEL / C1）与孤立代理项拒绝。
 - **进程路径上限**：UTF-8 ≤ 511 字节（不含 NUL），超限拒绝——超过时内核整条不匹配且不报错。
-- **block 表达边界**：block 规则只允许精确文件路径（路径型且非目录）；文件名 / 目录前缀带
-  规则序号拒绝。驱动 `allocate_rule_table` 对同形 blob 整块拒绝，避免「classify 记 block、
-  auth 层却拦不住」的假 block。
-- **block filter 预算**：按 layer × protocol × process × port × network 展开，总数（含
-  `fallback=block` 固定占的 4 条）不得超过 `PolicyLimits.MaxBlockFilters = 128`；驱动换表时
-  按同一公式再兜底一次。
 - 端口 0、端口区间颠倒、族与网段不一致、空数组、未知枚举值等。
 - blob 总大小 ≤ `PolicyLimits.RuleBlobMaxSize = 64 KiB`（空池时约 2046 条规则）。
+
+规则顺序 / block 表达边界 / filter 预算不再检查：`permit 内网 → block 其余`、block 文件名 /
+目录前缀 / 数组、`fallbackAction = block` + 任意规则都会编译通过；block 参与 classify 首命中，
+执行由 sink 端口上的固定 4 条 filter 完成。
 
 每一条检查都有对应测试，且由 `tools/userland/verify-gates.sh` 做反向验证：拆掉检查必须让测试变红。
 
@@ -171,11 +169,11 @@ SOCKS5（VM loopback）→ 跨机 target」。
 用临时副本改头、改夹具、改产品常量来证明这一点。
 
 **范围**：`abi/*` 锁**控制面 IOCTL**（`probe_ioctl.h` + `redirect_context.h` + 夹具），包括 v5 的
-`probe_forwarded_config` / `probe_forwarded_redirect*` 与 `0x80C`–`0x80E`、v7 的 `probe_forwarded_ingress[_config]` 与 `0x80F`/`0x810`，以及 v4 的
+`probe_forwarded_config` / `probe_forwarded_redirect*` 与 `0x80C`–`0x80E`、v7 的 `probe_forwarded_ingress[_config]` 与 `0x80F`/`0x810`、以及 v8 的 `probe_config.block_sink_port`，v4 的
 `probe_forwarded_info` / `probe_forwarded_stats` 与四个 forwarded IOCTL。Host 规则 blob 另有
 `abi/blob` 一组：`BlobAbiConsistencyTests` 读 `src/common/rule_blob.h` 与 `probe_ioctl.h` 的源码
 文本，把版本、magic、56 / 32 / 8 / 4 / 20 尺寸、动作值、selector kind、协议 / 族掩码、
-511 / 64 KiB / 128 三个上限与 `RuleBlobLayout`、`PolicyLimits`、`tools/wfprobe/Protocol.cs`
+511 / 64 KiB 两个上限与 `RuleBlobLayout`、`PolicyLimits`、`tools/wfprobe/Protocol.cs`
 三处逐常量互锁；行为一致性仍由 `tests/host` 的跨语言差分 ctest 锁（C# 产 blob、C++ 用同一份
 `try_open_blob` + `match` 消费）。差分发现不了「两侧一致地错」，所以 `LayoutTests` 锁字段偏移，
 `matcher` / 归一化用例锁单侧语义。
@@ -248,9 +246,9 @@ ctest --test-dir build --output-on-failure
 ```
 
 `vm-check` 只在 Windows VM 上跑（驱动已加载时）：ABI 握手、用真实 IOCTL 的缓冲区长度验证结构尺寸、
-进程路径 511/512 边界、句柄法解析（当前进程文件与目录）、以及「同一份规则表，C# 冲突检查与驱动
-`rule_order_valid` 结论一致」的差分矩阵（含 `tools` vs `tools2`、目录遮蔽后代、多端口相交 /
-不相交、混合族与精确路径 / 目录选择器命中）。
+进程路径 511/512 边界、句柄法解析（当前进程文件与目录）、以及「同一份规则表，产品 `Compile`
+与驱动都接受、generation +1、`rejected_blobs` 不增」的差分矩阵（含 `tools` vs `tools2`、目录
+遮蔽后代、多端口相交 / 不相交、混合族与精确路径 / 目录选择器命中、block 文件名/目录前缀）。
 
 两侧的夹具目录必须一致。C# 侧默认写 `<仓库根>/build/diff-fixtures`；C++ 侧默认读
 `${CMAKE_BINARY_DIR}/diff-fixtures`，用标准构建目录 `build` 时两者相同。用环境变量
@@ -271,7 +269,8 @@ python3 src/userland/scripts/check-effective-lines.py
 
 Host 规则 blob 当前是 **v2**：56 字节头 + 32 字节规则 + 8 字节 selector + 4 字节端口 +
 20 字节网段，段序为 `header | rules | process_pool | selector_pool | network_pool | port_pool`。
-v1 不再读取，控制器 / 驱动 / `wfprobe` 必须同批升级；控制面 IOCTL 仍是 v7。
+v1 不再读取，控制器 / 驱动 / `wfprobe` 必须同批升级；控制面 IOCTL 是 **v8**（新增
+`block_sink_port`）。
 
 - 所有取舍在编译期做完：路径型进程选择器经句柄法（`WindowsProcessPathNormalizer` +
   `WindowsDevicePath`）解析成 `ALE_APP_ID` 同形的设备路径，折叠 ASCII 小写；进程串按 NUL 结尾
@@ -279,11 +278,10 @@ v1 不再读取，控制器 / 驱动 / `wfprobe` 必须同批升级；控制面 
   一条 blob 规则。
 - 内核侧 `try_open_blob` 做全部字节级校验（段边界 / 重叠 / 对齐、UTF-8 与控制字符、511 字节、
   selector 形态与 `\device\` 前缀、端口区间、单族与网段一致等），`match` 按数组顺序找首个
-  命中，不解释用户意图；block 表达边界、filter 预算与顺序冲突在驱动 `allocate_rule_table`
-  再拒绝一次。
-- 兜底动作写在 blob 头部，与规则表一起原子替换；
-- 兜底 `block` 会按 6/17 生成协议过滤器（IPv4 / IPv6 各一对），因此「兜底 block + 非 block 规则」
-  是矛盾配置，在编译期拒绝。
+  命中，不解释用户意图；block 命中后 classify 改道到 `block_sink_port`，驱动只校验 sink 端口
+  与 blob 布局，不再做表达边界 / 预算 / 顺序拒绝。
+- 兜底动作写在 blob 头部，与规则表一起原子替换；`fallback = block` 只在没有规则命中时触发，
+  不会让同表的 permit / redirect 变成死规则。
 - 本仓库的用户态 `Relay/` 仍是 TCP 中继；UDP 的 listener / 中继在 WinForward 侧实现，
   UDP 重定向的接住与回包不在当前控制器范围内。
 
@@ -294,4 +292,5 @@ v1 不再读取，控制器 / 驱动 / `wfprobe` 必须同批升级；控制面 
   `gate.ps1` 不含需要外部 Linux 客户端的 forwarded 数据面。
 - 产品控制器每个 ifindex 只解析一个 L；UDP 多 L 并发多目的、UDP 热替换、IPv6 多入口未 E2E；
   LWF 注入可见性未验证。统一边界见任务 `verification.md` §15。
-- `StateCommand` 输出 `forwarded` / `forwarded-ingress` / `forwarded-stat`（ABI v7）。
+- `StateCommand` 输出 `forwarded` / `forwarded-ingress` / `forwarded-stat`（控制面 ABI v8；
+  forwarded 输出沿用 v7 布局前缀）。

@@ -6,7 +6,8 @@
 
 ## 前置
 
-- Windows VM 已安装 ABI v7 的 `wfprobe.sys`，服务 RUNNING；`wfprobe.exe` 已构建。
+- Windows VM 已安装控制面 ABI v8 的 `wfprobe.sys`，服务 RUNNING；`wfprobe.exe` 已构建
+  （B6c 验收时为 ABI v7）。
 - Linux 侧能访问 VM（默认 `192.168.100.2`），且原始目的地别名 `.99` 由门禁自己创建/删除。
 - 远端三个命令（可由环境变量提供）：
 
@@ -36,9 +37,9 @@ CI 中把三个变量换成等价的 `ssh`/`winrm` 包装；`--run-cmd/--poll-cm
 
 ## 未自动化（明确）
 
-- **fail 阶段**：ABI v7 下 config disabled 时 WFP filter 不再进入 classify，suite 的
-  `no_config` 断言不成立；`--include-fail` 保留为诊断入口，当前不作为门禁通过条件。
-  这是 B6c 发现，已记录，未改数据面。
+- **fail 阶段**：B6c 验收时 ABI v7 下 config disabled 时 WFP filter 不再进入 classify，suite
+  的 `no_config` 断言不成立；当前控制面 v8 未复验。`--include-fail` 保留为诊断入口，当前
+  不作为门禁通过条件。这是 B6c 发现，已记录，未改数据面。
 - multi-ingress / hotswap / noingress / StateCommand：Windows-only wfprobe 阶段，B6b
   已单独验证；不在 Linux 门禁重复。
 - IPv6 9 分片：需要客户端 IPv6 地址与 MTU 调整，见 `tools/linux/ipv6_mtu_fragment.py`，

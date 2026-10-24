@@ -250,7 +250,7 @@ def main():
     parser.add_argument("--host-port", type=int, default=40600)
     parser.add_argument("--log-dir", default=str(ROOT / "verification" / "forwarded-gate"))
     parser.add_argument("--skip-reject", action="store_true")
-    parser.add_argument("--include-fail", action="store_true", help="also run fail phases (currently fail on ABI v7; see verification)")
+    parser.add_argument("--include-fail", action="store_true", help="also run fail phases (B6c ABI v7 finding; not re-run on v8; see verification)")
     parser.add_argument("--no-prepare", action="store_true")
     parser.add_argument("--keep-alias", action="store_true")
     args = parser.parse_args()
@@ -316,7 +316,7 @@ def main():
                       {"cmd": f"python3 {LINUX / 'forwarded_tcp_probe.py'} --target {args.target}:{args.remote_port}"},
                       ["no_config=1"], 120)
         else:
-            log("fail-udp/fail-tcp: skipped (ABI v7 known finding; pass --include-fail to exercise)")
+            log("fail-udp/fail-tcp: skipped (B6c ABI v7 known finding; not re-run on v8; pass --include-fail to exercise)")
         run_reject(remote, cfg, args)
     finally:
         for proc in started:

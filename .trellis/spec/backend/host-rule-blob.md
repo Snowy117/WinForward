@@ -32,9 +32,9 @@ Host 层的两条铁律：
 - **同字段内 OR、字段之间 AND、规则数组顺序即优先级、首个命中生效。** 内核不解释用户意图，
   只做规范化后的比较。
 
-本层不包含：JSON 配置解析（`Configuration/`）、`ALE_AUTH_CONNECT` block filter 的运行时安装
-（`block_filters.cpp`）、classify 计数与事件、重定向。控制面 IOCTL ABI 仍是 **v7**，与本数据面
-ABI 各自版本化。
+本层不包含：JSON 配置解析（`Configuration/`）、sink 端口上固定 4 条 `ALE_AUTH_CONNECT` filter
+的运行时安装（`block_filters.cpp`）、classify 计数与事件、重定向。控制面 IOCTL ABI 是 **v8**
+（新增 `block_sink_port`），与本数据面 ABI 各自版本化。
 
 ## 2. ABI
 
@@ -180,9 +180,9 @@ v2 不支持扩展头：`header_size` 必须精确等于 56，否则 `rules_offs
     ≤ 3；三个「区间」合法（`count == 0` 时 `first == 0`，否则 `first + count` 不越界）；
 15. 规则的 `family_mask` 只含一个族时，它引用的每个网段都必须是该族（否则规则永远不可能命中）。
 
-解码端**不做**规则数 / 池条目数的容量上限检查；上限属于编译期（`rule_blob_max_size = 64 KiB`、
-`max_block_filters = 128`），内核只按缓冲区长度判界，避免把「生产者限制」和「消费端内存安全」
-混为一谈。
+解码端**不做**规则数 / 池条目数的容量上限检查；上限属于编译期（`rule_blob_max_size = 64 KiB`），
+block 执行也不再按规则数展开 filter。内核只按缓冲区长度判界，避免把「生产者限制」和
+「消费端内存安全」混为一谈。
 
 ## 5. matcher 语义
 
@@ -279,13 +279,12 @@ public IReadOnlyList<RuleAddressFamily>? Families { get; init; }
 - 路径型选择器解析成功；文件名型不含分隔符；
 - 路径型归一化结果必须以 `\device\` 开头、不以 `\` 结尾；
 - 规则只声明一个族时，每个网段的族必须与之一致；
-- block 规则的每个进程选择器必须是路径型且 `IsDirectory == false`（见 §8）；
-- block filter 预算（见 §8）；
 - blob 总大小 ≤ `PolicyLimits.RuleBlobMaxSize = 64 KiB`（空池时约 2046 条规则：56 + 32 × N）；
 - 进程串 UTF-8 ≤ 511 字节（不含 NUL）；ASCII 折叠后检查，非 ASCII 按原字节计数。
 
-`CompileUnchecked` 只跳过「顺序冲突」「block 表达边界」「filter 预算」，用于构造驱动必须独立
-拒绝的负向夹具；布局必须仍然合法。
+block 不再有表达边界 / 顺序 / filter 预算的编译期检查：block 参与 classify 首个命中，
+执行由 sink 端口上的固定 4 条 filter 完成（见 §7/§8）。`CompileUnchecked` 已随
+`RuleOrderValidator` 一起删除；产品与测试共用 `Compile`。
 
 ### 6.3 池与索引
 
@@ -296,69 +295,49 @@ public IReadOnlyList<RuleAddressFamily>? Families { get; init; }
 
 一条配置规则只写一条 32 字节 rule，三个 `*_first` 指向各自池的起始记录下标。
 
-## 7. 顺序校验（C# 与驱动同算法）
+## 7. 首个命中与 sink 执行
 
-`RuleOrderValidator.Validate`（用户态）与 `rule_order_valid`（`rule_table.cpp`）逐条对应：对每条
-block 规则，检查是否存在更早的非 block 规则可能命中同一条连接。block 被编译成独立的
-`ALE_AUTH_CONNECT` filter，只看自身条件、不参与「首个命中」顺序；若更早的 permit/redirect
-本应先命中，后面的 filter 仍会拦掉这条连接，语义与配置作者写的相反。
+block 不再编译成 per-rule auth filter，因此不存在“先行 permit 被后面的 block filter 抢掉”的
+问题。`RuleOrderValidator`、`rule_order_valid` 与全部重叠判定（协议 / 族 / 端口 / 网段 / 进程）
+已删除；`permit 内网 → block 其余`、block 文件名 / 目录前缀 / 数组、`fallback = block` +
+任意规则都按 blob 顺序求值，首个命中生效。
 
-| 字段 | 重叠判定 |
-|---|---|
-| 协议 | `maskA == 0 || maskB == 0 || (maskA & maskB) != 0` |
-| 地址族 | 有效族集 = `(mask == 0 ? 3 : mask) & 网段族集合`（无网段时就是前者）；两侧有效集相交 |
-| 端口 | 任一对端口区间相交；任一侧 `count == 0` 视为重叠 |
-| 网段 | 任一对同族 CIDR 前缀相交（较短前缀比较）；任一侧 `count == 0` 视为重叠 |
-| 进程 | 任一对选择器重叠（见下）；任一侧 `count == 0` 视为重叠 |
+- classify 命中 block：把连接 / 关联 local redirect 到 `block_sink_port`（不分配
+  `redirect_context`）。
+- AUTH_CONNECT 上的固定 filter 只认“被改道到 sink 的流量”，执行真正的拒绝。
+- 热替换：新连接 / 新 UDP 关联按新表；已存在的 UDP 关联保持旧决策直到关联结束
+  （U13 实测）。
 
-进程选择器对：
+`fallback = block` 现在只在没有规则命中时触发，不会让同表的 permit / redirect 变成死规则。
 
-- 文件名 vs 文件名：ASCII 相等；
-- 文件名 vs 路径：路径是目录 → 重叠（目录可能包含该文件名）；路径是文件 → 文件名与该路径
-  最后一段相等才重叠；
-- 路径 vs 路径：相等，或一方以「另一方 + `\`」开头（与 matcher 的前缀语义一致，保守）。
+## 8. sink 端口与固定 filter
 
-`fallback = block` 且表里存在任何非 block 规则时，两侧同样拒绝：驱动会为 TCP(6) / UDP(17)
-各生成协议过滤器（IPv4 / IPv6 每层一对），那些规则命中的连接全部变成死规则，而 classify
-仍会记 `permitted`。错误消息必须带两条规则序号与条件摘要（数组用逗号列出）。
+控制面 `probe_config`（ABI v8）新增 `block_sink_port`：
 
-## 8. block 表达边界与 filter 预算
+- `0` 表示未配置；`enabled != 0` 且规则表含 block 或 `fallback = block` 时，驱动拒绝启用。
+- 不能等于 `listener_port`；enabled 期间不能改变（必须先 disable）。
+- sink 端口由用户态 `BlockSink` 保留：UDP v4/v6 收到即丢；TCP v4/v6 只 bind 不 listen，
+  作为 filter 失效时的 RST 兜底。
 
-**表达边界。** block 规则由 `ALE_AUTH_CONNECT_V4/V6` 上的 `FWP_ACTION_BLOCK` filter 执行；
-`FWPM_CONDITION_ALE_APP_ID` 只支持 `FWP_MATCH_EQUAL`，WFP 没有可用的 app-id 前缀匹配
-（`FWP_MATCH_PREFIX` 实际是后缀匹配），目录路径也构造不出 app-id。因此：
+执行 filter 固定 4 条（V4/V6 × TCP/UDP），条件：
 
-- block 规则的进程选择器只允许**路径型且 `is_directory = 0`**（精确文件路径，可写数组）；
-- 文件名 / 目录前缀出现在 block 规则里，编译期带规则序号拒绝，错误消息说明
-  「WFP auth filter 只能精确匹配 ALE_APP_ID」；
-- 驱动 `allocate_rule_table` 的 `block_expression_valid` 对同形 blob 整块拒绝并 `DbgPrint`
-  规则序号；不做「classify 记 block、auth 层拦不住」的假 block。
+1. `FWPM_CONDITION_IP_PROTOCOL` = 6 / 17；
+2. `FWPM_CONDITION_IP_REMOTE_PORT` = `block_sink_port`；
+3. `FWPM_CONDITION_FLAGS` 含 `FWP_CONDITION_FLAG_IS_CONNECTION_REDIRECTED`
+   （`FWP_MATCH_FLAGS_ALL_SET`）。
 
-**展开公式**（编译期 `RuleBlobCompiler`、驱动 `block_filter_budget_valid` 与
-`probe_install_block_filters` 同一份）：
+因此一条 filter 只命中“被 classify 改道到 sink 的连接”，不会误伤该端口上的正常流量，也不随
+规则数 / 选择器数组展开。filter 只在当前表 `contains_block` 时安装，换表时按新旧表增删；
+没有总数预算。
 
-```text
-filters(rule) = Σ_layer ( protocol_count × process_count' × port_count' × network_count' )
-  layer ∈ {IPv4, IPv6}；family_mask 不含该层、或显式网段列表里没有该族时跳过该层
-  protocol_count = mask 为 0 或 3 ? 2 : 1
-  process_count' = max(1, process_count)   // 已保证全是精确文件路径
-  port_count'    = max(1, port_count)
-  network_count' = network_count == 0 ? 1 : 该层的网段数
-```
+实测语义（WinLTSC 26100）：
 
-- WFP 同一字段的多个条件是 AND，表达不了数组的 OR，所以规则内多个进程 / 端口 / 网段必须
-  展开成多条 filter；
-- `fallback = block` 额外占 2 层 × 2 协议 = 4 条只带协议条件的 filter；
-- 总数上限 `max_block_filters = 128`（`probe_ioctl.h`，`PolicyLimits.MaxBlockFilters` 与
-  `tools/wfprobe/Protocol.cs` 镜像）；编译期先算，驱动在换表时再按同一公式兜底；
-- 超限时驱动删除已建 filter 并返回 `STATUS_INVALID_PARAMETER`，旧表与旧 filter 保持不变；
-- 每条 filter 都显式写 `FWPM_CONDITION_IP_PROTOCOL` 的 6 / 17：不写协议条件的 filter 会误拦
-  首个出站 ICMP（以及按 UDP 处理的其他 IP 协议）；
-- 进程串写入 filter 前用 `RtlUTF8ToUnicodeN` 转成 UTF-16LE + NUL；非法 UTF-8 或超长时拒绝
-  整块 blob，绝不退化成「无条件 block」；
-- 网段 `/0` 省略地址条件（该层已是这一族），端口用 `FWP_MATCH_RANGE`。
+- TCP block 在连接阶段返回 `AccessDenied(10013)`；
+- UDP block 静默丢包（send 成功、对端收不到）；
+- U13 证明新关联的固定 filter 命中且 sink socket 收到 0 个 datagram。
 
-顺序歧义拒绝与 D4 的 block 语义（TCP RST、UDP 静默丢包）都不因数组化而改变。
+classify 内的 sink 改道仍可能失败（acquire/apply 等内部错误），redirect 层无法拦截：此时按
+fail-open 放行，记 `redirect_failures` 与 `block_enforcement_failed` 事件，不增加 `blocked`。
 
 ## 9. 三侧对应与验证
 
@@ -367,15 +346,16 @@ filters(rule) = Σ_layer ( protocol_count × process_count' × port_count' × ne
 | C++ 权威 | `src/common/rule_blob.h` | 布局常量、`static_assert`、`try_open_blob` 全部字节级校验 |
 | C++ 求值 | `src/common/matcher.h` | 集合 OR/AND、三种进程语义、首命中 |
 | C# 镜像 | `Policy/RuleBlobLayout.cs`、`RuleBlobHeader.cs`、`RuleBlobRule.cs`、`RuleBlobProcessSelector.cs`、`RuleBlobPortRange.cs`、`RuleBlobNetworkPrefix.cs` | 结构布局与常量 |
-| C# 编译 | `Policy/RuleBlobCompiler.cs`、`RuleOrderValidator.cs`、`ProcessSelector.cs`、`WindowsProcessPathNormalizer.cs`、`WindowsDevicePath.cs`、`PolicyLimits.cs` | 归一化、校验、编码、预算与顺序 |
+| C# 编译 | `Policy/RuleBlobCompiler.cs`、`ProcessSelector.cs`、`WindowsProcessPathNormalizer.cs`、`WindowsDevicePath.cs`、`PolicyLimits.cs` | 归一化、校验、编码 |
 | C# 配置 | `Configuration/PolicyConfigurationDocument.cs`、`PolicyConfigurationDocument.HostSelectors.cs` | 单值 / 数组、JSON 路径错误、端口合并 |
 | C++ 宿主测试 | `tests/host/rule_blob_test.cpp`、`rule_blob_validation_test.cpp`、`matcher_test.cpp`、`matcher_array_test.cpp`、`differential_test.cpp` | 布局负向矩阵、匹配语义、跨语言差分 |
-| C# 测试 | `WinForward.Userland.Tests/{LayoutTests, BlobAbiConsistencyTests, CompilerTests, CompilerSelectorTests, CompilerLimitTests, RuleOrderTests, RuleOrderProcessTests, ConfigurationTests, ConfigurationArrayTests, ProcessPathTests}.cs` | 单侧规范化与布局、预算、顺序矩阵 |
-| 夹具 | `tools/wfprobe/{BlobBuilder, RuleBlobOrder, Protocol, HostRuleParitySuite}.cs` | 独立 v2 构造器、顺序/预算镜像、驱动 parity 用例 |
+| C# 测试 | `WinForward.Userland.Tests/{LayoutTests, AbiConsistencyTests, BlobAbiConsistencyTests, CompilerTests, CompilerSelectorTests, CompilerLimitTests, ConfigurationTests, ConfigurationArrayTests, ProcessPathTests}.cs` | 布局、规范化、选择器/数组与 ABI |
+| 夹具 | `tools/wfprobe/{BlobBuilder, Protocol, HostRuleParitySuite, RuleSuite, UdpSuite, BlockSinkBinding}.cs` | 独立 v2 构造器、驱动 parity、sink 绑定 |
 
-驱动侧对应：`src/driver/rule_table.cpp`（`block_expression_valid`、`block_filter_budget_valid`、
-`rule_order_valid`、`allocate_rule_table`）、`src/driver/block_filters.cpp`（展开与安装）、
-`src/driver/process_path.cpp`（`ALE_APP_ID` → UTF-8）。
+驱动侧对应：`src/driver/rule_table.cpp`（`allocate_rule_table`、`contains_block`、引用计数与
+退役）、`src/driver/block_filters.cpp`（固定 4 条 sink filter 的安装/删除）、
+`src/driver/probe_control.cpp`（sink 端口校验与 filter 生命周期）、`src/driver/probe_classify.cpp`
+（block 改道 sink）、`src/driver/process_path.cpp`（`ALE_APP_ID` → UTF-8）。
 
 验证入口：
 
@@ -396,10 +376,14 @@ pwsh -File tools/windows/gate.ps1 -Root C:\workspace\WinForward.Kernel -Remote 1
 
 - **路径型选择器要求编译期路径存在**（文件或目录）；不存在的路径编译失败，而不是装一条
   永远不命中的规则。
-- **路径型选择器始终带前缀语义**，即使编译期解析结果是文件；顺序校验因此对路径选择器保守
-  （可能拒绝理论上不可能同时命中的组合）。
-- **block 不支持文件名 / 目录前缀**；这是 WFP auth filter 的结构限制。classify-enforced block
-  与 auth callout 方案另开任务，本层不引入 sink。
+- **路径型选择器始终带前缀语义**，即使编译期解析结果是文件；`is_directory` 只保留为解析结果
+  标记，不再影响匹配或校验。
+- **block 支持文件名 / 精确路径 / 目录前缀 / 数组**：block 参与 classify 首命中，执行是 sink
+  上的固定 filter，不再受 `ALE_APP_ID` 精确匹配限制。
+- **sink 端口在 enabled 期间稳定**；改端口必须先 disable。已存在的 UDP 关联保持旧决策直到
+  关联结束。
+- **sink 改道失败是 fail-open**：redirect 层无法拦截，用 `block_enforcement_failed` 事件与
+  `redirect_failures` 暴露；不假装 blocked。
 - **网段池不做跨规则去重**：blob 比完全去重略大，但规则区间连续，实现与校验更简单。
 - **v1 不兼容**：`rule_blob_version` 已是 2，旧 blob 整块拒绝；控制器、驱动、`wfprobe` 必须
   同批升级。配置层接受单值（等价于单元素数组），旧配置文件不需要改。
