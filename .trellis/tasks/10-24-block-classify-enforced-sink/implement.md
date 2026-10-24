@@ -114,6 +114,40 @@ Windows：`Build-Driver` 0 warning；安装后用现有 `wfprobe rules` / `appid
    `UdpSuite` U6/U7；`VmChecks` 顺序矩阵用 `CompileUnchecked` 断言驱动接受。
 8. 变异：`mutation.ps1` 与 `verify-gates.sh` 按上面“变异”条目删改。
 
+**wfprobe / 测试改造清单（第二个实现代理）**
+
+1. 新增 `tools/wfprobe/BlockSinkBinding.cs`：UDP v4/v6 wildcard 绑定并丢弃（计数仅供诊断）；
+   TCP 保持关闭或 bind-not-listen；`Port` 供 `ProbeConfig`。`RuleSuite`、`UdpSuite`、
+   `BlockProbe` 各自持有并在配置前创建。
+2. `Protocol.cs`：`DecisionBlockEnforcementFailed = 18`；`MaxBlockFilters` 保留到 Batch 3；
+   `DeferredBlocks` 注释改为 sink 改道。产品 `ProbeDecision`/`ProbeStats` 镜像同步。
+3. `RuleBlobOrder.cs` / `BlobBuilder.cs`：删除顺序/表达边界/预算/fallback 冲突校验；
+   `Build` 只做布局，`BuildUnchecked` 保留为别名。产品编译器本批仍保守。
+4. `RuleSuite.cs`：
+   - 配置前创建 `BlockSinkBinding`，写 `BlockSinkPort`。
+   - 顺序冲突用例反转：permit→block 同端口应成功；block→permit 同端口应失败。
+   - fallback=block + permit：permit 端口成功、其他端口失败；`generation` 增长。
+   - mainBlob/fallback 块的 `blocked/deferred_blocks` 断言按 sink 成功语义保留；
+     block server 无 accept。
+5. `HostRuleParitySuite.cs`：
+   - 删除 128 预算用例。
+   - block 精确路径数组保留；文件名/目录前缀从“编译期+驱动拒绝”改为正向 block
+     （父进程与副本都失败）。
+   - 新增 `permit 127.0.0.0/8 → block 其余`（本地 echo 成功）与 `fallback=block` + permit
+     （permit 成功、其他失败）。
+   - 事件/计数断言改用 sink 成功语义。
+6. `UdpSuite.cs`：配置加 `BlockSinkPort`；U6/U7 的 block 仍静默、原 `blockedSink` 无包；
+   TCP 对照先断言 `!connected` 并记录实际错误码（10013/10061），Batch 2 VM 实验后再收紧。
+7. `BlockProbe.cs`：block 规则存在时必须设置 sink 端口；firewall-check 的非命中规则仍应通过。
+8. `VmChecks.cs`：`CheckRuleOrderDifferential` 改为“驱动接受所有 `CompileUnchecked` 配置、
+   generation +1、rejected_blobs 不增”；产品仍拒绝的用例保留诊断消息检查；配置加 sink
+   端口（listener 1、sink 2）。
+9. 变异：`tools/windows/mutation.ps1` 删除 `rule-order-conflict`/`fallback-block-conflict`；
+   `block-filter-skip`/`block-filter-protocol` 锚点对齐新 `block_filters.cpp`；新增 sink
+   端口/协议少装一条的变异。`tools/userland/verify-gates.sh` 留到 Batch 3。
+10. 验证：Linux `check.sh --full`；VM 同步后 `dotnet build tools/wfprobe` +
+    `gate.ps1`（或至少 `wfprobe rules`/`udp-rules`）。TCP 错误码与 sink 计数写入实验记录。
+
 **验证**
 
 ```bash
