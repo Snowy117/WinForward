@@ -31,18 +31,18 @@ code and no C# Kernel project enters the solution in this batch.
 
 ## Acceptance Criteria
 
-- [ ] B1-AC1: `kernel/` contains the driver, common ABI, host tests and tools; no tracked build
+- [x] B1-AC1: `kernel/` contains the driver, common ABI, host tests and tools; no tracked build
       outputs, local configs, journals or duplicate Trellis tree; the source history is reachable
       through the import merge's second parent (`git rev-list --count 7ba4e6e`).
-- [ ] B1-AC2: `.trellis/spec/backend/kernel/` holds the live specs and
+- [x] B1-AC2: `.trellis/spec/backend/kernel/` holds the live specs and
       `.trellis/spec/backend/kernel/research/` holds the research/verification/decision documents
       with an index; the backend spec index links the Kernel family.
-- [ ] B1-AC3: `kernel/tools/check.sh --fast` passes; the CMake host tests configure and the
+- [x] B1-AC3: `kernel/tools/check.sh --fast` passes; the CMake host tests configure and the
       `wf_check` target passes; the root `dotnet build WinForward.slnx -c Release`,
       `dotnet test WinForward.slnx -c Release` and the format gate pass.
-- [ ] B1-AC4: `kernel/MIGRATION.md` records the source commit `7ba4e6e`, branch tips, imported
+- [x] B1-AC4: `kernel/MIGRATION.md` records the source commit `7ba4e6e`, branch tips, imported
       paths, retired paths and the spec/research mapping.
-- [ ] B1-AC5: `git diff --stat` shows only `kernel/**`, `.trellis/**`, root docs/config (if needed);
+- [x] B1-AC5: `git diff --stat` shows only `kernel/**`, `.trellis/**`, root docs/config (if needed);
       no product code changed.
 
 ## Out of Scope
