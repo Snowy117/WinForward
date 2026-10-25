@@ -112,7 +112,7 @@ public struct ProbeForwardedRedirect
     public readonly IPAddress ServerIP => AddressOf(ServerAddress, Family);
 
     public readonly IPAddress? ListenerIP =>
-        Version >= VersionValue && (Family == 4 || Family == 6) ? AddressOf(ListenerAddress, Family) : null;
+        Version >= VersionValue && Family is 4 or 6 ? AddressOf(ListenerAddress, Family) : null;
 
     public readonly string StateText => State switch
     {
@@ -122,7 +122,7 @@ public struct ProbeForwardedRedirect
         _ => $"state-{State}",
     };
 
-    public override readonly string ToString() =>
+    public readonly override string ToString() =>
         $"client={ClientIP}:{ClientPort} server={ServerIP}:{ServerPort} listener={ListenerIP}:{ListenerPort} " +
         $"upstream={UpstreamId} rule={RuleIndex} ingress={IngressIfIndex} generation={Generation} state={StateText}";
 

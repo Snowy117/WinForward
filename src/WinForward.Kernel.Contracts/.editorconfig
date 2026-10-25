@@ -1,5 +1,5 @@
-# 本工程专属的分析器抑制。仓库根的 .editorconfig 保留全局规则；这里的条目只覆盖证据所在的
-# 精确文件，项目内其它代码仍受同一条规则管辖。
+# 本工程专属的分析器抑制。仓库根的 .editorconfig 保留全局规则；除标注为工程作用域的条目外，
+# 这里的条目只覆盖证据所在的精确文件，项目内其它代码仍受同一条规则管辖。
 
 # [InlineArray] 的元素存储字段只由编译器生成的索引器、MemoryMarshal 与运行期布局使用，C# 源码里
 # 没有直接读取点，也不会被赋值，因此三条规则同时误判：S1144/RCS1213 认为它是死字段，RCS1169 认为
@@ -48,8 +48,11 @@ dotnet_diagnostic.RCS1169.severity = none
 # IOCTL 常量按 C++ make_ioctl 的公式逐项展开：`(device << 16) | (access << 14) | (function << 2) | method`。
 # 当前 FILE_ANY_ACCESS 与 METHOD_BUFFERED 都是 0，所以 `<< 14` 与 `| 0` 在数值上可省；但它们正是
 # 与 probe_ioctl.h 对照的那部分公式，删掉会让 ABI 推导失去可读的对照物，而常量值必须逐位不变。
+# jb 的 ShiftExpressionZeroLeftOperand 同理：左操作数恒为 0 的移位仍属于 make_ioctl 公式本身，
+# 不是笔误。
 [Device/ProbeIoctl.cs]
 dotnet_diagnostic.S2437.severity = none
+resharper_shift_expression_zero_left_operand_highlighting = none
 
 # string.Contains(char) 本身就是序数比较，也没有带 StringComparison 的重载；MA0001 建议的调用形式
 # 对 char 参数不存在，保留 Contains 是唯一不带文化语义的写法。
@@ -68,3 +71,71 @@ dotnet_diagnostic.SYSLIB1054.severity = none
 
 [Policy/WindowsDevicePath.cs]
 dotnet_diagnostic.SYSLIB1054.severity = none
+
+# =====================================================================
+# 地址族 / 网段族 switch：default 抛异常就是 fail-closed 校验契约
+#
+# 五处 switch 只把 IPv4 / IPv6 映射到驱动 ABI 的族位，其余取值一律拒绝。
+# AddressFamily 是 BCL 枚举（已知成员 30+），逐个列出其余成员既无行为差异，也让
+# “只有这两个族合法”的意图淹没在清单里；RuleAddressFamily.Any 不是合法网段族
+# （RemoteNetwork.Create 只产出 Ipv4 / Ipv6），显式列成 throw 会与兜底臂重复。
+# =====================================================================
+[Device/ProbeForwardedConfig.cs]
+resharper_switch_expression_handles_some_known_enum_values_with_exception_in_default_highlighting = none
+
+[Device/ProbeForwardedIngress.cs]
+resharper_switch_expression_handles_some_known_enum_values_with_exception_in_default_highlighting = none
+
+[Device/ProbeForwardedRedirect.cs]
+resharper_switch_expression_handles_some_known_enum_values_with_exception_in_default_highlighting = none
+
+[Policy/RemoteNetwork.cs]
+resharper_switch_expression_handles_some_known_enum_values_with_exception_in_default_highlighting = none
+
+[Policy/RuleBlobCompiler.cs]
+resharper_switch_expression_handles_some_known_enum_values_with_exception_in_default_highlighting = none
+
+# =====================================================================
+# JSON-bound 配置模型：jb 在根解决方案里看不到消费者
+#
+# 四个类型由 `kernel/` 的 PolicyConfigurationDocument 从 JSON 构造（对象初始化器写 init
+# 访问器），也由 Controller 与 Kernel 测试实例化；这些项目只在
+# `kernel/src/userland/WinForward.Userland.slnx` 里构建，不在根 `WinForward.slnx` 内。
+# 因此“从未实例化”“auto-property 可以只读”都是跨树视角的结构性误报：删掉 init 访问器
+# 或让类型不可构造会打断 kernel/ 的配置解析与测试，而该树不在本门禁内，抓不住。
+# =====================================================================
+[Policy/PolicyRule.cs]
+resharper_class_never_instantiated_global_highlighting = none
+resharper_auto_property_can_be_made_get_only_global_highlighting = none
+
+[Policy/PolicyTable.cs]
+resharper_class_never_instantiated_global_highlighting = none
+
+[Forwarded/ForwardedPolicyRule.cs]
+resharper_class_never_instantiated_global_highlighting = none
+resharper_auto_property_can_be_made_get_only_global_highlighting = none
+
+[Forwarded/ForwardedPolicyTable.cs]
+resharper_class_never_instantiated_global_highlighting = none
+
+# =====================================================================
+# 工程作用域：jb 的 Unused*/MemberCanBePrivate 在本工程上是结构性误报
+#
+# 本工程是 Kernel 控制面 ABI 的跨树契约库，消费者全在 `kernel/` 子树：
+# `kernel/src/userland/WinForward.Userland`（WfpController、PolicyConfigurationDocument、
+# ForwardedUdpRelay）、`kernel/src/userland/WinForward.Controller`（Run/Check/State/Disable 命令）、
+# `kernel/src/userland/WinForward.Userland.Tests`（ABI 布局、编译器与配置测试）。ABI 客户端与
+# 布局常量的内部面只经 `InternalsVisibleTo`（WinForward.Userland、WinForward.Userland.Tests）
+# 可见，jb 的跨程序集使用分析不建模这条授权。这些项目由
+# `kernel/src/userland/WinForward.Userland.slnx` 构建，不在根 `WinForward.slnx` 里，所以整片公共面
+# 在根解决方案视角下"无人使用、可以私有化"是结构性的，不是死代码；照做会打断 `kernel/` 的编译，
+# 而该树不在本门禁内，抓不住。quality-guidelines.md 的 jb 误报清单已把友元消费者归为同一类。
+#
+# 四条只在本工程作用域降级；真实代码级检查（冗余转换、模式合并、XML doc 等）依然生效，
+# 遇到就改代码；枚举 switch 覆盖的误报已按文件在上方逐条降级。
+# =====================================================================
+[*.cs]
+resharper_unused_type_global_highlighting = none
+resharper_unused_member_global_highlighting = none
+resharper_unused_auto_property_accessor_global_highlighting = none
+resharper_member_can_be_private_global_highlighting = none

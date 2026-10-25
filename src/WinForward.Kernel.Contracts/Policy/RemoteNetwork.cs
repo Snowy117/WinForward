@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 
 namespace WinForward.Userland.Policy;
 
@@ -46,6 +45,7 @@ public sealed class RemoteNetwork
             throw new ArgumentException($"CIDR 的地址部分无法解析：{cidr}", nameof(cidr));
         }
 
+        // ReSharper disable once ConvertIfStatementToReturnStatement // 前缀校验失败先抛、成功再构造网段，是本工程统一的失败关闭读序；条件返回会把失败路径折进表达式
         if (!int.TryParse(cidr[(slash + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var prefixLength))
         {
             throw new ArgumentException($"CIDR 的前缀长度不是十进制整数：{cidr}", nameof(cidr));

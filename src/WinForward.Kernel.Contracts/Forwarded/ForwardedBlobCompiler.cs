@@ -55,7 +55,7 @@ public static class ForwardedBlobCompiler
         header.TotalSize = (uint)totalSize;
         header.RuleCount = (uint)entries.Length;
         header.FallbackAction = (uint)table.FallbackAction;
-        header.RulesOffset = (uint)rulesOffset;
+        header.RulesOffset = rulesOffset;
         header.NetworkPoolOffset = (uint)networkOffset;
         header.NetworkPoolSize = (uint)networkSize;
         header.Reserved = 0;
@@ -163,6 +163,7 @@ public static class ForwardedBlobCompiler
     {
         if (action == RuleAction.Redirect)
         {
+            // ReSharper disable once ConvertIfStatementToSwitchStatement // 两条哨兵校验各自带独立错误文案，按顺序早退比 switch 分派更能读出 redirect 的前置条件
             if (upstreamId is null)
             {
                 throw Error(ruleIndex, "redirect 规则必须指定 UpstreamId");

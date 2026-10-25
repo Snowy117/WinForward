@@ -50,6 +50,7 @@ public sealed class ProcessSelector
         foreach (var character in text)
         {
             // 与 rule_blob.h 的 is_control_code_point 一致：C0、DEL 与 C1 都在拒绝范围内。
+            // ReSharper disable once MergeIntoPattern // 显式区间比较逐段对应 rule_blob.h 的 is_control_code_point；关系模式会让 Sonar S3267 误判这条失败即抛的扫描为 Where 过滤
             if (character < '\u0020' || (character >= '\u007F' && character <= '\u009F'))
             {
                 throw new ArgumentException(

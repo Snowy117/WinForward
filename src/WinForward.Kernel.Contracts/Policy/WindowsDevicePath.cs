@@ -44,7 +44,7 @@ internal static class WindowsDevicePath
         }
 
         var required = GetFinalPathNameByHandleQuery(handle, IntPtr.Zero, 0, FileNameNormalized | VolumeNameNt);
-        if (required == 0 || required > MaxPathChars)
+        if (required is 0 or > MaxPathChars)
         {
             return null;
         }

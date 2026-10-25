@@ -52,7 +52,7 @@ public sealed class WfpDeviceClient : IDisposable
     }
 
     public void SetConfig(ProbeConfig config) =>
-        Ioctl(ProbeIoctl.SetConfigCode, MemoryMarshal.AsBytes(new ReadOnlySpan<ProbeConfig>(in config)).ToArray(), 0);
+        Ioctl(ProbeIoctl.SetConfigCode, [.. MemoryMarshal.AsBytes(new ReadOnlySpan<ProbeConfig>(in config))], 0);
 
     public ProbeConfig GetConfig() => ReadStruct<ProbeConfig>(ProbeIoctl.GetConfigCode, "GetConfig");
 
@@ -96,7 +96,7 @@ public sealed class WfpDeviceClient : IDisposable
 
     public void SetForwardedConfig(ProbeForwardedConfig config) =>
         Ioctl(ProbeIoctl.SetForwardedConfigCode,
-              MemoryMarshal.AsBytes(new ReadOnlySpan<ProbeForwardedConfig>(in config)).ToArray(),
+              [.. MemoryMarshal.AsBytes(new ReadOnlySpan<ProbeForwardedConfig>(in config))],
               0);
 
     public ProbeForwardedConfig GetForwardedConfig() =>
@@ -138,12 +138,13 @@ public sealed class WfpDeviceClient : IDisposable
 
         var size = maxEvents * Unsafe.SizeOf<ProbeEvent>();
         var data = Ioctl(ProbeIoctl.GetEventsCode, [], size);
+        // ReSharper disable once ConvertIfStatementToReturnStatement // 校验守卫失败先抛、成功再返回，是本工程统一的失败关闭读序；条件返回会把失败路径折进表达式
         if (data.Length % Unsafe.SizeOf<ProbeEvent>() != 0)
         {
             throw new InvalidOperationException($"GetEvents 返回 {data.Length} 字节，不是 probe_event 的整数倍");
         }
 
-        return MemoryMarshal.Cast<byte, ProbeEvent>(data.AsSpan()).ToArray();
+        return [.. MemoryMarshal.Cast<byte, ProbeEvent>(data.AsSpan())];
     }
 
     /// <summary>诊断接口：把 UTF-16LE 字节交给内核的 collect_process_path，回读 UTF-8 长度与内容。</summary>
@@ -209,7 +210,7 @@ public sealed class WfpDeviceClient : IDisposable
                               $"DeviceIoControl 0x{code:X8} 报告写回 {returned} 字节，超出输出缓冲区"));
         }
 
-        return output.AsSpan(0, returned).ToArray();
+        return [.. output.AsSpan(0, returned)];
     }
 
     private static string Describe(uint code) => code switch

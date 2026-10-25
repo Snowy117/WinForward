@@ -169,7 +169,7 @@ public static class RuleBlobCompiler
                 throw Error(ruleIndex, $"远端端口区间颠倒：{range}");
             }
 
-            if (range.Begin == 0 && !range.IsAny)
+            if (range is { Begin: 0, IsAny: false })
             {
                 throw Error(ruleIndex,
                             $"远端端口 0 不是合法端口（只有 PortRange.Any 的 0..65535 表示任意）：{range}");
@@ -269,7 +269,7 @@ public static class RuleBlobCompiler
             if (!text.StartsWith(@"\device\", StringComparison.OrdinalIgnoreCase) || text[^1] == '\\')
             {
                 throw Error(ruleIndex,
-                            "路径型进程选择器必须归一成以 \\device\\ 开头、不以 \\ 结尾的设备路径：" +
+                            @"路径型进程选择器必须归一成以 \device\ 开头、不以 \ 结尾的设备路径：" +
                             $"{text}（选择器：{selector.Value}）");
             }
         }
@@ -347,7 +347,7 @@ public static class RuleBlobCompiler
         header.TotalSize = (uint)totalSize;
         header.RuleCount = (uint)entries.Length;
         header.FallbackAction = (uint)fallbackAction;
-        header.RulesOffset = (uint)rulesOffset;
+        header.RulesOffset = rulesOffset;
         header.ProcessPoolOffset = (uint)processOffset;
         header.ProcessPoolSize = (uint)processBytes.Length;
         header.SelectorPoolOffset = (uint)selectorOffset;

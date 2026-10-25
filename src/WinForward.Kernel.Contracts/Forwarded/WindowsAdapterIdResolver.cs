@@ -118,7 +118,10 @@ public sealed class WindowsAdapterIdResolver : IAdapterIdResolver
             try
             {
                 var properties = adapter.GetIPProperties();
+                // ReSharper disable ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
+                // 接口快照把两族属性都当作可能缺失（TryResolve 的「IPv4/IPv6 属性都取不到」失败路径）；BCL 标注不建模该缺失，保留空值回退
                 index = (uint?)properties.GetIPv4Properties()?.Index ?? (uint?)properties.GetIPv6Properties()?.Index;
+                // ReSharper restore ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
             }
             catch (NetworkInformationException)
             {

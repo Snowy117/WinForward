@@ -10,7 +10,7 @@ namespace WinForward.Userland.Forwarded;
 /// 直接报错。
 /// </para>
 /// <para>
-/// 调用约定：<paramref name="adapterId"/> 与 <paramref name="adapterName"/> 至少有一个非空，
+/// 调用约定：<c>adapterId</c> 与 <c>adapterName</c> 至少有一个非空，
 /// 实现只需解析非空的那个；两个都给时配置层会分别调用一次并比对结果，因此实现不必自己处理
 /// 两个选择器冲突的情况。
 /// </para>
