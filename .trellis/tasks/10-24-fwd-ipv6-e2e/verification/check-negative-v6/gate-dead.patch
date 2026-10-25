@@ -1,0 +1,20 @@
+--- tools/linux/forwarded_gate.py	2026-10-25 01:38:21.484298731 +0800
++++ /tmp/forwarded_gate_dead.py	2026-10-25 01:40:56.055336405 +0800
+@@ -38,7 +38,7 @@
+ import sys
+ import time
+ 
+-ROOT = pathlib.Path(__file__).resolve().parents[2]
++ROOT = pathlib.Path("/home/paff/Projects/WinForward.Kernel")
+ LINUX = ROOT / "tools" / "linux"
+ # prepare-b6c-forwarded.ps1 的默认 v6 测试地址；prepare 中途失败、没打印 B6C-V6-READY 时
+ # 仍用它们检查 -Remove 是否清干净。
+@@ -369,7 +369,7 @@
+                     raise GateError(f"B6C-V6-READY is missing {','.join(missing)}: {v6}")
+                 cfg.internal_l1 = v6["internal_l1"]
+                 cfg.internal_l2 = v6["internal_l2"]
+-                cfg.internal_target = v6["internal_target"]
++                cfg.internal_target = "fe80::dead"
+                 cfg.external_l1 = v6["external_l1"]
+                 cfg.external_target = v6["external_target"]
+                 cfg.eth0_link_local = linux_link_local("eth0")

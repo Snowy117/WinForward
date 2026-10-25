@@ -1,0 +1,7 @@
+$ python3 /home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_tcp_b6b.py --mode multi --target 192.168.100.99:40250 --target 192.168.77.99:40250 --bind-address 192.168.100.4 --bind-address 192.168.77.4 --source-port 40500 --payload-size 2048 --timeout 20 && python3 /home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_tcp_b6b.py --mode multi --target 192.168.100.99:40250 --target 192.168.100.99:40251 --bind-address 192.168.100.4 --source-port 40501 --payload-size 2048 --timeout 20
+[client] target=192.168.100.99:40250 local=192.168.100.4:40500 bytes=2048 sha=a152db2545dc06e110974fb34ca6a39c96648b297e405b4edba5581a0ae9042a ok=1
+[client] target=192.168.77.99:40250 local=192.168.77.4:40500 bytes=2048 sha=c31163ec4cd08520582a299f29d6dd932b54b60dd1042599632aae1897b25582 ok=1
+[client] target=192.168.100.99:40250 local=192.168.100.4:40501 bytes=2048 sha=a152db2545dc06e110974fb34ca6a39c96648b297e405b4edba5581a0ae9042a ok=1
+[client] target=192.168.100.99:40251 local=192.168.100.4:40501 bytes=2048 sha=c31163ec4cd08520582a299f29d6dd932b54b60dd1042599632aae1897b25582 ok=1
+
+

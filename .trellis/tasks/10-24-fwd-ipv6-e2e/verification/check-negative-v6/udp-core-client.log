@@ -1,0 +1,6 @@
+$ python3 /home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_udp_client.py --target 192.168.100.99:40250 --count 10 --verify 192.168.100.2:41400 --source-port-base 44001
+[client] verify port ready 192.168.100.2:41400
+[client] target=192.168.100.99:40250 received=10/10 source_ok=True last_source=192.168.100.99:40250
+client_port=44001 target_port=40250 bytes=640 count=10 sha=deac6833105d28fb41b0faffec7f4b19006284613d9137d4aa39245baacf587a source=192.168.100.99:40250 source_ok=1 ok=1
+
+
