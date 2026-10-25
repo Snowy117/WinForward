@@ -1,15 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Policy：规则模型与 blob 编译器；Configuration：暂定 JSON；Device：IOCTL；Control/Relay：产品进程。 -->
+    <!--
+      兼容壳：ABI 镜像、blob 编译器与设备客户端已移到仓库根的
+      src/WinForward.Kernel.Contracts 工程。Configuration/、Control/ 与 Relay/ 在脚手架退役前
+      仍留在这里，Kernel 控制器与原生测试驱动通过本工程同时拿到两边。tools/wfprobe 不引用任何
+      产品工程，它自带 ABI 夹具镜像。
+    -->
     <AssemblyName>WinForward.Userland</AssemblyName>
     <RootNamespace>WinForward.Userland</RootNamespace>
-
-
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 布局断言与夹具生成在测试工程里做，它们是同一份 ABI 的两端。 -->
+    <ProjectReference Include="../../../../src/WinForward.Kernel.Contracts/WinForward.Kernel.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Relay/ 与 Control/ 的内部类型仍由 Kernel 测试直接断言。 -->
     <InternalsVisibleTo Include="WinForward.Userland.Tests" />
   </ItemGroup>
 

@@ -119,7 +119,9 @@ until it is retired.
   would otherwise use the monorepo root, where the `src/driver/**` / `src/common/**` rule globs match
   nothing, and the gate would pass with zero scanned files.
 - Scripts under `kernel/tools/windows/` keep deriving `-Root` two levels up from `tools\windows`
-  (that is `kernel/`); the WDK build and `gate.ps1` are not wired to CI in this batch.
+  (that is `kernel/`); the WDK build and `gate.ps1` are not wired to CI in this batch. `-Root` means
+  the `kernel/` subtree root, not the repository root; since the contracts extraction the C# build
+  under it reaches the repository root through relative paths (see Contracts extraction).
 - `kernel/.githooks/pre-commit` and `install.sh` still resolve the git toplevel, so this batch leaves
   them untouched; the parent plan installs one root dispatcher instead.
 - Configure and run the host tests from the monorepo root:
@@ -128,6 +130,60 @@ until it is retired.
   cmake -S kernel -B kernel/build/check -G Ninja
   cmake --build kernel/build/check --target wf_check
   ```
+
+## Contracts extraction
+
+The Kernel C# contract surface now lives at the repository root instead of inside the native tree.
+`Device/`, `Policy/` and `Forwarded/` moved verbatim from
+`kernel/src/userland/WinForward.Userland/` to `src/WinForward.Kernel.Contracts/`, which is a member
+of `WinForward.slnx` and therefore subject to the root analyzers and `dotnet format`.
+
+| Item | State |
+|---|---|
+| Moved | `Device/`, `Policy/`, `Forwarded/` → `src/WinForward.Kernel.Contracts/{Device,Policy,Forwarded}/` |
+| Unchanged | Byte layouts, IOCTL structs, blob compilers, golden bytes, process-path normalization |
+| New assembly | `WinForward.Kernel.Contracts`; `RootNamespace` stays `WinForward.Userland`, so the type namespaces are still `WinForward.Userland.*` |
+| Old project | `kernel/src/userland/WinForward.Userland` is a thin `ProjectReference` to the new project plus `Configuration/`, `Control/` and `Relay/`; its `AssemblyName`/`RootNamespace` are unchanged |
+| References | `WinForward.Userland.Tests` and `WinForward.Controller` still reference only the old project; project-reference transitivity exposes the moved types. Measured on the actual builds: `WinForward.Userland.slnx` compiles and `check.sh --full` (including the `wf_check` test runner) passes |
+| Internals | The new project grants `InternalsVisibleTo` to `WinForward.Userland.Tests` (ABI/layout assertions) and to `WinForward.Userland` (its `Configuration/` reads the forwarded blob sentinel). The Controller needs no grant |
+
+The old project is a compatibility shim, not a second userland: it adds no types of its own beyond
+the scaffolding it still carries.
+
+Deferred, and deliberately not mixed into the extraction:
+
+- Retiring `Configuration/`, `Control/` and `Relay/`. They stay until the Controller and the test
+  runner stop using them (and `tools/wfprobe` stops driving the Controller binary in its gate
+  suites); the backend seam replaces them with `WinForward.Configuration` / `WinForward.Runtime`.
+- Renaming the `WinForward.Userland.*` namespaces to `WinForward.Kernel.Contracts.*`. It is a
+  mechanical change across the moved files, the tests and the Controller, and it would bury the
+  extraction diff.
+
+Gate and tool effects:
+
+- `kernel/tools/userland/verify-gates.sh` mutates the moved sources by path, so its mutation targets
+  are now `../src/WinForward.Kernel.Contracts/Device/ProbeIoctl.cs` and
+  `../src/WinForward.Kernel.Contracts/Policy/RuleBlobCompiler.cs` (the script runs from `kernel/`).
+  The `Configuration/` and `Relay/` mutation paths stay under `kernel/src/userland/` while that
+  scaffolding remains.
+- `tools/wfprobe/wfprobe.csproj` targets `net10.0` like the rest of the userland. It had drifted to
+  `net11.0`, which the repository SDK (`global.json`) cannot build; the Windows VM's SDK 11 builds
+  `net10.0` as well. The project also removes the four root analyzer packages it inherits through
+  the filesystem walk to the root `Directory.Build.props`: the tool is not in the product solution
+  and predates those rules, and enabling them makes a Release build report 500 analyzer errors over
+  20 files immediately. The csproj comment carries the measured rule counts (MSBuild prints each
+  diagnostic again in the failure summary, so the raw log has twice as many error lines) and the
+  removal condition.
+- `tools/windows/gate.ps1` still builds `WinForward.Userland.slnx`, and the Controller output path is
+  unchanged, but its build surface is no longer self-contained: the solution now includes
+  `src/WinForward.Kernel.Contracts` through a cross-tree path (`../../../src/...` from
+  `kernel/src/userland`), and the shim references the same project with `../../../../src/...`. A
+  Windows machine deployed with only the `kernel/` subtree cannot build it.
+- The Windows deployment therefore has to carry the complete repository layout: `<repo>/kernel`
+  plus `<repo>/src/WinForward.Kernel.Contracts`, and the root build files the contracts project
+  imports (`Directory.Build.props`, `Directory.Packages.props`, `src/Directory.Build.props`, and
+  `analyzers/WinForward.Analyzers`). `gate.ps1 -Root` keeps pointing at `<repo>/kernel`; the
+  relative paths inside the solution and the project references do the rest.
 
 ## Known follow-ups
 

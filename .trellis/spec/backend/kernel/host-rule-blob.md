@@ -1,6 +1,7 @@
 # Host 规则 blob（v2）
 
-> 适用范围：`src/common/rule_blob.h`、`src/common/matcher.h`、`src/userland/WinForward.Userland/Policy/`、
+> 适用范围：`src/common/rule_blob.h`、`src/common/matcher.h`、
+> `src/WinForward.Kernel.Contracts/Policy/`（类型仍在 `WinForward.Userland.Policy` 命名空间）、
 > `tools/wfprobe/`。
 > 拟定：2026-10-24。任务证据：`.trellis/spec/backend/kernel/research/10-24-host-rule-arrays-process-match/`。
 

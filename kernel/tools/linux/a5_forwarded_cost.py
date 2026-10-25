@@ -63,7 +63,7 @@ def main():
     parser.add_argument("--poll-cmd", default="windows-vm b6ctl run")
     parser.add_argument("--up-cmd", default="windows-vm up2 up")
     parser.add_argument("--remote-root", default="C:/workspace")
-    parser.add_argument("--suite-exe", default="C:/workspace/WinForward.Kernel/tools/wfprobe/bin/Release/net11.0/wfprobe.exe")
+    parser.add_argument("--suite-exe", default="C:/workspace/WinForward.Kernel/tools/wfprobe/bin/Release/net10.0/wfprobe.exe")
     parser.add_argument("--helper", default="C:/workspace/forwarded-gate-suite.ps1")
     parser.add_argument("--prepare", default="C:/workspace/prepare-b6c-forwarded.ps1")
     parser.add_argument("--target", default="192.168.100.99")

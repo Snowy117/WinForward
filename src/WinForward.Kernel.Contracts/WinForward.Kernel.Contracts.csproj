@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>WinForward.Kernel.Contracts</AssemblyName>
+    <!--
+      Transitional: the ABI mirror, the host/forwarded blob compilers and the process-path resolver
+      moved here verbatim, so their namespaces stay WinForward.Userland.* for now. The Kernel
+      controller, test runner and tools/wfprobe compile against those names; renaming them is a
+      separate mechanical change and must not be mixed into this extraction. RootNamespace keeps
+      IDE0130 (namespace matches folder structure) quiet in the meantime.
+    -->
+    <RootNamespace>WinForward.Userland</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The Kernel test runner asserts buffer sizes and the raw IOCTL entry point, which are
+         internal to the ABI client. -->
+    <InternalsVisibleTo Include="WinForward.Userland.Tests" />
+    <!-- The Kernel compatibility project's Configuration/ still reads the forwarded blob sentinel
+         when it validates adapter selectors. Drop this grant with that scaffolding. -->
+    <InternalsVisibleTo Include="WinForward.Userland" />
+  </ItemGroup>
+
+</Project>

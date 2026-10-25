@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "10-25-kernel-import-foundation",
-    "10-25-backend-driver-config"
+    "10-25-backend-driver-config",
+    "10-25-kernel-contracts-extraction"
   ],
   "parent": null,
   "relatedFiles": [],

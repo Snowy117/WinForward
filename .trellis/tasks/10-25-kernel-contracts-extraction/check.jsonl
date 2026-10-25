@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/contracts-project.md", "reason": "Verify the shim/reference behavior and native-tool paths against the researched dependency surface."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the extraction stayed within the parent design and did not start the backend/userland retirement."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify every analyzer suppression has a concrete reason and no gate was weakened."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify the new project's references/namespace/project naming and no dependency reversal."}
+{"file": ".trellis/spec/backend/kernel/csharp-conventions.md", "reason": "Verify the ABI/compiler code still follows the Kernel conventions and test contract."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Verify the host blob layout/golden behavior did not change."}
+{"file": ".trellis/spec/backend/kernel/forwarded-rule-blob.md", "reason": "Verify the forwarded blob layout/golden behavior did not change."}

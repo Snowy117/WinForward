@@ -10,14 +10,19 @@ blob 格式一旦对不上，症状是规则静默不生效而不是报错，所
 
 | 路径 | 内容 |
 |---|---|
-| `WinForward.Userland/Policy/` | 规则模型、编译期校验、blob 编译器、ABI 镜像结构 |
+| `src/WinForward.Kernel.Contracts/Policy/` | 规则模型、编译期校验、blob 编译器、ABI 镜像结构 |
+| `src/WinForward.Kernel.Contracts/Device/` | 控制面 IOCTL：ABI 结构镜像、布局断言、设备客户端 |
+| `src/WinForward.Kernel.Contracts/Forwarded/` | forwarded 规则模型、blob 编译器、入口适配器解析 |
 | `WinForward.Userland/Configuration/` | 暂定 JSON 配置 → `ControllerConfiguration` / `PolicyTable`（**唯一**的格式感知层） |
-| `WinForward.Userland/Device/` | 控制面 IOCTL：ABI 结构镜像、布局断言、设备客户端 |
 | `WinForward.Userland/Control/` | 产品生命周期：下发规则 → 起监听 → 告诉驱动端口与 self-PID → 退出 |
 | `WinForward.Userland/Relay/` | accept → 读回原始目的地 → 建出站（直连或经 SOCKS5）→ 双向转发 |
 | `WinForward.Controller/` | 控制台入口：`run` / `check` / `state` / `disable` / `echo` / `client` |
 | `WinForward.Userland.Tests/` | 零依赖测试驱动、布局断言、ABI 一致性、差分用例表与夹具生成 |
 | `Directory.Build.props` | 公共属性：`net10.0`、nullable、warnings-as-errors |
+
+`WinForward.Kernel.Contracts/` 三个目录已搬到仓库根（上表里相对仓库根，其余路径相对本目录），
+`WinForward.Userland` 只剩 `Configuration/`、`Control/`、`Relay/` 并通过 `ProjectReference` 引用它。
+类型命名空间仍是 `WinForward.Userland.*`，改名是后续批次的事。
 
 测试工程刻意不引 xunit：仓库的构建面只有 nix devShell 与 Windows VM，两者都不保证能访问
 NuGet。入口是 `dotnet run` 的 `test` 子命令，退出码即门禁结果。
@@ -160,7 +165,7 @@ driver，再释放 sink。`userland-e2e` 断言回读的 `block-sink-port` 非 0
 | 位置 | 角色 |
 |---|---|
 | `src/driver/probe_ioctl.h` | 权威：`static_assert` 的尺寸/偏移、常量、枚举 |
-| `WinForward.Userland/Device/` | 产品镜像 + 运行期布局断言（`DeviceLayout.Verify()`） |
+| `src/WinForward.Kernel.Contracts/Device/` | 产品镜像 + 运行期布局断言（`DeviceLayout.Verify()`） |
 | `tools/wfprobe/Protocol.cs` | 测试夹具（独立程序，不引用产品工程） |
 
 `WinForward.Userland.Tests/AbiConsistencyTests.cs` **读头的文本**：解析结构体字段、`static_assert`、

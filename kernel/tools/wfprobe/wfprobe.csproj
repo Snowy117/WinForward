@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net11.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -9,4 +9,20 @@
     <RootNamespace>WinForward.Probe</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      wfprobe 是原生门禁工具，不在产品解决方案 WinForward.slnx 里；根 Directory.Build.props 按
+      工程所在目录向上逐级查找，因此只要仓库里有它，这个工程就会继承那四个分析器包。这套工具写在
+      那套规则之前，实测把包放开后，一次 Release 构建直接报出 500 条错误：MA0004 249、S6966 36、
+      MA0051 34、MA0048 30、VSTHRD103 27、S1199 21，分布在 20 个文件。MSBuild 会在失败摘要里
+      把每条再打印一遍，因此原始日志里是 1000 行 error、实际 500 条；TreatWarningsAsErrors 下
+      它们全是错误。所以在工程级定向摘掉这四个包，而不是关掉任何一条规则或降低整个构建面的严格度。
+      把 wfprobe 纳入根分析器门禁是单独的一批机械改动，届时删掉这个 ItemGroup。
+    -->
+    <PackageReference Remove="Meziantou.Analyzer" />
+    <PackageReference Remove="Microsoft.VisualStudio.Threading.Analyzers" />
+    <PackageReference Remove="Roslynator.Analyzers" />
+    <PackageReference Remove="SonarAnalyzer.CSharp" />
+  </ItemGroup>
 </Project>

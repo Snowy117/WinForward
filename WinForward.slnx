@@ -7,6 +7,7 @@
     <Project Path="src/WinForward.Core/WinForward.Core.csproj" />
     <Project Path="src/WinForward.NdisApi/WinForward.NdisApi.csproj" />
     <Project Path="src/WinForward.Protocols/WinForward.Protocols.csproj" />
+    <Project Path="src/WinForward.Kernel.Contracts/WinForward.Kernel.Contracts.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WinForward.Configuration.Tests/WinForward.Configuration.Tests.csproj" />

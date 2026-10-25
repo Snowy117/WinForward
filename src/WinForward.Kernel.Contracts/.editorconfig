@@ -1,0 +1,70 @@
+# 本工程专属的分析器抑制。仓库根的 .editorconfig 保留全局规则；这里的条目只覆盖证据所在的
+# 精确文件，项目内其它代码仍受同一条规则管辖。
+
+# [InlineArray] 的元素存储字段只由编译器生成的索引器、MemoryMarshal 与运行期布局使用，C# 源码里
+# 没有直接读取点，也不会被赋值，因此三条规则同时误判：S1144/RCS1213 认为它是死字段，RCS1169 认为
+# 它可以 readonly。删掉它或加上 readonly 都会破坏 [InlineArray] 的元素访问（特性要求恰好一个可写
+# 实例字段）。只列出声明了该字段的 ABI 镜像文件。
+[Device/ProbeConfig.cs]
+dotnet_diagnostic.S1144.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+dotnet_diagnostic.RCS1169.severity = none
+
+[Device/ProcessPathMeasurement.cs]
+dotnet_diagnostic.S1144.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+dotnet_diagnostic.RCS1169.severity = none
+
+[Device/ProbeEvent.cs]
+dotnet_diagnostic.S1144.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+dotnet_diagnostic.RCS1169.severity = none
+
+[Device/RedirectContext.cs]
+dotnet_diagnostic.S1144.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+dotnet_diagnostic.RCS1169.severity = none
+
+[Device/ProbeForwardedConfig.cs]
+dotnet_diagnostic.S1144.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+dotnet_diagnostic.RCS1169.severity = none
+
+[Device/ProbeForwardedIngress.cs]
+dotnet_diagnostic.S1144.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+dotnet_diagnostic.RCS1169.severity = none
+
+[Device/ProbeForwardedRedirect.cs]
+dotnet_diagnostic.S1144.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+dotnet_diagnostic.RCS1169.severity = none
+
+[Policy/RuleBlobNetworkPrefix.cs]
+dotnet_diagnostic.S1144.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+dotnet_diagnostic.RCS1169.severity = none
+
+# IOCTL 常量按 C++ make_ioctl 的公式逐项展开：`(device << 16) | (access << 14) | (function << 2) | method`。
+# 当前 FILE_ANY_ACCESS 与 METHOD_BUFFERED 都是 0，所以 `<< 14` 与 `| 0` 在数值上可省；但它们正是
+# 与 probe_ioctl.h 对照的那部分公式，删掉会让 ABI 推导失去可读的对照物，而常量值必须逐位不变。
+[Device/ProbeIoctl.cs]
+dotnet_diagnostic.S2437.severity = none
+
+# string.Contains(char) 本身就是序数比较，也没有带 StringComparison 的重载；MA0001 建议的调用形式
+# 对 char 参数不存在，保留 Contains 是唯一不带文化语义的写法。
+[Policy/ProcessSelector.cs]
+dotnet_diagnostic.MA0001.severity = none
+
+[Policy/RuleBlobCompiler.cs]
+dotnet_diagnostic.MA0001.severity = none
+
+# SYSLIB1054（改用 LibraryImport 的源生成封送）：这些声明是已冻结的 Windows 互操作面——
+# CreateFileW 返回 SafeFileHandle、GetFinalPathNameByHandleW 写入 [Out] char[] 路径缓冲、
+# GetFileInformationByHandle 输出非 blittable 结构。改用源生成封送必须逐条补 [MarshalUsing]
+# 并重新验证失败路径与句柄所有权，属于独立的 ABI 评审，不能在文件搬迁里顺手替换。
+[Device/NativeDeviceApi.cs]
+dotnet_diagnostic.SYSLIB1054.severity = none
+
+[Policy/WindowsDevicePath.cs]
+dotnet_diagnostic.SYSLIB1054.severity = none

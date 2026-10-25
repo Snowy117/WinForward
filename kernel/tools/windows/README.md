@@ -7,8 +7,8 @@
 Windows 侧脚本对**机器事实**（工具安装位置、仓库根、测试目标地址）一律靠发现或参数：
 MSBuild 走 `vswhere`，signtool 走 Windows Kits 的版本目录，accesschk 走 PATH / 环境变量 /
 系统盘一层目录；仓库里没有固定盘符、固定 IP 或固定版本号路径。
-C# 工具的目标框架输出目录（如 `net10.0` / `net11.0`）仍按工程当前配置写死，属于后续批次，
-不在本目录的“工具发现”范围内。
+C# 工具的目标框架输出目录（如 `net10.0`）仍按工程当前配置写死，属于后续批次，不在本目录的
+“工具发现”范围内。
 
 ## 前置条件
 
@@ -22,12 +22,31 @@ C# 工具的目标框架输出目录（如 `net10.0` / `net11.0`）仍按工程�
 | 管理员 PowerShell | 安装/卸载驱动、改防火墙规则需要管理员权限 |
 | CodeQL CLI（仅 `codeql.ps1`） | 解压 bundle，用 `-CodeqlHome` / `CODEQL_HOME` / PATH 指向 `codeql.cmd` 所在目录；仓库不包含 |
 
-驱动工程用 `..\..\src\common` 指向共享头，因此仓库根下必须同时有 `src\driver`、`src\common`、
+驱动工程用 `..\..\src\common` 指向共享头，因此 `-Root` 下必须同时有 `src\driver`、`src\common`、
 `src\userland`、`tools\wfprobe` 与 `tools\socks5`。
+
+## 仓库布局与 `-Root`
+
+`-Root` 指的是 **`kernel/` 子树的根**（含 `src\driver`、`src\common`、`src\userland`、`tools\*`），
+不是整个仓库的根。C# 契约面搬到仓库根之后，这个区分变成硬性要求：
+
+- `src\userland\WinForward.Userland.slnx` 直接包含
+  `..\..\..\src\WinForward.Kernel.Contracts\WinForward.Kernel.Contracts.csproj`，`WinForward.Userland`
+  兼容壳用 `..\..\..\..\src\WinForward.Kernel.Contracts\...` 引用同一工程——两者都从 `kernel\`
+  向上走到仓库根。
+- 契约工程经 `src\Directory.Build.props` 导入根 `Directory.Build.props` 并引用
+  `analyzers\WinForward.Analyzers`，包版本来自根 `Directory.Packages.props`。
+
+所以送到 Windows 机器上的必须是**完整仓库布局**：`<repo>\kernel\` 与
+`<repo>\src\WinForward.Kernel.Contracts\` 并存，`<repo>\` 下还要有 `Directory.Build.props`、
+`Directory.Packages.props`、`src\Directory.Build.props` 与 `analyzers\WinForward.Analyzers\`。
+只同步 `kernel\` 子树会让 `gate.ps1` 第 7 步的解决方案构建直接找不到工程。`-Root` 仍指向
+`<repo>\kernel`，跨树引用由上面的相对路径自己走到仓库根。
 
 ## 参数
 
-- `-Root`：仓库根目录。默认由 `$PSScriptRoot` 上推两级（`tools\windows` → 仓库根），也可以显式指定。
+- `-Root`：`kernel/` 子树根目录。默认由 `$PSScriptRoot` 上推两级（`tools\windows` → `kernel\`），也可以
+  显式指定；它必须位于完整仓库布局之内，见上一节。
 - `-Remote`：测试目标地址，格式 `<主机:端口>`。**没有默认值**：先取 `-Remote`，再取环境变量
   `WF_REMOTE`，都没有就报错并说明这是测试目标地址（通常是另一台跑回显/代理服务的机器），不是本机地址。
 
@@ -35,8 +54,8 @@ C# 工具的目标框架输出目录（如 `net10.0` / `net11.0`）仍按工程�
 # 完整门禁
 pwsh -File .\gate.ps1 -Remote <测试目标地址:端口>
 
-# 也可以换一个仓库根
-pwsh -File .\gate.ps1 -Root <仓库根> -Remote <测试目标地址:端口>
+# 也可以换一个子树根
+pwsh -File .\gate.ps1 -Root <kernel 子树根> -Remote <测试目标地址:端口>
 ```
 
 ## 模块边界
@@ -70,7 +89,8 @@ pwsh -File .\gate.ps1 -Root <仓库根> -Remote <测试目标地址:端口>
 4. `accesschk -q -o \Device\WfProbe`，断言含 SYSTEM / Administrators、不含 Everyone；
 5. 构建 `tools/wfprobe`，跑 `appid`、`rules`、`udp-rules`、`selftest`（V4）、`selftest --dual`、`gates`；
 6. 跑 `firewall-check.ps1`；
-7. 构建用户态，跑单测与 `vm-check`；
+7. 构建用户态，跑单测与 `vm-check`；解决方案包含仓库根的 `WinForward.Kernel.Contracts`，因此这一步
+   要求完整仓库布局（见“仓库布局与 `-Root`”）；
 8. 跑 `userland-e2e.ps1`；
 9. 断言全部套件之后驱动仍 `RUNNING`、VM boot time 未变；
 10. 无论成功失败，最后卸载驱动。

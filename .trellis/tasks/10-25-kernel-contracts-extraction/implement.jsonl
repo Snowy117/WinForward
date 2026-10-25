@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/contracts-project.md", "reason": "The dependency-surface research for moving Device/Policy/Forwarded and keeping the native Controller/test runner/wfprobe buildable."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Parent design: the root WinForward.Kernel.Contracts project, the shim boundary and the no-second-userland rule."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Project graph/layout expectations for adding a root project and keeping dependency direction."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Analyzer/warning policy and the narrow-suppression rules for the imported ABI/compiler code."}
+{"file": ".trellis/spec/backend/kernel/csharp-conventions.md", "reason": "The Kernel C# conventions and ABI test expectations the moved code was written against."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "The host blob byte contract that must not change during the move."}
+{"file": ".trellis/spec/backend/kernel/forwarded-rule-blob.md", "reason": "The forwarded blob byte contract that must not change during the move."}

@@ -1,7 +1,7 @@
 # Forwarded 规则 blob（v1）
 
 > 适用范围：`src/common/forwarded_blob.h`、`src/common/forwarded_matcher.h` 与
-> `src/userland/WinForward.Userland/Forwarded/`。
+> `src/WinForward.Kernel.Contracts/Forwarded/`（类型仍在 `WinForward.Userland.Forwarded` 命名空间）。
 > 拟定：2026-10-23。源任务 `10-23-fwd-b1-forwarded-blob`（研究文档未随本次迁移导入）。
 
 这份文档是 Forwarded 规则层的跨语言契约。C# 侧负责把规则编译成字节流，内核侧只解码与匹配；

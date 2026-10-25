@@ -106,16 +106,16 @@ expect_mutation_red "ABI/改夹具的枚举取值" run_abi_with_root "$tmp"
 reset_header
 
 # ---------- 2. 产品常量 ----------
-backup src/userland/WinForward.Userland/Device/ProbeIoctl.cs
-product_ioctl="src/userland/WinForward.Userland/Device/ProbeIoctl.cs"
+backup ../src/WinForward.Kernel.Contracts/Device/ProbeIoctl.cs
+product_ioctl="../src/WinForward.Kernel.Contracts/Device/ProbeIoctl.cs"
 sed -i 's/public const uint RuleBlobMaxSize = 64 \* 1024;/public const uint RuleBlobMaxSize = 65 * 1024;/' \
     "$product_ioctl"
 expect_mutation_red "ABI/改产品常量" dotnet run --project "$tests_project" -c Release -- abi
 cp "$product_ioctl.bak" "$product_ioctl"
 
 # ---------- 3. 编译期语义检查 ----------
-backup src/userland/WinForward.Userland/Policy/RuleBlobCompiler.cs
-compiler="src/userland/WinForward.Userland/Policy/RuleBlobCompiler.cs"
+backup ../src/WinForward.Kernel.Contracts/Policy/RuleBlobCompiler.cs
+compiler="../src/WinForward.Kernel.Contracts/Policy/RuleBlobCompiler.cs"
 
 sed -i 's/if (totalSize > PolicyLimits.RuleBlobMaxSize)/if (false)/' "$compiler"
 expect_mutation_red "编译/取消 64 KiB blob 上限" dotnet run --project "$tests_project" -c Release -- test

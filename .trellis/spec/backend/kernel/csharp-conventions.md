@@ -1,6 +1,8 @@
 # C# 编码规范（用户态）
 
-> 适用范围：`src/userland/` 下的全部 C# 代码。
+> 适用范围：`kernel/src/userland/` 下的全部 C# 代码，以及仓库根 `src/WinForward.Kernel.Contracts/`
+> 下的 Kernel 契约代码（ABI 镜像、host/forwarded blob 编译器、进程路径解析）。后者是前者的
+> `ProjectReference` 目标，两者共享下面这套规则。
 > 拟定：2026-10-20。
 
 这份规范只覆盖 C# 侧。C++ 侧（含 `src/common`、`tests/host`）仍然遵守
@@ -50,8 +52,16 @@ C# 的 ABI 镜像结构用 `public` 字段（而不是属性）：`MemoryMarshal
 
 - 一个文件一个公开类型，文件名与类型同名。
 - 命名空间用文件级声明（`namespace X;`），不写块级嵌套。
-- 工程按职责分：`WinForward.Userland`（产品逻辑，`Policy/` 命名空间）、
+- 工程按职责分：`WinForward.Kernel.Contracts`（仓库根 `src/WinForward.Kernel.Contracts/`：ABI 镜像、
+  host/forwarded blob 编译器、进程路径解析，`Device/`、`Policy/`、`Forwarded/` 三个目录）、
+  `WinForward.Userland`（`Configuration/`、`Control/`、`Relay/` 脚手架，`ProjectReference` 契约工程）、
   `WinForward.Userland.Tests`（测试与夹具生成）。测试代码不混进产品工程。
+- 契约工程的程序集名是 `WinForward.Kernel.Contracts`，命名空间在过渡期仍保持
+  `WinForward.Userland.*`（`RootNamespace` 也留在 `WinForward.Userland`，避免 IDE0130 把每个
+  文件的命名空间都标出来）。改成与程序集一致是单独的机械批次，不要顺手混进功能改动。
+- 两个工程的构建与门禁输入不同：契约工程走仓库根的 `Directory.Build.props`（四个分析器 + `dotnet format`），
+  `kernel/src/userland` 走 `kernel/src/userland/Directory.Build.props`（自有 `net10.0` 与
+  warnings-as-errors）。改公共属性时要确认两边都还成立。
 
 ---
 
