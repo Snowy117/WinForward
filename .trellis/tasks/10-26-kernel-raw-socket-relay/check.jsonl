@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the raw-socket seam matches the backend close contract."}
+{"file": ".trellis/spec/backend/tcp-relay-lifecycle.md", "reason": "Verify completion/end-kind and no behavior change for the packet path."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Verify socket ownership/disposal and no leaks."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify tests/format/build and the reported environment gap."}

@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Parent design: the raw-socket relay seam and the backend's close semantics."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "The redirect/relay family invariants the raw-socket entry must not change."}
+{"file": ".trellis/spec/backend/tcp-relay-lifecycle.md", "reason": "Relay lifetime, completion and end-kind semantics."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Socket ownership and quiescence rules."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Analyzer/format/test gates and the no-behaviour-change evidence."}

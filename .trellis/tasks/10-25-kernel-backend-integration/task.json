@@ -24,7 +24,8 @@
     "10-25-kernel-contracts-extraction",
     "10-25-winpkfilter-backend-seam",
     "10-25-kernel-runtime-seam",
-    "10-25-kernel-policy-compiler"
+    "10-25-kernel-policy-compiler",
+    "10-26-kernel-raw-socket-relay"
   ],
   "parent": null,
   "relatedFiles": [],

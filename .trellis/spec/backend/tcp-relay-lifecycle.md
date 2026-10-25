@@ -13,10 +13,13 @@
 
 ## What a relay end is
 
-`TcpProxyRelay` implements `ITcpRelay` and the internal `ITcpRelayEndInfo { RelayEndKind EndKind; long
+`TcpProxyRelay` implements `ITcpRelay` and the public `ITcpRelayEndInfo { RelayEndKind EndKind; long
 ServerStreamBytes }`. `RelayEndKind` is `CleanEnded` / `Stalled` / `Faulted` and is meaningful only once
 `Completion` completes; a relay that does not implement the capability is treated as `CleanEnded`. The
-enum is internal, so it lives on a separate capability interface rather than on the public `ITcpRelay`.
+kind lives on a capability interface rather than on `ITcpRelay` because not every relay classifies its
+end, and the interface is public so a backend outside this assembly — one that owns the accepted socket
+instead of borrowing the redirect listener — can read the kind after `Completion` and close its own
+socket abortively (linger 0) for `Stalled`/`Faulted`, where the acceptor injects its crafted RST|ACK.
 `EndKind` **defaults to `Faulted`** — the fail-visible kind: a relay whose `RunPumpAsync` throws before its
 first classification write (for example during `NetworkStream`/CTS construction) must still surface as a
 client reset, so `CleanEnded` is assigned only explicitly, after both pumps verifiably completed (caught in
@@ -25,6 +28,27 @@ The acceptor turns the kind into the client-visible close: a crafted RST|ACK for
 clean one the bounded drain — the relay is released, the stack's own FIN is carried by the live alias, and
 the retire waits for the client's acknowledgement — described in
 [tcp-client-close-injection.md](./tcp-client-close-injection.md).
+
+## Establishment entries
+
+`TcpProxyRelayFactory.EstablishAsync` has two entries over the same SOCKS5 control/connect path:
+
+- **Packet path.** The `ITcpAcceptedConnection` overload accepts only the concrete
+  `TcpAcceptedConnection` the redirect listener builds, so the relayed connection is always one the
+  listener accepted and the acceptor's peer check validated.
+- **Socket-owning backend.** The raw `Socket` overload requires a connected IP socket, records the
+  socket's remote endpoint as the accepted connection's identity, and delegates to the packet-path
+  method. It exists for a backend that owns its listener and receives the connected socket from
+  somewhere other than `TcpRedirectListener`; the original destination still arrives as the separate
+  argument. It also reproduces the listener's client-leg `NoDelay = true` before establishment —
+  both relay legs are byte pipes (see [relay-pump-and-checksums.md](./relay-pump-and-checksums.md)),
+  so a raw entry that skipped it would leave Nagle x delayed-ACK stalls of 40-200 ms on small
+  proxied writes.
+
+Ownership transfers on success — the relay closes the socket through its pumps, so the caller must not
+dispose it afterwards. A failed establishment leaves the socket with the caller, which owns it and
+closes it abortively rather than reusing it. A socket without an `IPEndPoint` remote endpoint is a
+startup error.
 
 ## Pump result classification
 
@@ -155,6 +179,9 @@ disposal is a no-op through the `IsSealed` gate.
   `DisposingARelayObservesItsFaultedCompletionSoItNeverEscapes` (uses `UnobservedExceptionProbe`), and
   `RelayReportsTheServerStreamBytesItWroteToTheClient`.
 - `TcpRelayEndCloseTests.RelayEndKindIsStalledWhenPumpStalls` pins `Completion`'s stall fast-exit.
+- `TcpProxyRelayFactoryTests` pins the raw-socket entry end to end against a loopback SOCKS5 upstream:
+  both directions relay, a clean half-close ends `CleanEnded`, an upstream reset ends `Faulted`, the
+  relay disposes the socket it was handed, and the overload plus the end-kind surface are public.
 - `TcpRelayObservationTests` covers the **two discard paths**: the acceptor's attach-failure branch
   (`AttachFailureDisposesTheDiscardedRelay` asserts `relay.IsDisposed` — observation now *is* the relay's
   own dispose) and the intrinsic pump fault (exactly one `tcp.relay.faulted`).

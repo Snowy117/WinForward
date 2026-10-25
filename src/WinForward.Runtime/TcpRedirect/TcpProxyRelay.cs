@@ -25,6 +25,38 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, ILogge
     /// <summary>The per-direction relay pump window; the bundle-owned relay pool uses this size.</summary>
     public const int PumpBufferSize = 64 * 1024;
 
+    /// <summary>
+    /// Establishes the relay for a connection this assembly did not accept: a backend that owns its
+    /// own listener hands over the already-connected client socket plus the destination the client
+    /// asked for, and the socket is wrapped in the same accepted connection the redirect listener
+    /// produces so the SOCKS5 control/connect path is identical to the packet path.
+    /// <para>
+    /// Ownership transfers on success — the relay closes the socket with its pumps — so the caller
+    /// must not dispose it afterwards. A failed call leaves the socket with the caller, which still
+    /// owns it and is expected to close it abortively rather than reuse it.
+    /// </para>
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="acceptedSocket"/> is not connected to an
+    /// IP peer; an unconnected socket cannot identify the accepted connection.</exception>
+    public ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, Socket acceptedSocket, Socks5Server server, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(acceptedSocket);
+        if (acceptedSocket.RemoteEndPoint is not IPEndPoint remote)
+        {
+            throw new ArgumentException("The accepted socket must be connected to an IP peer.", nameof(acceptedSocket));
+        }
+
+        // The client leg is a byte pipe, and both relay legs carry the NoDelay invariant: the
+        // listener's accept and the upstream connect set it on their sockets. This entry replaces
+        // the listener, so it must reproduce the client half — otherwise small proxied writes
+        // stall 40-200 ms on Nagle x delayed ACK.
+        acceptedSocket.NoDelay = true;
+        var acceptedConnection = new TcpAcceptedConnection(
+            acceptedSocket,
+            Endpoint.From(remote.Address, checked((ushort)remote.Port)));
+        return EstablishAsync(originalDestination, acceptedConnection, server, cancellationToken);
+    }
+
     public async ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(acceptedConnection);
@@ -67,9 +99,9 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, ILogge
 /// <summary>
 /// Why a relay ended: both pumps completed with FINs propagated, a pump stalled past the stall
 /// window (the relay then completes without faulting), or a pump faulted. Meaningful only once
-/// <see cref="ITcpRelay.Completion"/> completes; drives the acceptor's client-reset decision.
+/// <see cref="ITcpRelay.Completion"/> completes.
 /// </summary>
-internal enum RelayEndKind
+public enum RelayEndKind
 {
     CleanEnded,
     Stalled,
@@ -77,11 +109,17 @@ internal enum RelayEndKind
 }
 
 /// <summary>
-/// The relay surface that reports <see cref="EndKind"/> to the acceptor. A separate internal
-/// capability because <see cref="ITcpRelay"/> is public while the end kind is not; a relay that
-/// does not implement it is treated as a clean end (no client reset).
+/// The relay surface that reports <see cref="EndKind"/>. A capability rather than a member of
+/// <see cref="ITcpRelay"/>, because not every relay can classify its end; a relay that does not
+/// implement it is treated as a clean end (no client reset).
+/// <para>
+/// A consumer outside this assembly that owns the client socket reads the kind after
+/// <see cref="ITcpRelay.Completion"/> and closes its own socket abortively (linger 0) for a
+/// <see cref="RelayEndKind.Stalled"/> or <see cref="RelayEndKind.Faulted"/> end, leaving the normal
+/// FIN path for <see cref="RelayEndKind.CleanEnded"/>.
+/// </para>
 /// </summary>
-internal interface ITcpRelayEndInfo
+public interface ITcpRelayEndInfo
 {
     /// <summary>Why the relay ended; meaningful only after <see cref="ITcpRelay.Completion"/> completes.</summary>
     RelayEndKind EndKind { get; }
