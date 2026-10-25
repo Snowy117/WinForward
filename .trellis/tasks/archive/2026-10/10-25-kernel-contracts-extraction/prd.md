@@ -40,16 +40,16 @@ retired when the backend/forwarded E2E tools move.
 
 ## Acceptance Criteria
 
-- [ ] C3-AC1: `WinForward.slnx` builds with the new project; root `dotnet build`, `dotnet test` and
+- [x] C3-AC1: `WinForward.slnx` builds with the new project; root `dotnet build`, `dotnet test` and
       `dotnet format` pass.
-- [ ] C3-AC2: the Kernel native solution and `wf_check` build/run with the shim; the Kernel
+- [x] C3-AC2: the Kernel native solution and `wf_check` build/run with the shim; the Kernel
       ABI/layout/compiler tests pass (same count as before, no skipped suite).
-- [ ] C3-AC3: no byte-layout/golden/compiler-output changes; the moved code's diff is limited to
+- [x] C3-AC3: no byte-layout/golden/compiler-output changes; the moved code's diff is limited to
       namespaces/paths/analyzer suppressions and the project plumbing.
-- [ ] C3-AC4: `verify-gates.sh` points at the new compiler/IOCTL paths for the moved files, and the
+- [x] C3-AC4: `verify-gates.sh` points at the new compiler/IOCTL paths for the moved files, and the
       old paths are not silently scanned as zero files.
-- [ ] C3-AC5: no product data path, Runtime/NdisApi, BackendDriver or unrelated dirty-file changes.
-- [ ] C3-AC6: `kernel/MIGRATION.md` and the parent `research/contracts-project.md` record the
+- [x] C3-AC5: no product data path, Runtime/NdisApi, BackendDriver or unrelated dirty-file changes.
+- [x] C3-AC6: `kernel/MIGRATION.md` and the parent `research/contracts-project.md` record the
       extraction, shim and deferred scaffolding/namespace rename. The known `jb inspectcode`
       environment gap is recorded; primary gates must be green.
 
