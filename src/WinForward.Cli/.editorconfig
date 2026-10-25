@@ -1,0 +1,17 @@
+# 本工程专属的分析器抑制。仓库根的 .editorconfig 保留全局规则；这里的条目只覆盖证据所在的精确文件，
+# 工程内其它代码仍受同一条规则管辖。
+
+# =====================================================================
+# DurableCaptureBundle：jb 的 MemberCanBePrivate 无法看到友元程序集的消费者
+#
+# 这五个成员（构造函数、UdpTargets、KernelPassCache、CreateKernelPassCache、UpdateUdpTargets）
+# 声明为 internal，消费者只有 `tests/WinForward.Integration.Tests`：`DurableCaptureBundleTests`
+# 直接构造 bundle、调用 UpdateUdpTargets 并读取 UdpTargets；`KernelPassCacheCompositionTests`
+# 调用 CreateKernelPassCache、读取 KernelPassCache，并构造 bundle 断言其持有同一个缓存。
+# 这条可见性由本工程 csproj 的 `InternalsVisibleTo WinForward.Integration.Tests` 授权，而 jb 的
+# 跨程序集使用分析不建模该授权——quality-guidelines.md 已把友元消费者列为不可「修复」的 jb 误报类。
+# 按「可以私有化」动手会让测试报 CS0122，而 jb 看不到那个构建错误。只降级这一个文件；工程内其它
+# 代码仍受同一条规则管辖。
+# =====================================================================
+[**/DurableCaptureBundle.cs]
+resharper_member_can_be_private_global_highlighting = none

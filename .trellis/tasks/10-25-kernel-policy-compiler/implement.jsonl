@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Parent design: the rule-index contract, target mapping and Kernel backend boundaries."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/gap-analysis.md", "reason": "Evidence for the target mapping and the rule-index bridge."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Host blob v2 layout, one-rule-per-config-rule invariant, selector semantics and limits."}
+{"file": ".trellis/spec/backend/kernel/csharp-conventions.md", "reason": "Kernel C#/Contracts conventions and the transitional namespaces."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where the converter/tests belong and the reference direction."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Analyzer/format/test gates and the no-behaviour-change evidence."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Path-qualified configuration diagnostics and fail-closed compile errors."}

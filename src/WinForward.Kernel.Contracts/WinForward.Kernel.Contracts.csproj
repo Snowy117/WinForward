@@ -19,6 +19,10 @@
     <!-- The Kernel compatibility project's Configuration/ still reads the forwarded blob sentinel
          when it validates adapter selectors. Drop this grant with that scaffolding. -->
     <InternalsVisibleTo Include="WinForward.Userland" />
+    <!-- The CLI policy-compiler integration tests decode the compiled host blob through the ABI
+         mirror structs and the RuleBlobLayout constants, so the stride and offsets they assert are
+         the ones the compiler writes instead of a second copy that could drift. -->
+    <InternalsVisibleTo Include="WinForward.Integration.Tests" />
   </ItemGroup>
 
 </Project>

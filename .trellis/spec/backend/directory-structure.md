@@ -16,7 +16,7 @@ extracting a shared test fake; before moving a type across layers.
 direction is fixed:
 
 ```
-Cli     → { Core, Configuration, Protocols, NdisApi, Runtime, Windows }
+Cli     → { Core, Configuration, Protocols, NdisApi, Runtime, Windows, Kernel.Contracts, Kernel.Runtime }
 Runtime → { Core, Configuration, Protocols, NdisApi, Windows }
 Windows, Protocols, NdisApi, Configuration → Core
 Kernel.Contracts → ∅ (BCL only)
@@ -33,7 +33,10 @@ and `WfpDeviceClient`. Neither project may reference `Runtime`, `NdisApi`, `Wind
 Both are consumed through `kernel/src/userland/WinForward.Userland`, the compatibility shim that the
 native controller and test runner build against (the Runtime project is the shim's own
 `ProjectReference`; its types stay resolvable through that transitive edge); `tools/wfprobe` stays a
-standalone fixture program with no product reference.
+standalone fixture program with no product reference. `WinForward.Cli` is their product-side
+consumer through the same one-way edges: `Kernel.Contracts` for the host-policy compiler's rule-blob
+model, `Kernel.Runtime` for the host-TCP backend's redirect-context helpers (that edge lands with the
+backend itself).
 
 Never reverse an edge. When a type appears to need one, confirm the direction before touching
 anything and move the type instead.

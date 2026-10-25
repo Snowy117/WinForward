@@ -11,6 +11,7 @@
     <ProjectReference Include="../../src/WinForward.Cli/WinForward.Cli.csproj" />
     <ProjectReference Include="../../src/WinForward.Configuration/WinForward.Configuration.csproj" />
     <ProjectReference Include="../../src/WinForward.Core/WinForward.Core.csproj" />
+    <ProjectReference Include="../../src/WinForward.Kernel.Contracts/WinForward.Kernel.Contracts.csproj" />
     <ProjectReference Include="../../src/WinForward.NdisApi/WinForward.NdisApi.csproj" />
     <ProjectReference Include="../../src/WinForward.Protocols/WinForward.Protocols.csproj" />
     <ProjectReference Include="../../src/WinForward.Runtime/WinForward.Runtime.csproj" />

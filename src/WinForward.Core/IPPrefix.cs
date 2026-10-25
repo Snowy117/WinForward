@@ -69,4 +69,11 @@ public readonly record struct IPPrefix
         var mask = PrefixMask(prefixLength, address.Family);
         return new IPAddressValue(address.Bits & mask, address.Family);
     }
+
+    /// <summary>
+    /// Formats the masked network and the prefix length in CIDR form, the spelling
+    /// <see cref="TryParse"/> accepts back. Materializes an <see cref="IPAddress"/>, so it belongs to
+    /// cold edges (configuration mapping, diagnostics), never to a packet path.
+    /// </summary>
+    public override string ToString() => $"{Network}/{PrefixLength}";
 }

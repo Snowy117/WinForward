@@ -46,7 +46,8 @@ public sealed class PolicySnapshot
 
     public IReadOnlyList<PolicyRule> ForwardedRules { get; init; } = [];
 
-    private FlowAction HostFallbackAction { get; }
+    /// <summary>The action a host flow receives when no rule in <see cref="HostRules"/> matches.</summary>
+    public FlowAction HostFallbackAction { get; }
 
     public FlowAction ForwardedFallbackAction { get; init; } = FlowAction.Pass;
 

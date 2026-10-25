@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the compiler/target table matches the parent rule-index contract."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/gap-analysis.md", "reason": "Verify the target mapping and capability boundaries are not silently expanded."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Verify one-to-one rule mapping, selector limits and blob semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify build/test/format and the jb evidence/gap."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify every compile refusal is path-qualified and fail-closed."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify project references, file placement and the 400-line ceiling."}

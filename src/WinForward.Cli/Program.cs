@@ -3,10 +3,12 @@ using System.Runtime.Versioning;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using WinForward.Cli.Backends;
+using WinForward.Cli.Backends.Kernel;
 using WinForward.Cli.Logging;
 using WinForward.Configuration;
 using WinForward.NdisApi;
 using WinForward.Runtime.Logging;
+using WinForward.Userland.Policy;
 using WinForward.Windows;
 
 namespace WinForward.Cli;
@@ -156,7 +158,17 @@ internal static class Program
                 StartupLog.KernelBackendUnavailable(logger);
                 return 1;
             }
-            await using var backend = new WinpkFilterBackend(loaded.Validated, loggerFactory, logger);
+#pragma warning disable CA1859 // The local stays IInterceptionBackend: the guard below reads the contract member the configuration is compared against, and narrowing it to today's only implementation would make the provider the run honours an implementation detail again.
+            await using IInterceptionBackend backend = new WinpkFilterBackend(loaded.Validated, loggerFactory, logger);
+#pragma warning restore CA1859
+            // A provider mismatch is a composition bug: fail closed before any driver work rather
+            // than run a driver the operator did not select. The throw reaches the fatal-fault
+            // catch below, which returns exit code 3.
+            if (!string.Equals(backend.ProviderName, loaded.Validated.BackendDriver.ProviderName, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"The selected backend reports provider '{backend.ProviderName}' but the configuration selects '{loaded.Validated.BackendDriver.ProviderName}'; refusing to run a backend the configuration did not select.");
+            }
             return await RunBackendUntilCancelledAsync(backend).ConfigureAwait(false);
         }
         catch (DllNotFoundException)
@@ -281,14 +293,47 @@ internal static class Program
             return 1;
         }
 
+        // A Kernel-provider configuration is only valid if it also compiles: the blob's limits and
+        // the process-path contract fail the command here, before the confirmation line, exactly as
+        // the ordinary configuration gate does. No driver is opened.
+        KernelPolicyCompilation? kernelCompilation = null;
+        if (loaded.Validated.BackendDriver.Provider == BackendProvider.WinForwardKernel
+            && !TryCompileKernelPolicy(loaded.Validated, out kernelCompilation, out var kernelDiagnostics))
+        {
+            PrintDiagnostics(kernelDiagnostics);
+            return 1;
+        }
+
         PrintSources(loaded.Sources);
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Configuration is valid. tcpFlowCapacity: {loaded.Validated.TcpFlowCapacity}"));
         Console.WriteLine($"Provider: {loaded.Validated.BackendDriver.ProviderName}");
+        if (kernelCompilation is not null)
+        {
+            Console.WriteLine(string.Create(
+                CultureInfo.InvariantCulture,
+                $"Kernel host rule blob compiled: {kernelCompilation.RuleCount} rule(s), {kernelCompilation.HostBlob.Length} bytes."));
+        }
         foreach (var warning in loaded.Validated.Warnings)
         {
             Console.Error.WriteLine($"warning {warning}");
         }
         return 0;
+    }
+
+    /// <summary>
+    /// Runs the Kernel policy compiler the way a Kernel-provider run will, so <c>validate</c> reports
+    /// process-path existence, blob limits and the rule mapping before a driver is opened. A
+    /// filename-only policy compiles on any host; a path selector needs Windows handle resolution.
+    /// </summary>
+    private static bool TryCompileKernelPolicy(
+        ValidatedConfiguration configuration,
+        out KernelPolicyCompilation? compilation,
+        out IReadOnlyList<ConfigDiagnostic> diagnostics)
+    {
+        IProcessPathNormalizer normalizer = OperatingSystem.IsWindows()
+            ? WindowsProcessPathNormalizer.ForWindows()
+            : new UnsupportedProcessPathNormalizer();
+        return KernelPolicyCompiler.TryCompile(configuration, normalizer, out compilation, out diagnostics);
     }
 
     private static void PrintSources(IReadOnlyList<ConfigurationSource> sources)

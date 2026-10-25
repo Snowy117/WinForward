@@ -125,8 +125,8 @@ resharper_class_never_instantiated_global_highlighting = none
 # `kernel/src/userland/WinForward.Userland`（WfpController、PolicyConfigurationDocument、
 # ForwardedUdpRelay）、`kernel/src/userland/WinForward.Controller`（Run/Check/State/Disable 命令）、
 # `kernel/src/userland/WinForward.Userland.Tests`（ABI 布局、编译器与配置测试）。ABI 客户端与
-# 布局常量的内部面只经 `InternalsVisibleTo`（WinForward.Userland、WinForward.Userland.Tests）
-# 可见，jb 的跨程序集使用分析不建模这条授权。这些项目由
+# 布局常量的内部面只经 `InternalsVisibleTo`（WinForward.Userland、WinForward.Userland.Tests、
+# WinForward.Integration.Tests）可见，jb 的跨程序集使用分析不建模这条授权。这些项目由
 # `kernel/src/userland/WinForward.Userland.slnx` 构建，不在根 `WinForward.slnx` 里，所以整片公共面
 # 在根解决方案视角下"无人使用、可以私有化"是结构性的，不是死代码；照做会打断 `kernel/` 的编译，
 # 而该树不在本门禁内，抓不住。quality-guidelines.md 的 jb 误报清单已把友元消费者归为同一类。
