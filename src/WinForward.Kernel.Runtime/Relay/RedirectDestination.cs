@@ -18,7 +18,6 @@ public enum RedirectSource
 public sealed class RedirectDestination
 {
     private readonly byte _family;
-    private readonly byte _protocol;
 
     private RedirectDestination(byte family,
                                 byte protocol,
@@ -30,7 +29,7 @@ public sealed class RedirectDestination
                                 uint ingressIfIndex)
     {
         _family = family;
-        _protocol = protocol;
+        Protocol = protocol;
         EndPoint = endPoint;
         ProcessId = processId;
         RuleIndex = ruleIndex;
@@ -47,7 +46,7 @@ public sealed class RedirectDestination
     public int RuleIndex { get; }
 
     /// <summary>IPPROTO_TCP 或 IPPROTO_UDP，来自 redirect context 的 protocol 字段。</summary>
-    public byte Protocol => _protocol;
+    public byte Protocol { get; }
 
     public RedirectSource Source { get; }
 
@@ -66,7 +65,7 @@ public sealed class RedirectDestination
             return false;
         }
 
-        RedirectContext context = MemoryMarshal.Read<RedirectContext>(raw);
+        var context = MemoryMarshal.Read<RedirectContext>(raw);
         if (context.Magic != RedirectContext.MagicValue)
         {
             error = $"redirect context 魔数 0x{context.Magic:X8} 不匹配";
@@ -85,7 +84,7 @@ public sealed class RedirectDestination
             return false;
         }
 
-        IPAddress? address = ParseAddress(context.Family, context.OriginalAddress);
+        var address = ParseAddress(context.Family, context.OriginalAddress);
         if (address is null)
         {
             error = $"redirect context 地址族 {context.Family} 不是 IPv4/IPv6";
@@ -104,7 +103,7 @@ public sealed class RedirectDestination
                                               (int)context.ProcessId,
                                               (int)context.RuleIndex,
                                               RedirectSource.Host,
-                                              null,
+                                              upstreamId: null,
                                               0);
         error = string.Empty;
         return true;
@@ -142,7 +141,7 @@ public sealed class RedirectDestination
             return false;
         }
 
-        IPAddress server = redirect.ServerIP;
+        var server = redirect.ServerIP;
         destination = new RedirectDestination(redirect.Family,
                                               redirect.Protocol,
                                               new IPEndPoint(server, redirect.ServerPort),
@@ -157,7 +156,7 @@ public sealed class RedirectDestination
 
     private static IPAddress? ParseAddress(byte family, RedirectContext.AddressStorage address)
     {
-        Span<byte> bytes = MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref address, 1));
+        var bytes = MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref address, 1));
         return family switch
         {
             RedirectContext.FamilyIpv4 => new IPAddress(bytes[..4]),
@@ -170,5 +169,5 @@ public sealed class RedirectDestination
 
     public string FamilyText => _family == RedirectContext.FamilyIpv6 ? "IPv6" : "IPv4";
 
-    public string ProtocolText => _protocol == RedirectContext.ProtocolUdp ? "UDP" : "TCP";
+    public string ProtocolText => Protocol == RedirectContext.ProtocolUdp ? "UDP" : "TCP";
 }

@@ -1,0 +1,36 @@
+# 本工程专属的分析器抑制。仓库根的 .editorconfig 保留全局规则；除标注为工程作用域的条目外，
+# 这里的条目只覆盖证据所在的精确文件，工程内其它代码仍受同一条规则管辖。
+
+# =====================================================================
+# 工程作用域：jb 的 Unused*/MemberCanBePrivate 在本工程上是结构性误报
+#
+# 本工程是 Kernel 后端的跨树运行时库，公共面的消费者全在 `kernel/` 子树：
+# `kernel/src/userland` 的 WfpController / RelayServer / ForwardedUdpRelay / OutboundConnector、
+# `kernel/src/userland/WinForward.Userland.Tests`（ListenerSet 与 BlockSink 的端口、重试契约在那里
+# 断言），以及尚未接入的 Kernel 后端。这些项目由 `kernel/src/userland/WinForward.Userland.slnx`
+# 构建，不在根 `WinForward.slnx` 里；jb 只分析根解决方案，所以"没有消费者"是结构性的，不是死代码。
+# 按「可以私有化」的建议动手会直接打断 `kernel/` 的编译，而该树不在本门禁内，抓不住。
+# quality-guidelines.md 已把友元程序集消费者列为不可「修复」的 jb 误报；这里是同一形状——使用点
+# 全在另一棵解决方案树里。
+#
+# 四条只在本工程作用域降级；真实代码级检查（冗余跳转、逻辑模式合并等）依然生效，遇到就改代码。
+# =====================================================================
+[*.cs]
+resharper_unused_type_global_highlighting = none
+resharper_unused_member_global_highlighting = none
+resharper_unused_auto_property_accessor_global_highlighting = none
+resharper_member_can_be_private_global_highlighting = none
+
+# MA0051（方法过长）：Bind(IReadOnlyList<IPAddress>) 实测 67 行，行数全部来自一次绑定尝试的
+# 显式建 socket 与失败清理，以及外层换端口的重试。绑定 / 重试语义由 Kernel 测试锁定，拆分会在
+# 只搬家的批次里移动 try/catch 的清理边界。
+[Relay/ListenerSet.cs]
+dotnet_diagnostic.MA0051.severity = none
+
+# SYSLIB1054（改用 LibraryImport 的源生成封送）：两条声明是已冻结的 Windows 互操作面——WSAIoctl
+# 的三段 IntPtr 进出与 out uint 计数、WSAGetLastError 的 SetLastError 语义。改用源生成封送必须在
+# 同一批里重新验证失败路径与缓冲区契约，属于独立的互操作评审，不能在文件搬迁里顺手替换。
+# 该规则是 info 级：Release build 不报（实测去掉本条仍 0 warning），`dotnet format --severity info`
+# 报两条，而 format 才是本仓的强制门禁，所以这条抑制是必需的。
+[Relay/SocketIoctl.cs]
+dotnet_diagnostic.SYSLIB1054.severity = none

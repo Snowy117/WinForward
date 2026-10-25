@@ -31,17 +31,18 @@ C# 工具的目标框架输出目录（如 `net10.0`）仍按工程当前配置�
 不是整个仓库的根。C# 契约面搬到仓库根之后，这个区分变成硬性要求：
 
 - `src\userland\WinForward.Userland.slnx` 直接包含
-  `..\..\..\src\WinForward.Kernel.Contracts\WinForward.Kernel.Contracts.csproj`，`WinForward.Userland`
-  兼容壳用 `..\..\..\..\src\WinForward.Kernel.Contracts\...` 引用同一工程——两者都从 `kernel\`
-  向上走到仓库根。
-- 契约工程经 `src\Directory.Build.props` 导入根 `Directory.Build.props` 并引用
+  `..\..\..\src\WinForward.Kernel.Contracts\WinForward.Kernel.Contracts.csproj` 与
+  `..\..\..\src\WinForward.Kernel.Runtime\WinForward.Kernel.Runtime.csproj`；`WinForward.Userland`
+  兼容壳再用 `..\..\..\..\src\WinForward.Kernel.Contracts\...`（以及同层的 `...Runtime\...`）引用
+  这两个工程——所有引用都从 `kernel\` 向上走到仓库根。
+- 这两个工程都经 `src\Directory.Build.props` 导入根 `Directory.Build.props` 并引用
   `analyzers\WinForward.Analyzers`，包版本来自根 `Directory.Packages.props`。
 
-所以送到 Windows 机器上的必须是**完整仓库布局**：`<repo>\kernel\` 与
-`<repo>\src\WinForward.Kernel.Contracts\` 并存，`<repo>\` 下还要有 `Directory.Build.props`、
-`Directory.Packages.props`、`src\Directory.Build.props` 与 `analyzers\WinForward.Analyzers\`。
-只同步 `kernel\` 子树会让 `gate.ps1` 第 7 步的解决方案构建直接找不到工程。`-Root` 仍指向
-`<repo>\kernel`，跨树引用由上面的相对路径自己走到仓库根。
+所以送到 Windows 机器上的必须是**完整仓库布局**：`<repo>\kernel\`、
+`<repo>\src\WinForward.Kernel.Contracts\` 与 `<repo>\src\WinForward.Kernel.Runtime\` 并存，`<repo>\`
+下还要有 `Directory.Build.props`、`Directory.Packages.props`、`src\Directory.Build.props` 与
+`analyzers\WinForward.Analyzers\`。只同步 `kernel\` 子树会让 `gate.ps1` 第 7 步的解决方案构建直接
+找不到工程。`-Root` 仍指向 `<repo>\kernel`，跨树引用由上面的相对路径自己走到仓库根。
 
 ## 参数
 
@@ -89,8 +90,8 @@ pwsh -File .\gate.ps1 -Root <kernel 子树根> -Remote <测试目标地址:端�
 4. `accesschk -q -o \Device\WfProbe`，断言含 SYSTEM / Administrators、不含 Everyone；
 5. 构建 `tools/wfprobe`，跑 `appid`、`rules`、`udp-rules`、`selftest`（V4）、`selftest --dual`、`gates`；
 6. 跑 `firewall-check.ps1`；
-7. 构建用户态，跑单测与 `vm-check`；解决方案包含仓库根的 `WinForward.Kernel.Contracts`，因此这一步
-   要求完整仓库布局（见“仓库布局与 `-Root`”）；
+7. 构建用户态，跑单测与 `vm-check`；解决方案包含仓库根的 `WinForward.Kernel.Contracts` 与
+   `WinForward.Kernel.Runtime`，因此这一步要求完整仓库布局（见“仓库布局与 `-Root`”）；
 8. 跑 `userland-e2e.ps1`；
 9. 断言全部套件之后驱动仍 `RUNNING`、VM boot time 未变；
 10. 无论成功失败，最后卸载驱动。

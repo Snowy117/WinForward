@@ -1,8 +1,10 @@
 # C# 编码规范（用户态）
 
 > 适用范围：`kernel/src/userland/` 下的全部 C# 代码，以及仓库根 `src/WinForward.Kernel.Contracts/`
-> 下的 Kernel 契约代码（ABI 镜像、host/forwarded blob 编译器、进程路径解析）。后者是前者的
-> `ProjectReference` 目标，两者共享下面这套规则。
+> 与 `src/WinForward.Kernel.Runtime/` 下的 Kernel C# 代码（前者是 ABI 镜像、host/forwarded blob
+> 编译器、进程路径解析；后者是 redirect context 查询/解析、host/forwarded context source、
+> `BlockSink` 与 `ListenerSet`）。仓库根的两个工程分别是 kernel/src/userland 各工程的
+> `ProjectReference` 目标，三边共享下面这套规则。
 > 拟定：2026-10-20。
 
 这份规范只覆盖 C# 侧。C++ 侧（含 `src/common`、`tests/host`）仍然遵守
@@ -54,14 +56,18 @@ C# 的 ABI 镜像结构用 `public` 字段（而不是属性）：`MemoryMarshal
 - 命名空间用文件级声明（`namespace X;`），不写块级嵌套。
 - 工程按职责分：`WinForward.Kernel.Contracts`（仓库根 `src/WinForward.Kernel.Contracts/`：ABI 镜像、
   host/forwarded blob 编译器、进程路径解析，`Device/`、`Policy/`、`Forwarded/` 三个目录）、
-  `WinForward.Userland`（`Configuration/`、`Control/`、`Relay/` 脚手架，`ProjectReference` 契约工程）、
-  `WinForward.Userland.Tests`（测试与夹具生成）。测试代码不混进产品工程。
-- 契约工程的程序集名是 `WinForward.Kernel.Contracts`，命名空间在过渡期仍保持
-  `WinForward.Userland.*`（`RootNamespace` 也留在 `WinForward.Userland`，避免 IDE0130 把每个
-  文件的命名空间都标出来）。改成与程序集一致是单独的机械批次，不要顺手混进功能改动。
-- 两个工程的构建与门禁输入不同：契约工程走仓库根的 `Directory.Build.props`（四个分析器 + `dotnet format`），
-  `kernel/src/userland` 走 `kernel/src/userland/Directory.Build.props`（自有 `net10.0` 与
-  warnings-as-errors）。改公共属性时要确认两边都还成立。
+  `WinForward.Kernel.Runtime`（仓库根 `src/WinForward.Kernel.Runtime/Relay/`：redirect context
+  查询/解析、host/forwarded context source、`BlockSink`、`ListenerSet`，`ProjectReference` 契约工程）、
+  `WinForward.Userland`（`Configuration/`、`Control/`、`Relay/` 脚手架，`ProjectReference` 上面两个
+  工程）、`WinForward.Userland.Tests`（测试与夹具生成）。测试代码不混进产品工程。
+- 仓库根两个工程的程序集名分别是 `WinForward.Kernel.Contracts` 与 `WinForward.Kernel.Runtime`，
+  命名空间在过渡期仍保持 `WinForward.Userland.*`（`RootNamespace` 也留在 `WinForward.Userland`，
+  避免 IDE0130 把每个文件的命名空间都标出来）。改成与程序集一致是单独的机械批次，不要顺手混进
+  功能改动。
+- 仓库根的两个工程走仓库根的 `Directory.Build.props`（四个分析器 + `dotnet format`），
+  `kernel/src/userland` 走 `kernel/src/userland/Directory.Build.props`（自有 `net10.0`、
+  warnings-as-errors 与 `InvariantGlobalization`）。Runtime 工程已不在后者的作用域内，错误消息里
+  的数字格式化因此显式使用 `CultureInfo.InvariantCulture`。改公共属性时要确认三边都还成立。
 
 ---
 

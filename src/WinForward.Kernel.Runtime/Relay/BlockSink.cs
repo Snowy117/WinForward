@@ -19,7 +19,7 @@ public sealed class BlockSink : IDisposable
 {
     private const int BindAttempts = 5;
     private const int ReceiveBufferSize = 2048;
-    private static readonly TimeSpan DisposeTimeout = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan s_disposeTimeout = TimeSpan.FromSeconds(1);
 
     private readonly Socket _udp4;
     private readonly Socket _udp6;
@@ -37,11 +37,13 @@ public sealed class BlockSink : IDisposable
         _tcp4 = tcp4;
         _tcp6 = tcp6;
         Port = port;
-        _receiveLoops = new[]
-        {
-            Task.Run(() => ReceiveLoopAsync(udp4, _stop.Token)),
-            Task.Run(() => ReceiveLoopAsync(udp6, _stop.Token)),
-        };
+#pragma warning disable WF0003 // The two receive loops are joined by Dispose's bounded Task.WaitAll; QuiescenceScope is internal to WinForward.Runtime, which this project must not reference.
+        _receiveLoops =
+        [
+            Task.Run(() => ReceiveLoopAsync(udp4, _stop.Token), _stop.Token),
+            Task.Run(() => ReceiveLoopAsync(udp6, _stop.Token), _stop.Token),
+        ];
+#pragma warning restore WF0003
     }
 
     /// <summary>写进驱动 <c>block_sink_port</c> 的端口；生命周期内不变。</summary>
@@ -62,7 +64,7 @@ public sealed class BlockSink : IDisposable
         }
 
         SocketException? lastError = null;
-        for (int attempt = 0; attempt < BindAttempts; attempt++)
+        for (var attempt = 0; attempt < BindAttempts; attempt++)
         {
             Socket? udp4 = null;
             Socket? udp6 = null;
@@ -72,7 +74,7 @@ public sealed class BlockSink : IDisposable
             {
                 udp4 = BindSocket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp,
                                   IPAddress.Any, 0);
-                int port = ((IPEndPoint)udp4.LocalEndPoint!).Port;
+                var port = ((IPEndPoint)udp4.LocalEndPoint!).Port;
                 if (port == excludePort)
                 {
                     // 系统把 listener 端口分给了 sink：关掉重选，不能让两个用途混在一个端口上。
@@ -138,7 +140,7 @@ public sealed class BlockSink : IDisposable
 
     private async Task ReceiveLoopAsync(Socket socket, CancellationToken token)
     {
-        byte[] buffer = new byte[ReceiveBufferSize];
+        var buffer = new byte[ReceiveBufferSize];
         EndPoint remote = socket.AddressFamily == AddressFamily.InterNetwork
                               ? new IPEndPoint(IPAddress.Any, 0)
                               : new IPEndPoint(IPAddress.IPv6Any, 0);
@@ -161,7 +163,6 @@ public sealed class BlockSink : IDisposable
                 }
 
                 // sink 不解析内容也不回复；偶发的接收错误不值得让兜底循环退出。
-                continue;
             }
         }
     }
@@ -182,7 +183,9 @@ public sealed class BlockSink : IDisposable
 
         try
         {
-            Task.WaitAll(_receiveLoops, DisposeTimeout);
+#pragma warning disable VSTHRD002 // Dispose is synchronous by contract; the loops exit on cancel or socket close and the wait is bounded by s_disposeTimeout.
+            Task.WaitAll(_receiveLoops, s_disposeTimeout);
+#pragma warning restore VSTHRD002
         }
         catch (AggregateException)
         {

@@ -22,7 +22,8 @@
     "10-25-kernel-import-foundation",
     "10-25-backend-driver-config",
     "10-25-kernel-contracts-extraction",
-    "10-25-winpkfilter-backend-seam"
+    "10-25-winpkfilter-backend-seam",
+    "10-25-kernel-runtime-seam"
   ],
   "parent": null,
   "relatedFiles": [],

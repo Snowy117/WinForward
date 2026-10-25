@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the move stays a helper extraction and does not start the backend/data path."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/contracts-project.md", "reason": "Verify reference/transitivity and native-build behavior against the measured result."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify analyzer suppressions and the root/native gate results."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Verify socket/listener/block-sink ownership and disposal."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify bind/query/parse failures remain fail-closed."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "Verify redirect-context/block-sink/listener semantics did not change."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify project/reference placement and the Release native solution mapping."}

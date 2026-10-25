@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Userland.Device;
@@ -11,14 +12,11 @@ namespace WinForward.Userland.Relay;
 /// UDP 用收到 datagram 的源地址；同一个 listener 端口上的两类表项由查询里的 protocol 区分。
 /// 查不到（STATUS_NOT_FOUND）不是异常，而是「这条流量不是 forwarded 重定向来的」，交给下一个 source。
 /// </summary>
-public sealed class ForwardedRedirectContextSource : IRedirectContextSource
+public sealed class ForwardedRedirectContextSource(WfpDeviceClient device) : IRedirectContextSource
 {
     private const int ErrorNotFound = 1168;
 
-    private readonly WfpDeviceClient _device;
-
-    public ForwardedRedirectContextSource(WfpDeviceClient device) =>
-        _device = device ?? throw new ArgumentNullException(nameof(device));
+    private readonly WfpDeviceClient _device = device ?? throw new ArgumentNullException(nameof(device));
 
     public string Name => "forwarded";
 
@@ -52,7 +50,7 @@ public sealed class ForwardedRedirectContextSource : IRedirectContextSource
 
         if (listener.Port is <= 0 or > 65535)
         {
-            error = $"listener 端口 {listener.Port} 越界";
+            error = string.Create(CultureInfo.InvariantCulture, $"listener 端口 {listener.Port} 越界");
             return false;
         }
 
@@ -75,7 +73,7 @@ public sealed class ForwardedRedirectContextSource : IRedirectContextSource
         }
         catch (Win32Exception exception)
         {
-            error = $"forwarded redirect 查询失败：Win32={exception.NativeErrorCode} {exception.Message}";
+            error = string.Create(CultureInfo.InvariantCulture, $"forwarded redirect 查询失败：Win32={exception.NativeErrorCode} {exception.Message}");
             return false;
         }
         catch (InvalidOperationException exception)

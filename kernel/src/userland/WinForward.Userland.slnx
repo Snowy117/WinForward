@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="../../../src/WinForward.Kernel.Contracts/WinForward.Kernel.Contracts.csproj" />
+  <Project Path="../../../src/WinForward.Kernel.Runtime/WinForward.Kernel.Runtime.csproj" />
   <Project Path="WinForward.Userland/WinForward.Userland.csproj" />
   <Project Path="WinForward.Userland.Tests/WinForward.Userland.Tests.csproj" />
   <Project Path="WinForward.Controller/WinForward.Controller.csproj" />

@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Parent design: the Kernel backend seam, the runtime helper boundary and the no-second-userland rule."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/contracts-project.md", "reason": "The measured contracts/shim/transitivity behavior this runtime project extends."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Project placement/references and the transitional namespace pattern for the new runtime project."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Socket/bind/redirect-context failure handling and the fail-closed helpers."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Socket ownership/disposal and listener/block-sink lifetime rules."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Analyzer/format/test gates and narrow suppression policy for interop code."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "The redirect-context/block-sink/listener semantics the moved helpers implement."}

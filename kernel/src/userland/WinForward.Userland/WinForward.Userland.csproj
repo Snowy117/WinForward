@@ -3,9 +3,10 @@
   <PropertyGroup>
     <!--
       兼容壳：ABI 镜像、blob 编译器与设备客户端已移到仓库根的
-      src/WinForward.Kernel.Contracts 工程。Configuration/、Control/ 与 Relay/ 在脚手架退役前
-      仍留在这里，Kernel 控制器与原生测试驱动通过本工程同时拿到两边。tools/wfprobe 不引用任何
-      产品工程，它自带 ABI 夹具镜像。
+      src/WinForward.Kernel.Contracts 工程；redirect context 查询/解析、host/forwarded context
+      source、BlockSink 与 ListenerSet 已移到仓库根的 src/WinForward.Kernel.Runtime 工程。
+      Configuration/、Control/ 与 Relay/ 的其余部分在脚手架退役前仍留在这里，Kernel 控制器与
+      原生测试驱动通过本工程同时拿到三边。tools/wfprobe 不引用任何产品工程，它自带 ABI 夹具镜像。
     -->
     <AssemblyName>WinForward.Userland</AssemblyName>
     <RootNamespace>WinForward.Userland</RootNamespace>
@@ -13,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../../src/WinForward.Kernel.Contracts/WinForward.Kernel.Contracts.csproj" />
+    <ProjectReference Include="../../../../src/WinForward.Kernel.Runtime/WinForward.Kernel.Runtime.csproj" />
   </ItemGroup>
 
   <ItemGroup>

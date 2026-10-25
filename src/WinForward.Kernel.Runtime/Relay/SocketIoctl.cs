@@ -10,9 +10,9 @@ namespace WinForward.Userland.Relay;
 /// </summary>
 public static class SocketIoctl
 {
-    public const uint QueryRedirectRecords = 0x980000DC;
-    public const uint QueryRedirectContext = 0x980000DD;
-    public const uint SetRedirectRecordsCode = 0x980000DE;
+    private const uint QueryRedirectRecords = 0x980000DC;
+    private const uint QueryRedirectContext = 0x980000DD;
+    private const uint SetRedirectRecordsCode = 0x980000DE;
 
     private const int InitialBufferSize = 16 * 1024;
     private const int MaximumBufferSize = 256 * 1024;
@@ -43,7 +43,7 @@ public static class SocketIoctl
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
-            return Array.Empty<byte>();
+            return [];
         }
     }
 
@@ -54,11 +54,11 @@ public static class SocketIoctl
             return;
         }
 
-        IntPtr buffer = Marshal.AllocHGlobal(records.Length);
+        var buffer = Marshal.AllocHGlobal(records.Length);
         try
         {
             CopyToUnmanaged(records, buffer);
-            int result = WSAIoctl(socket.Handle, SetRedirectRecordsCode, buffer, (uint)records.Length,
+            var result = WSAIoctl(socket.Handle, SetRedirectRecordsCode, buffer, (uint)records.Length,
                                   IntPtr.Zero, 0, out _, IntPtr.Zero, IntPtr.Zero);
             if (result != 0)
             {
@@ -73,30 +73,30 @@ public static class SocketIoctl
 
     private static byte[] Query(Socket socket, uint ioControlCode)
     {
-        int size = InitialBufferSize;
-        for (int attempt = 0; attempt < 6; attempt++)
+        var size = InitialBufferSize;
+        for (var attempt = 0; attempt < 6; attempt++)
         {
-            IntPtr buffer = Marshal.AllocHGlobal(size);
+            var buffer = Marshal.AllocHGlobal(size);
             try
             {
-                int result = WSAIoctl(socket.Handle, ioControlCode, IntPtr.Zero, 0, buffer, (uint)size,
-                                      out uint returned, IntPtr.Zero, IntPtr.Zero);
+                var result = WSAIoctl(socket.Handle, ioControlCode, IntPtr.Zero, 0, buffer, (uint)size,
+                                      out var returned, IntPtr.Zero, IntPtr.Zero);
                 if (result == 0)
                 {
-                    return returned == 0 ? Array.Empty<byte>() : CopyFromUnmanaged(buffer, (int)returned);
+                    return returned == 0 ? [] : CopyFromUnmanaged(buffer, (int)returned);
                 }
 
-                int error = WSAGetLastError();
+                var error = WSAGetLastError();
                 // WSAEINVAL(10022) 对这两个查询的含义是「这条连接没有对应的上下文/记录」，不是缓冲区不足：
                 // 当成缓冲区不足会一路重试到 256 KiB 才报「上限仍不足」，既误导又白白分配内存。
-                bool bufferTooSmall = error == ErrorInsufficientBuffer || error == Wsaemsgsize;
+                var bufferTooSmall = error is ErrorInsufficientBuffer or Wsaemsgsize;
 
                 if (!bufferTooSmall)
                 {
                     throw new Win32Exception(error, $"WSAIoctl 0x{ioControlCode:X8} 失败");
                 }
 
-                int next = returned > (uint)size ? (int)returned : size * 2;
+                var next = returned > (uint)size ? (int)returned : size * 2;
                 if (next > MaximumBufferSize)
                 {
                     next = MaximumBufferSize;
@@ -120,13 +120,13 @@ public static class SocketIoctl
 
     private static void CopyToUnmanaged(ReadOnlySpan<byte> source, IntPtr destination)
     {
-        byte[] managed = source.ToArray();
+        var managed = source.ToArray();
         Marshal.Copy(managed, 0, destination, managed.Length);
     }
 
     private static byte[] CopyFromUnmanaged(IntPtr source, int length)
     {
-        byte[] data = new byte[length];
+        var data = new byte[length];
         Marshal.Copy(source, data, 0, length);
         return data;
     }

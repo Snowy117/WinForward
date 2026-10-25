@@ -12,7 +12,7 @@ extracting a shared test fake; before moving a type across layers.
 
 ## Project Graph
 
-8 production projects and 14 test projects in one .NET 10 solution (`WinForward.slnx`). Dependency
+9 production projects and 14 test projects in one .NET 10 solution (`WinForward.slnx`). Dependency
 direction is fixed:
 
 ```
@@ -20,14 +20,20 @@ Cli     → { Core, Configuration, Protocols, NdisApi, Runtime, Windows }
 Runtime → { Core, Configuration, Protocols, NdisApi, Windows }
 Windows, Protocols, NdisApi, Configuration → Core
 Kernel.Contracts → ∅ (BCL only)
+Kernel.Runtime → { Kernel.Contracts }
 ```
 
 `WinForward.Kernel.Contracts` is the exception with no outbound project edge: it is the Kernel WFP
 ABI mirror and the host/forwarded rule-blob compilers, and it must never reference the product data
 path (`Runtime`, `NdisApi`, `Windows`) or acquire a dependency that would drag the native Kernel
-tools into the proxy stack. Its only consumer is `kernel/src/userland/WinForward.Userland`, the
-compatibility shim that the native controller and test runner build against; `tools/wfprobe` stays
-a standalone fixture program with no product reference.
+tools into the proxy stack. `WinForward.Kernel.Runtime` holds the helpers the Kernel host-TCP
+backend composes with the product relay — redirect-context query/parse, the host/forwarded context
+sources, `BlockSink` and `ListenerSet` — and references `Kernel.Contracts` only, for the ABI structs
+and `WfpDeviceClient`. Neither project may reference `Runtime`, `NdisApi`, `Windows` or the driver.
+Both are consumed through `kernel/src/userland/WinForward.Userland`, the compatibility shim that the
+native controller and test runner build against (the Runtime project is the shim's own
+`ProjectReference`; its types stay resolvable through that transitive edge); `tools/wfprobe` stays a
+standalone fixture program with no product reference.
 
 Never reverse an edge. When a type appears to need one, confirm the direction before touching
 anything and move the type instead.
@@ -40,6 +46,7 @@ src/
 ├── WinForward.Configuration/  # JSON DTOs + ConfigurationLoader + ValidatedConfiguration
 ├── WinForward.Core/           # dependency-free primitives (Endpoint, IPAddressValue, FlowKey, IPPrefix…)
 ├── WinForward.Kernel.Contracts/  # Kernel ABI mirror + rule-blob compilers (namespaces still WinForward.Userland.*)
+├── WinForward.Kernel.Runtime/    # Kernel redirect-context/block-sink/listener helpers (namespaces still WinForward.Userland.*)
 ├── WinForward.NdisApi/        # NDISAPI interop (Abi declarations / Driver / Gate / Buffer)
 ├── WinForward.Protocols/      # pure protocol codecs (Socks5Messages, Socks5UdpCodec)
 ├── WinForward.Runtime/        # capture/dispatch runtime; five sub-namespaces (below)

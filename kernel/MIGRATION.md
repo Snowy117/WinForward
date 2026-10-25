@@ -180,10 +180,44 @@ Gate and tool effects:
   `kernel/src/userland`), and the shim references the same project with `../../../../src/...`. A
   Windows machine deployed with only the `kernel/` subtree cannot build it.
 - The Windows deployment therefore has to carry the complete repository layout: `<repo>/kernel`
-  plus `<repo>/src/WinForward.Kernel.Contracts`, and the root build files the contracts project
-  imports (`Directory.Build.props`, `Directory.Packages.props`, `src/Directory.Build.props`, and
-  `analyzers/WinForward.Analyzers`). `gate.ps1 -Root` keeps pointing at `<repo>/kernel`; the
-  relative paths inside the solution and the project references do the rest.
+  plus `<repo>/src/WinForward.Kernel.Contracts` and `<repo>/src/WinForward.Kernel.Runtime`, and the
+  root build files those projects import (`Directory.Build.props`, `Directory.Packages.props`,
+  `src/Directory.Build.props`, and `analyzers/WinForward.Analyzers`). `gate.ps1 -Root` keeps
+  pointing at `<repo>/kernel`; the relative paths inside the solution and the project references do
+  the rest.
+
+## Runtime seam extraction
+
+The userland helpers the Kernel host-TCP backend needs now live at the repository root too.
+`SocketIoctl`, `RedirectDestination`, `IRedirectContextSource`, `HostRedirectContextSource`,
+`ForwardedRedirectContextSource`, `BlockSink` and `ListenerSet` moved from
+`kernel/src/userland/WinForward.Userland/Relay/` to `src/WinForward.Kernel.Runtime/Relay/`. The
+project is a member of `WinForward.slnx` and of `WinForward.Userland.slnx`, so both the root gate
+and the native Release build analyze and compile it.
+
+| Item | State |
+|---|---|
+| Moved | The seven files above → `src/WinForward.Kernel.Runtime/Relay/`; type namespaces stay `WinForward.Userland.Relay`, and the only body changes are the analyzer-suppression lines plus the root analyzer/formatter fixes (`var`, collection expressions, one primary constructor, invariant interpolation, and the `_stop.Token` argument MA0040 requires on the two `BlockSink` `Task.Run` calls — cancellation is still only requested by `Dispose`, so the loops' lifecycle is unchanged) |
+| Unchanged | Redirect-context magic/version/size checks, `SIO_QUERY_WFP_CONNECTION_REDIRECT_CONTEXT` constants, host/forwarded field mapping, `BlockSink` v4/v6 ports and TCP bind-only fallback, `ListenerSet` wildcard/address binding and same-port retry |
+| New assembly | `WinForward.Kernel.Runtime`; `RootNamespace` stays `WinForward.Userland`, so the type namespaces are still `WinForward.Userland.Relay` |
+| References | The new project references `WinForward.Kernel.Contracts` only. It must not reference `WinForward.Runtime`, `WinForward.NdisApi` or the driver |
+| Old project | `kernel/src/userland/WinForward.Userland` adds a `ProjectReference` to the new project beside the contracts one; it keeps `Relay/RelayServer`, `PumpPair`, `OutboundConnector`, `Socks5Client`, `Socks5UdpAssociation`, `Socks5UdpCodec`, `Socks5Exception`, `ForwardedUdpRelay`, `Control/` and `Configuration/` |
+| Consumers | `WinForward.Userland.Tests` and `WinForward.Controller` needed no new reference: project-reference transitivity exposes the moved types, measured on `WinForward.Userland.slnx -c Release`. `tools/wfprobe` references no product project at all — its `BlockSinkBinding` is its own fixture — so the move does not touch it |
+| Internals | No `InternalsVisibleTo` grant: every moved type and member the Kernel tests use (`BlockSink`, `ListenerSet`, `UdpListener`, `RedirectDestination.TryParse`) is public |
+| Analyzers | Root build/format clean. Narrow suppressions only: `#pragma warning disable WF0003` around the two `BlockSink` receive loops (joined by `Dispose`) and `VSTHRD002` around its bounded `Task.WaitAll`; project-scoped `.editorconfig` entries for `MA0051` in `Relay/ListenerSet.cs` (67 lines) and `SYSLIB1054` in `Relay/SocketIoctl.cs` (the build reports no SYSLIB1054, but `dotnet format --severity info` does, and that is the enforced gate), each with its measured reason; project-scoped jb entries for `UnusedType.Global`, `UnusedMember.Global`, `UnusedAutoPropertyAccessor.Global` and `MemberCanBePrivate.Global` in this project and in `WinForward.Kernel.Contracts`, because every consumer of both public surfaces sits in the native `kernel/src/userland` tree, which is outside `WinForward.slnx` and therefore outside the inspection's usage analysis. With those entries `jb inspectcode` over the Runtime project file reports zero issues; the Contracts project drops from 169 to 52 findings outside that class |
+
+The old project remains a compatibility shim. Deferred, and deliberately not mixed into this
+extraction:
+
+- The namespace rename `WinForward.Userland.*` → `WinForward.Kernel.Runtime.*`; the project and its
+  types are one mechanical batch away.
+- Building the Kernel host-TCP backend on these helpers (device configuration, accept loop, relay
+  and data path are a later batch).
+
+The native Release build compiles the helper in `src/WinForward.Kernel.Runtime/bin/Release/net10.0/`
+because the project is listed in `WinForward.Userland.slnx`; without the solution entry the
+out-of-solution `ProjectReference` would map it to Debug (the same finding the contracts extraction
+recorded).
 
 ## Known follow-ups
 

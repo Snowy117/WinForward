@@ -13,16 +13,22 @@ blob 格式一旦对不上，症状是规则静默不生效而不是报错，所
 | `src/WinForward.Kernel.Contracts/Policy/` | 规则模型、编译期校验、blob 编译器、ABI 镜像结构 |
 | `src/WinForward.Kernel.Contracts/Device/` | 控制面 IOCTL：ABI 结构镜像、布局断言、设备客户端 |
 | `src/WinForward.Kernel.Contracts/Forwarded/` | forwarded 规则模型、blob 编译器、入口适配器解析 |
+| `src/WinForward.Kernel.Runtime/Relay/` | redirect context 查询/解析、host/forwarded context source、`BlockSink`、`ListenerSet` |
 | `WinForward.Userland/Configuration/` | 暂定 JSON 配置 → `ControllerConfiguration` / `PolicyTable`（**唯一**的格式感知层） |
 | `WinForward.Userland/Control/` | 产品生命周期：下发规则 → 起监听 → 告诉驱动端口与 self-PID → 退出 |
-| `WinForward.Userland/Relay/` | accept → 读回原始目的地 → 建出站（直连或经 SOCKS5）→ 双向转发 |
+| `WinForward.Userland/Relay/` | accept → 读回原始目的地 → 建出站（直连或经 SOCKS5）→ 双向转发（`RelayServer`、`PumpPair`、`OutboundConnector`、`Socks5*`、`ForwardedUdpRelay`） |
 | `WinForward.Controller/` | 控制台入口：`run` / `check` / `state` / `disable` / `echo` / `client` |
 | `WinForward.Userland.Tests/` | 零依赖测试驱动、布局断言、ABI 一致性、差分用例表与夹具生成 |
 | `Directory.Build.props` | 公共属性：`net10.0`、nullable、warnings-as-errors |
 
-`WinForward.Kernel.Contracts/` 三个目录已搬到仓库根（上表里相对仓库根，其余路径相对本目录），
-`WinForward.Userland` 只剩 `Configuration/`、`Control/`、`Relay/` 并通过 `ProjectReference` 引用它。
-类型命名空间仍是 `WinForward.Userland.*`，改名是后续批次的事。
+`WinForward.Kernel.Contracts/` 三个目录与 `WinForward.Kernel.Runtime/` 已搬到仓库根（上表里相对
+仓库根，其余路径相对本目录），`WinForward.Userland` 只剩 `Configuration/`、`Control/`、`Relay/`
+的其余部分，并通过两个 `ProjectReference` 引用它们。类型命名空间仍是 `WinForward.Userland.*`
+（runtime 工程同样把 `RootNamespace` 停在 `WinForward.Userland`），改名是后续批次的事。
+
+这些工程搬到仓库根之后，两个 solution 都要列出它们：根 `WinForward.slnx` 让仓库的分析器与
+`dotnet format` 覆盖它们，本目录的 `WinForward.Userland.slnx` 让原生 Release 构建按 Release
+编译它们（不在 solution 里的 `ProjectReference` 会退回 Debug）。
 
 测试工程刻意不引 xunit：仓库的构建面只有 nix devShell 与 Windows VM，两者都不保证能访问
 NuGet。入口是 `dotnet run` 的 `test` 子命令，退出码即门禁结果。
@@ -136,10 +142,11 @@ SOCKS5（VM loopback）→ 跨机 target」。
 
 ## Block sink
 
-Host block 命中后驱动把连接 / 关联改道到控制器保留的 sink 端口。`Relay/BlockSink.cs` 在
-v4/v6 × UDP/TCP 上保留同一端口：UDP 收到即丢、TCP 只 bind 不 listen；端口写进
-`ProbeConfig.EnabledFor(..., blockSinkPort)`，`enabled` 期间不变。控制器停止时先 disable
-driver，再释放 sink。`userland-e2e` 断言回读的 `block-sink-port` 非 0 且与 listener 不同。
+Host block 命中后驱动把连接 / 关联改道到控制器保留的 sink 端口。
+`src/WinForward.Kernel.Runtime/Relay/BlockSink.cs` 在 v4/v6 × UDP/TCP 上保留同一端口：UDP 收到
+即丢、TCP 只 bind 不 listen；端口写进 `ProbeConfig.EnabledFor(..., blockSinkPort)`，`enabled`
+期间不变。控制器停止时先 disable driver，再释放 sink。`userland-e2e` 断言回读的
+`block-sink-port` 非 0 且与 listener 不同。
 
 ## 编译期语义检查
 

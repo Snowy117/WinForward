@@ -13,7 +13,7 @@ public sealed class HostRedirectContextSource : IRedirectContextSource
     {
         ArgumentNullException.ThrowIfNull(client);
         destination = null;
-        byte[]? rawContext = SocketIoctl.TryQueryRedirectContext(client, out error);
+        var rawContext = SocketIoctl.TryQueryRedirectContext(client, out error);
         if (rawContext is null)
         {
             return false;

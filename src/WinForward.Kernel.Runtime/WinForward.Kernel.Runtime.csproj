@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>WinForward.Kernel.Runtime</AssemblyName>
+    <!--
+      Transitional: the redirect-context query/parse, the host/forwarded context sources, the block
+      sink and the listener set moved here, so their namespaces stay WinForward.Userland.Relay for
+      now. The Kernel controller, its test runner and the Kernel redirect/relay scaffolding compile
+      against those names; renaming them is a separate mechanical change and must not be mixed into
+      this extraction. RootNamespace keeps IDE0130 (namespace matches folder structure) quiet in the
+      meantime.
+    -->
+    <RootNamespace>WinForward.Userland</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The moved sources read RedirectContext, ProbeForwardedRedirect and WfpDeviceClient. The
+         project must not reference WinForward.Runtime, WinForward.NdisApi or the driver: the
+         Kernel backend composes these helpers with the product relay, not the other way round. -->
+    <ProjectReference Include="../WinForward.Kernel.Contracts/WinForward.Kernel.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

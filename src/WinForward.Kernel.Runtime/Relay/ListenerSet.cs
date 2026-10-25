@@ -41,12 +41,12 @@ public sealed class ListenerSet : IDisposable
 
     public IReadOnlyList<ListenerEndpoint> Endpoints => _endpoints;
 
-    public IReadOnlyList<TcpListener> Listeners => _endpoints.Select(endpoint => endpoint.Tcp).ToArray();
+    public IReadOnlyList<TcpListener> Listeners => [.. _endpoints.Select(endpoint => endpoint.Tcp)];
 
     public IReadOnlyList<UdpListener> UdpSockets =>
-        _endpoints.Select(endpoint => new UdpListener(endpoint.EndPoint, endpoint.Udp)).ToArray();
+        [.. _endpoints.Select(endpoint => new UdpListener(endpoint.EndPoint, endpoint.Udp))];
 
-    public static ListenerSet Bind() => Bind(Array.Empty<IPAddress>());
+    public static ListenerSet Bind() => Bind([]);
 
     public static ListenerSet Bind(IReadOnlyList<IPAddress> addresses)
     {
@@ -56,15 +56,15 @@ public sealed class ListenerSet : IDisposable
             return BindWildcard();
         }
 
-        IPAddress[] targets = addresses.Distinct().ToArray();
+        IPAddress[] targets = [.. addresses.Distinct()];
         SocketException? lastError = null;
-        for (int attempt = 0; attempt < BindAttempts; attempt++)
+        for (var attempt = 0; attempt < BindAttempts; attempt++)
         {
             var endpoints = new List<ListenerEndpoint>(targets.Length);
-            int port = 0;
+            var port = 0;
             try
             {
-                foreach (IPAddress address in targets)
+                foreach (var address in targets)
                 {
                     var tcp = new TcpListener(address, port);
                     if (address.AddressFamily == AddressFamily.InterNetworkV6)
@@ -97,7 +97,7 @@ public sealed class ListenerSet : IDisposable
             {
                 // 系统刚分配的端口可能已被别的进程在另一个地址/协议上占用；换一个端口重试。
                 lastError = exception;
-                foreach (ListenerEndpoint endpoint in endpoints)
+                foreach (var endpoint in endpoints)
                 {
                     endpoint.Udp.Dispose();
                     endpoint.Tcp.Stop();
@@ -105,7 +105,7 @@ public sealed class ListenerSet : IDisposable
             }
             catch
             {
-                foreach (ListenerEndpoint endpoint in endpoints)
+                foreach (var endpoint in endpoints)
                 {
                     endpoint.Udp.Dispose();
                     endpoint.Tcp.Stop();
@@ -121,7 +121,7 @@ public sealed class ListenerSet : IDisposable
     private static ListenerSet BindWildcard()
     {
         SocketException? lastError = null;
-        for (int attempt = 0; attempt < BindAttempts; attempt++)
+        for (var attempt = 0; attempt < BindAttempts; attempt++)
         {
             var ipv4 = new TcpListener(IPAddress.Any, 0);
             TcpListener? ipv6 = null;
@@ -130,7 +130,7 @@ public sealed class ListenerSet : IDisposable
             try
             {
                 ipv4.Start();
-                int port = ((IPEndPoint)ipv4.LocalEndpoint).Port;
+                var port = ((IPEndPoint)ipv4.LocalEndpoint).Port;
 
                 ipv6 = new TcpListener(IPAddress.IPv6Any, port);
                 ipv6.Server.DualMode = false;
@@ -183,7 +183,7 @@ public sealed class ListenerSet : IDisposable
 
     public void Dispose()
     {
-        foreach (ListenerEndpoint endpoint in _endpoints)
+        foreach (var endpoint in _endpoints)
         {
             endpoint.Tcp.Stop();
             endpoint.Udp.Dispose();
