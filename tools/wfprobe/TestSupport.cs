@@ -138,5 +138,30 @@ internal static class SocketHelpers
             throw new ArgumentException($"地址应为 HOST:PORT：{text}");
         return (text[..separator], int.Parse(text[(separator + 1)..]));
     }
+
+    public static IPAddress WithScope(IPAddress address, uint ifIndex)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetworkV6 || ifIndex == 0)
+        {
+            return address;
+        }
+
+        if (!address.IsIPv6LinkLocal || address.ScopeId != 0)
+        {
+            return address;
+        }
+
+        return new IPAddress(address.GetAddressBytes(), (long)ifIndex);
+    }
+
+    public static bool SameAddress(IPAddress left, IPAddress right)
+    {
+        if (left.AddressFamily != right.AddressFamily)
+        {
+            return false;
+        }
+
+        return left.GetAddressBytes().AsSpan().SequenceEqual(right.GetAddressBytes());
+    }
 }
 

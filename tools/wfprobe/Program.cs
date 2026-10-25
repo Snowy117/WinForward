@@ -109,21 +109,25 @@ internal static class Program
   wfprobe forwarded-rules [--ifindex N] [--local-ip A.B.C.D] [--peer HOST:PORT]
                         [--inbound-port N] [--inbound-wait-ms M] [--timeout-ms M]
                          [--only F1,F2,...]
-  wfprobe forwarded-tcp --phase core|upstreams|fail [--local-ip A.B.C.D] [--ifindex N]
-                        [--listener-port N] [--remote-address A.B.C.D] [--remote-port N]
-                        [--backend HOST:PORT] [--client-cidr CIDR] [--wait-ms M]
-                        [--expect-accepts K] [--bytes N] [--verify-port N]
-                        [--verify-timeout-ms M] [--no-verify] [--restore-only]
-  wfprobe forwarded-udp --phase core|socks5|fail|fragment|fragment-host|capacity|reject [--local-ip A.B.C.D] [--ifindex N]
-                        [--listener-port N] [--remote-address A.B.C.D] [--remote-port N]
+  wfprobe forwarded-tcp --phase core|upstreams|fail|multi|noingress|hotswap [--local-ip A.B.C.D|IPv6]
+                        [--second-local-ip ADDR] [--external-local-ip ADDR] [--ifindex N]
+                        [--listener-port N] [--remote-address ADDR] [--external-remote-address ADDR]
+                        [--remote-port N] [--second-remote-port N] [--backend HOST:PORT]
+                        [--client-cidr CIDR] [--wait-ms M] [--expect-accepts K] [--bytes N]
+                        [--source-port-a N] [--source-port-b N] [--verify-port N]
+                        [--verify-timeout-ms M] [--no-alias] [--no-verify] [--restore-only]
+  wfprobe forwarded-udp --phase core|socks5|fail|fragment|fragment-host|capacity|reject [--local-ip A.B.C.D|IPv6] [--ifindex N]
+                        [--listener-port N] [--remote-address ADDR] [--remote-port N]
                         [--backend HOST:PORT] [--client-cidr CIDR] [--wait-ms M]
                         [--expect-datagrams N] [--expect-created N] [--capacity N] [--sweep-base N]
                         [--expect-fragments N] [--fragment-timeout-ms M] [--host-fragment-port N]
-                        [--host-fragment-address A.B.C.D] [--fragment-permit-first-port N]
+                        [--host-fragment-address ADDR] [--fragment-permit-first-port N]
                         [--verify-port N] [--verify-timeout-ms M] [--no-alias] [--no-verify] [--restore-only]
 
   forwarded-tcp 先在 VM 内下发 redirect 规则与 forwarded config，再打印 [forwarded-tcp] READY 等待外部客户端；
   Linux 客户端连 10.99.0.1:40250（临时路由）即可验证 DNAT/回程/半关闭/upstream 选择。
+  IPv6 阶段用链路本地 L/target（target 必须与 L 不同）并显式 --no-alias；地址由
+  tools/windows/prepare-b6c-forwarded.ps1 -WithIpv6 准备。
   默认要求外部客户端在数据面结束后连 verify 端口（listener+1000）回报实际收到字节数、SHA-256 与
   TCP ACK 字节数；没有回报或内容不一致即 FAIL。--no-verify 仅供手工调试。
 ");

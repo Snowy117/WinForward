@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """External Linux TCP client/reporter for wfprobe forwarded-tcp core.
 
+--target accepts host:port for IPv4, bare IPv6 (fe80::99%eth0:40250) or bracketed
+IPv6 ([fe80::99%eth0]:40250). --verify stays on the VM IPv4 address.
+
 acked 必须是真实 TCP ACK 语义：读取 TCP_INFO.tcpi_bytes_acked（客户端发出的字节中被
 对端 ACK 的数量），不再用 recv 实收字节冒充。
 """
@@ -29,6 +32,13 @@ def tcp_bytes_acked(sock):
     return struct.unpack_from("Q", info, _TCP_INFO_BYTES_ACKED_OFFSET)[0]
 
 
+def parse_endpoint(text):
+    host, port = text.rsplit(":", 1)
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    return host, int(port)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", required=True)
@@ -37,12 +47,12 @@ def main():
     parser.add_argument("--verify", required=True)
     parser.add_argument("--timeout", type=float, default=5.0)
     args = parser.parse_args()
-    host, port = args.target.rsplit(":", 1)
-    verify_host, verify_port = args.verify.rsplit(":", 1)
+    host, port = parse_endpoint(args.target)
+    verify_host, verify_port = parse_endpoint(args.verify)
     payload = payload_for(args.bytes)
     expected_sha = hashlib.sha256(payload).hexdigest()
     for _ in range(args.count):
-        with socket.create_connection((host, int(port)), timeout=args.timeout) as conn:
+        with socket.create_connection((host, port), timeout=args.timeout) as conn:
             client_port = conn.getsockname()[1]
             conn.sendall(payload)
             received = b""
@@ -59,7 +69,7 @@ def main():
         line = (f"port={client_port} bytes={len(received)} acked={acked} "
                 f"sha={sha} ok={1 if ok else 0}")
         print(f"[client] {line}", flush=True)
-        with socket.create_connection((verify_host, int(verify_port)), timeout=args.timeout) as verify:
+        with socket.create_connection((verify_host, verify_port), timeout=args.timeout) as verify:
             verify.sendall((line + "\n").encode())
         if not ok:
             return 1

@@ -70,8 +70,10 @@ internal static class ForwardedTcpSuite
         ProbeStats stats = device.GetStats();
         Check.Equal(Protocol.AbiVersion, (long)stats.AbiVersion, "驱动 ABI 版本与夹具一致");
 
-        using OnLinkAlias alias = OnLinkAlias.Ensure(remoteAddress, localIp, ifIndex, !options.Has("no-alias"));
-        if (!alias.Ready)
+        using OnLinkAlias? alias = SkipAlias(options, remoteAddress)
+                                       ? null
+                                       : OnLinkAlias.Ensure(remoteAddress, localIp, ifIndex, !options.Has("no-alias"));
+        if (alias is not null && !alias.Ready)
         {
             Console.WriteLine($"[forwarded-tcp] alias 不可用：{alias.Error}");
             return 7;
@@ -137,7 +139,7 @@ internal static class ForwardedTcpSuite
         Install(device, blob, 1, listenerPort, localIp, family);
         device.ResetForwardedStats();
 
-        using var listener = new TcpListener(IPAddress.Any, listenerPort);
+        using var listener = BindTcpAny(listenerPort, family);
         listener.Start();
         using TcpListener? verifyListener = verify is null ? null : StartVerifyListener(verify);
         Console.WriteLine($"[forwarded-tcp] READY phase=core listener={listenerPort} " +
@@ -192,8 +194,8 @@ internal static class ForwardedTcpSuite
         {
             Check.True(session.QueryOk, "redirect 查询命中", session.Detail);
             Check.Equal(remotePort, session.ServerPort, "redirect 表记录原始服务器端口");
-            Check.True(session.ServerAddress.Equals(remoteAddress), "redirect 表记录原始服务器地址",
-                       $"{session.ServerAddress}");
+            Check.True(SocketHelpers.SameAddress(session.ServerAddress, remoteAddress),
+                       "redirect 表记录原始服务器地址", $"{session.ServerAddress}");
             Check.Equal(0, session.UpstreamId, "redirect 表记录 upstream_id");
             Check.True(session.BytesClientToServer > 0, "中继收到客户端数据", $"{session.BytesClientToServer}B");
             Check.True(session.BytesServerToClient > 0, "回程数据回到客户端", $"{session.BytesServerToClient}B");
@@ -237,8 +239,8 @@ internal static class ForwardedTcpSuite
                                                      int timeoutMs,
                                                      VerifyPlan? verify)
     {
-        await using var upstream0 = new Socks5FakeServer();
-        await using var upstream1 = new Socks5FakeServer();
+        await using var upstream0 = new Socks5FakeServer { DialOverride = backend };
+        await using var upstream1 = new Socks5FakeServer { DialOverride = backend };
         var upstreams = new Dictionary<uint, Socks5FakeServer>
         {
             [0] = upstream0,
@@ -261,7 +263,7 @@ internal static class ForwardedTcpSuite
         Install(device, blob, (uint)(singleUpstream ? 1 : 2), listenerPort, localIp, family);
         device.ResetForwardedStats();
 
-        using var listener = new TcpListener(IPAddress.Any, listenerPort);
+        using var listener = BindTcpAny(listenerPort, family);
         listener.Start();
         using TcpListener? verifyListener = verify is null ? null : StartVerifyListener(verify);
         Console.WriteLine($"[forwarded-tcp] READY phase=upstreams listener={listenerPort} " +
@@ -297,6 +299,14 @@ internal static class ForwardedTcpSuite
         PrintStats("upstreams", stats);
 
         Check.True(sessions.Count == expectAccepts, "客户端都触发 accept", $"{sessions.Count}/{expectAccepts}");
+        if (remoteAddress.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            Check.Equal(singleUpstream ? expectAccepts : 1, upstream0.V6Connections,
+                        "upstream 0 收到 atyp=4 CONNECT");
+            Check.Equal(singleUpstream ? 0 : 1, upstream1.V6Connections,
+                        "upstream 1 收到 atyp=4 CONNECT");
+        }
+
         if (singleUpstream)
         {
             Check.Equal(expectAccepts, upstream0.Connections, "单上游收到全部 CONNECT");
@@ -332,11 +342,69 @@ internal static class ForwardedTcpSuite
         return Check.Failures == 0 ? 0 : 6;
     }
 
-    private static TcpListener BindOn(string address, int port)
+    private static TcpListener BindOn(string address, int port, uint ifIndex)
     {
-        TcpListener listener = new(IPAddress.Parse(address), port);
+        IPAddress parsed = SocketHelpers.WithScope(IPAddress.Parse(address), ifIndex);
+        TcpListener listener = new(parsed, port);
+        if (parsed.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            listener.Server.DualMode = false;
+        }
+
         listener.Start();
         return listener;
+    }
+
+    private static TcpListener BindTcpAny(int port, byte family)
+    {
+        TcpListener listener = family == 6
+                                   ? new TcpListener(IPAddress.IPv6Any, port)
+                                   : new TcpListener(IPAddress.Any, port);
+        if (family == 6)
+        {
+            listener.Server.DualMode = false;
+        }
+
+        return listener;
+    }
+
+    private static bool SkipAlias(Options options, string remoteAddress) =>
+        options.Has("no-alias") && IPAddress.Parse(remoteAddress).AddressFamily == AddressFamily.InterNetworkV6;
+
+    private static bool SameAddressSet(IEnumerable<IPAddress> actual, params IPAddress[] expected)
+    {
+        var remaining = new List<IPAddress>(expected);
+        foreach (IPAddress item in actual)
+        {
+            int index = remaining.FindIndex(candidate => SocketHelpers.SameAddress(candidate, item));
+            if (index < 0)
+            {
+                return false;
+            }
+
+            remaining.RemoveAt(index);
+        }
+
+        return remaining.Count == 0;
+    }
+
+    private static bool SameEndpointSet(IEnumerable<(IPAddress Address, int Port)> actual,
+                                        params (IPAddress Address, int Port)[] expected)
+    {
+        var remaining = new List<(IPAddress Address, int Port)>(expected);
+        foreach ((IPAddress address, int port) in actual)
+        {
+            int index = remaining.FindIndex(candidate => SocketHelpers.SameAddress(candidate.Address, address) &&
+                                                         candidate.Port == port);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            remaining.RemoveAt(index);
+        }
+
+        return remaining.Count == 0;
     }
 
     private static async Task<int> RunMultiAsync(WfpDevice device, Options options)
@@ -361,12 +429,19 @@ internal static class ForwardedTcpSuite
         Check.True(internalIndex != 0 && externalIndex != 0, "multi 解析两个入口 ifIndex",
                    $"internal={internalIndex} external={externalIndex}");
 
-        using OnLinkAlias secondL = OnLinkAlias.Ensure(secondLocalIp, localIp, internalIndex, !options.Has("no-alias"));
-        using OnLinkAlias externalTarget = OnLinkAlias.Ensure(
-            externalRemoteAddress, externalLocalIp, externalIndex, !options.Has("no-alias"));
-        if (!secondL.Ready || !externalTarget.Ready)
+        bool skipAlias = options.Has("no-alias") &&
+                         IPAddress.Parse(remoteAddress).AddressFamily == AddressFamily.InterNetworkV6;
+        using OnLinkAlias? secondL = skipAlias
+                                         ? null
+                                         : OnLinkAlias.Ensure(secondLocalIp, localIp, internalIndex, !options.Has("no-alias"));
+        using OnLinkAlias? externalTarget = skipAlias
+                                                ? null
+                                                : OnLinkAlias.Ensure(
+                                                    externalRemoteAddress, externalLocalIp, externalIndex,
+                                                    !options.Has("no-alias"));
+        if (secondL is not null && (!secondL.Ready || externalTarget is null || !externalTarget.Ready))
         {
-            Console.WriteLine($"[forwarded-tcp] multi alias 不可用：{secondL.Error} / {externalTarget.Error}");
+            Console.WriteLine($"[forwarded-tcp] multi alias 不可用：{secondL.Error} / {externalTarget?.Error}");
             return 7;
         }
 
@@ -397,7 +472,7 @@ internal static class ForwardedTcpSuite
         {
             foreach (ProbeForwardedIngress row in rows)
             {
-                listeners.Add(BindOn(row.ListenerIP!.ToString(), listenerPort));
+                listeners.Add(BindOn(row.ListenerIP!.ToString(), listenerPort, row.IfIndex));
             }
 
             Console.WriteLine($"[forwarded-tcp] READY phase=multi listener={listenerPort} " +
@@ -470,14 +545,15 @@ internal static class ForwardedTcpSuite
 
             if (crossIngress.Length == 2)
             {
-                var locals = crossIngress.Select(session => session.Local.Address.ToString()).ToHashSet(StringComparer.Ordinal);
-                Check.True(locals.SetEquals(new[] { localIp, externalLocalIp }), "multi 跨入口使用两个 L",
-                           string.Join(",", locals));
-                var targets = crossIngress.Select(session => $"{session.ServerAddress}:{session.ServerPort}")
-                    .ToHashSet(StringComparer.Ordinal);
-                Check.True(targets.SetEquals(new[] { $"{remoteAddress}:{remotePort}",
-                                                     $"{externalRemoteAddress}:{remotePort}" }),
-                           "multi 跨入口回程记录两个原始目的", string.Join(",", targets));
+                Check.True(SameAddressSet(crossIngress.Select(session => session.Local.Address),
+                                          IPAddress.Parse(localIp), IPAddress.Parse(externalLocalIp)),
+                           "multi 跨入口使用两个 L",
+                           string.Join(",", crossIngress.Select(session => session.Local.Address)));
+                Check.True(SameEndpointSet(crossIngress.Select(session => (session.ServerAddress, session.ServerPort)),
+                                           (IPAddress.Parse(remoteAddress), remotePort),
+                                           (IPAddress.Parse(externalRemoteAddress), remotePort)),
+                           "multi 跨入口回程记录两个原始目的",
+                           string.Join(",", crossIngress.Select(session => $"{session.ServerAddress}:{session.ServerPort}")));
                 var ingresses = crossIngress.Select(session => session.IngressIfIndex).ToHashSet();
                 Check.True(ingresses.SetEquals(new[] { internalIndex, externalIndex }), "multi 跨入口 ingress 正确",
                            string.Join(",", ingresses));
@@ -485,13 +561,15 @@ internal static class ForwardedTcpSuite
 
             if (sameIngress.Length == 2)
             {
-                var locals = sameIngress.Select(session => session.Local.Address.ToString()).ToHashSet(StringComparer.Ordinal);
-                Check.True(locals.SetEquals(new[] { localIp, secondLocalIp }), "multi 同入口并发使用两个 L",
-                           string.Join(",", locals));
+                Check.True(SameAddressSet(sameIngress.Select(session => session.Local.Address),
+                                          IPAddress.Parse(localIp), IPAddress.Parse(secondLocalIp)),
+                           "multi 同入口并发使用两个 L",
+                           string.Join(",", sameIngress.Select(session => session.Local.Address)));
                 var ports = sameIngress.Select(session => session.ServerPort).ToHashSet();
                 Check.True(ports.SetEquals(new[] { remotePort, secondRemotePort }),
                            "multi 同客户端端口两个目的并存", string.Join(",", ports));
-                Check.True(sameIngress.All(session => session.ServerAddress.ToString() == remoteAddress),
+                Check.True(sameIngress.All(session => SocketHelpers.SameAddress(session.ServerAddress,
+                                                                                IPAddress.Parse(remoteAddress))),
                            "multi 同入口两个目的地址相同", remoteAddress);
 
                 Check.True(sameIngress.All(session => session.IngressIfIndex == internalIndex),
@@ -625,8 +703,7 @@ internal static class ForwardedTcpSuite
         await using var upstream1 = new Socks5FakeServer();
         var upstreams = new Dictionary<uint, Socks5FakeServer> { [0] = upstream0, [1] = upstream1 };
 
-        using var listener = new TcpListener(IPAddress.Parse(localIp), listenerPort);
-        listener.Start();
+        using var listener = BindOn(localIp, listenerPort, ifIndex);
         Console.WriteLine($"[forwarded-tcp] READY phase=hotswap listener={listenerPort} " +
                           $"target={remoteAddress}:{remotePort} bytes={payloadBytes} swap_delay_ms={swapDelayMs}");
         Console.Out.Flush();
@@ -725,7 +802,7 @@ internal static class ForwardedTcpSuite
         device.SetForwardedConfig(DisabledConfig(listenerPort));
         device.ResetForwardedStats();
 
-        using var listener = new TcpListener(IPAddress.Any, listenerPort);
+        using var listener = BindTcpAny(listenerPort, family);
         listener.Start();
         Console.WriteLine($"[forwarded-tcp] READY phase=fail listener={listenerPort} " +
                           $"remote={remoteAddress}:{remotePort} expect=no-accept timeout_ms={timeoutMs}");
@@ -815,7 +892,10 @@ internal static class ForwardedTcpSuite
                 Socket outbound;
                 if (upstreams is not null && upstreams.TryGetValue(redirect.UpstreamId, out Socks5FakeServer? fake))
                 {
-                    outbound = await Socks5TestClient.ConnectAsync(fake.EndPoint, backend, timeoutMs, token);
+                    IPEndPoint requested = redirect.ServerIP.AddressFamily == AddressFamily.InterNetworkV6
+                                               ? new IPEndPoint(redirect.ServerIP, redirect.ServerPort)
+                                               : backend;
+                    outbound = await Socks5TestClient.ConnectAsync(fake.EndPoint, requested, timeoutMs, token);
                 }
                 else
                 {
@@ -1284,7 +1364,7 @@ internal static class ForwardedTcpSuite
         {
             foreach (UnicastIPAddressInformation unicast in adapter.GetIPProperties().UnicastAddresses)
             {
-                if (!unicast.Address.Equals(wanted))
+                if (!SocketHelpers.SameAddress(unicast.Address, wanted))
                 {
                     continue;
                 }
@@ -1328,6 +1408,7 @@ internal sealed class Socks5FakeServer : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _loop;
     private int _connections;
+    private int _v6Connections;
 
     public Socks5FakeServer()
     {
@@ -1338,7 +1419,11 @@ internal sealed class Socks5FakeServer : IAsyncDisposable
 
     public IPEndPoint EndPoint { get; }
 
+    public IPEndPoint? DialOverride { get; set; }
+
     public int Connections => Volatile.Read(ref _connections);
+
+    public int V6Connections => Volatile.Read(ref _v6Connections);
 
     private async Task AcceptLoopAsync()
     {
@@ -1359,7 +1444,7 @@ internal sealed class Socks5FakeServer : IAsyncDisposable
         }
     }
 
-    private static async Task ServeAsync(Socket client)
+    private async Task ServeAsync(Socket client)
     {
         using (client)
         {
@@ -1401,14 +1486,19 @@ internal sealed class Socks5FakeServer : IAsyncDisposable
                 byte[] portBytes = new byte[2];
                 await ReadExactlyAsync(client, portBytes);
                 int port = BinaryPrimitives.ReadUInt16BigEndian(portBytes);
+                if (destination.AddressFamily == AddressFamily.InterNetworkV6)
+                {
+                    Interlocked.Increment(ref _v6Connections);
+                }
 
                 await client.SendAsync(new byte[] { 0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0 });
 
-                using Socket outbound = new(destination.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
+                IPEndPoint dial = DialOverride ?? new IPEndPoint(destination, port);
+                using Socket outbound = new(dial.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
                 {
                     NoDelay = true,
                 };
-                await outbound.ConnectAsync(new IPEndPoint(destination, port), _stopToken);
+                await outbound.ConnectAsync(dial, _stopToken);
                 await PumpBound(client, outbound);
             }
             catch (Exception)

@@ -41,6 +41,7 @@ if (-not (Test-Path -LiteralPath $Controller)) { "缺少 Controller：$Controlle
 if (-not (Test-Path -LiteralPath $Config)) { "缺少 config：$Config"; exit 2 }
 Remove-Item -LiteralPath $LogPath, "$LogPath.err" -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $StopFile -Force -ErrorAction SilentlyContinue
+if ($ClientReport) { Remove-Item -LiteralPath $ClientReport -Force -ErrorAction SilentlyContinue }
 
 # 上一次运行可能留下 stop 文件；必须在启动前确保不存在，否则 controller 会立即退出。
 if (Test-Path -LiteralPath $StopFile) { throw "stop 文件无法删除：$StopFile" }

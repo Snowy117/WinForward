@@ -6,9 +6,14 @@ multi:  two targets are connected concurrently from one bound source port; each 
 swap:   connection 1 is established and echoed, then (after --gap seconds) connection 2 is opened
         and echoed. The suite changes the forwarded blob between the two connections; the old
         entry must keep its upstream and the new one must use the new rule.
+
+Targets may be IPv4 (192.168.100.99:40250) or scoped link-local IPv6 (fe80::99%eth0:40250).
+--bind-address is repeatable: one value applies to every target, or one value per --target
+(needed for cross-ingress connections on different Linux interfaces).
 """
 import argparse
 import hashlib
+import ipaddress
 import socket
 import sys
 import time
@@ -18,17 +23,35 @@ def payload_for(tag, size):
     return bytes(((tag * 53 + index * 17 + 11) & 0xFF) for index in range(size))
 
 
+def parse_endpoint(text):
+    host, port = text.rsplit(":", 1)
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    return host, int(port)
+
+
+def address_version(host):
+    try:
+        return ipaddress.ip_address(host.split("%")[0]).version
+    except ValueError:
+        return 4
+
+
 def connect(target, bind_address, source_port, timeout):
-    host, port = target.rsplit(":", 1)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    host, port = parse_endpoint(target)
+    family = socket.AF_INET6 if address_version(host) == 6 else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     except OSError:
         pass
-    sock.bind((bind_address, source_port))
+    if not bind_address:
+        bind_address = "::" if family == socket.AF_INET6 else "0.0.0.0"
+    bind_sockaddr = socket.getaddrinfo(bind_address, source_port, family, socket.SOCK_STREAM)[0][4]
+    sock.bind(bind_sockaddr)
     sock.settimeout(timeout)
-    sock.connect((host, int(port)))
+    sock.connect(socket.getaddrinfo(host, port, family, socket.SOCK_STREAM)[0][4])
     return sock
 
 
@@ -47,8 +70,8 @@ def report_lines(results, verify, timeout):
     for line in results:
         print(f"[client] {line}", flush=True)
         if verify:
-            host, port = verify.rsplit(":", 1)
-            with socket.create_connection((host, int(port)), timeout=timeout) as sink:
+            host, port = parse_endpoint(verify)
+            with socket.create_connection((host, port), timeout=timeout) as sink:
                 sink.sendall((line + "\n").encode())
     return 0 if all("ok=1" in line for line in results) else 1
 
@@ -66,7 +89,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("multi", "swap"), required=True)
     parser.add_argument("--target", action="append", required=True)
-    parser.add_argument("--bind-address", default="0.0.0.0")
+    parser.add_argument("--bind-address", action="append", default=[],
+                        help="local bind address (repeatable: one for all targets or one per target)")
     parser.add_argument("--source-port", type=int, required=True)
     parser.add_argument("--second-source-port", type=int, default=0)
     parser.add_argument("--payload-size", type=int, default=2048)
@@ -74,6 +98,14 @@ def main():
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--verify", default="")
     args = parser.parse_args()
+
+    bind_addresses = args.bind_address or [""]
+    if len(bind_addresses) != 1 and len(bind_addresses) != len(args.target):
+        print("--bind-address must be given once or once per --target", file=sys.stderr)
+        return 2
+
+    def bind_for(index):
+        return bind_addresses[0] if len(bind_addresses) == 1 else bind_addresses[index]
 
     results = []
     if args.mode == "multi":
@@ -83,8 +115,8 @@ def main():
         sockets = []
         try:
             # 先建立两条连接（同一个源端口），再各发各收；并发窗口由套件的 accept 循环保持。
-            for target in args.target:
-                sockets.append(connect(target, args.bind_address, args.source_port, args.timeout))
+            for index, target in enumerate(args.target):
+                sockets.append(connect(target, bind_for(index), args.source_port, args.timeout))
             payloads = [payload_for(index + 1, args.payload_size) for index in range(2)]
             for index, sock in enumerate(sockets):
                 sock.sendall(payloads[index])
@@ -102,7 +134,7 @@ def main():
     else:
         target = args.target[0]
         payload = payload_for(1, args.payload_size)
-        first = connect(target, args.bind_address, args.source_port, args.timeout)
+        first = connect(target, bind_for(0), args.source_port, args.timeout)
         try:
             received = exchange(first, payload)
             results.append(result_line(target, first, payload, received))
@@ -120,7 +152,7 @@ def main():
 
         payload = payload_for(2, args.payload_size)
         second_port = args.second_source_port or 0
-        with connect(target, args.bind_address, second_port, args.timeout) as second:
+        with connect(target, bind_for(0), second_port, args.timeout) as second:
             received = exchange(second, payload)
             results.append(result_line(target, second, payload, received))
 

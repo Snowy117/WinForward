@@ -132,9 +132,9 @@ internal static class ForwardedUdpSuite
         Install(device, blob, 1, listenerPort, localIp, family);
         device.ResetForwardedStats();
 
-        using var listener = BindUdp(listenerPort);
-        using var backendSocket = BindEphemeralUdp();
-        using Socket? decoy = TryBindDecoy(remoteAddress, remotePort);
+        using var listener = BindUdp(listenerPort, FamilyOf(family));
+        using var backendSocket = BindEphemeralUdp(backend.AddressFamily);
+        using Socket? decoy = TryBindDecoy(remoteAddress, remotePort, ifIndex);
         using TcpListener? verifyListener = noVerify ? null : StartVerifyListener(verifyPort);
         Console.WriteLine($"[forwarded-udp] READY phase=core listener={listenerPort} " +
                           $"verify_port={(noVerify ? "skipped" : verifyPort.ToString())} " +
@@ -148,11 +148,14 @@ internal static class ForwardedUdpSuite
         {
             byte[] buffer = new byte[65535];
             byte[] echoBuffer = new byte[65535];
-            EndPoint any = new IPEndPoint(IPAddress.Any, 0);
+            // listener 与 backend 可能处于不同地址族（v6 listener + v4 backend），
+            // 必须为每个 socket 使用同族的 receive-from 占位端点。
+            EndPoint listenerAny = AnyFor(listener.AddressFamily);
+            EndPoint backendAny = AnyFor(backendSocket.AddressFamily);
             while (records.Count < expectDatagrams)
             {
                 SocketReceiveFromResult received =
-                    await listener.ReceiveFromAsync(buffer, SocketFlags.None, any, window.Token);
+                    await listener.ReceiveFromAsync(buffer, SocketFlags.None, listenerAny, window.Token);
                 if (received.RemoteEndPoint is not IPEndPoint client || received.ReceivedBytes <= 0)
                 {
                     continue;
@@ -163,7 +166,7 @@ internal static class ForwardedUdpSuite
                 byte[] payload = buffer.AsSpan(0, received.ReceivedBytes).ToArray();
                 await backendSocket.SendToAsync(payload, SocketFlags.None, backend, window.Token);
                 SocketReceiveFromResult echo =
-                    await backendSocket.ReceiveFromAsync(echoBuffer, SocketFlags.None, any, window.Token);
+                    await backendSocket.ReceiveFromAsync(echoBuffer, SocketFlags.None, backendAny, window.Token);
                 await listener.SendToAsync(echoBuffer.AsMemory(0, echo.ReceivedBytes), SocketFlags.None, client,
                                            window.Token);
             }
@@ -181,8 +184,8 @@ internal static class ForwardedUdpSuite
         {
             Check.True(record.QueryOk, "UDP redirect 查询命中", record.Detail);
             Check.Equal(remotePort, record.ServerPort, "redirect 表记录原始服务器端口");
-            Check.True(record.ServerAddress.Equals(remoteAddress), "redirect 表记录原始服务器地址",
-                       $"{record.ServerAddress}");
+            Check.True(SocketHelpers.SameAddress(record.ServerAddress, remoteAddress),
+                       "redirect 表记录原始服务器地址", $"{record.ServerAddress}");
             Check.Equal(0, record.UpstreamId, "redirect 表记录 upstream_id");
             Check.Equal((byte)Protocol.RuleProtocolUdp, record.Protocol, "redirect 表 protocol=17");
         }
@@ -216,7 +219,7 @@ internal static class ForwardedUdpSuite
             byte[] decoyBuffer = new byte[65535];
             while (decoy.Available > 0)
             {
-                EndPoint decoyPeer = new IPEndPoint(IPAddress.Any, 0);
+                EndPoint decoyPeer = AnyFor(decoy.AddressFamily);
                 int decoyBytes = decoy.ReceiveFrom(decoyBuffer, ref decoyPeer);
                 if (decoyBytes <= 0)
                 {
@@ -277,7 +280,7 @@ internal static class ForwardedUdpSuite
         Install(device, blob, permitFirstPort > 0 ? 2u : 1u, listenerPort, localIp, family);
         device.ResetForwardedStats();
 
-        using var listener = BindUdpFor(listenerPort, remoteAddress.AddressFamily);
+        using var listener = BindUdp(listenerPort, remoteAddress.AddressFamily);
         Console.WriteLine($"[forwarded-udp] READY phase=fragment listener={listenerPort} " +
                           $"remote={remoteAddress}:{remotePort} expect_fragments={expectFragments} " +
                           $"permit_first_port={permitFirstPort} expect=no-datagram");
@@ -285,9 +288,7 @@ internal static class ForwardedUdpSuite
         Console.Out.Flush();
 
         bool received = false;
-        EndPoint fragmentAny = remoteAddress.AddressFamily == AddressFamily.InterNetworkV6
-                                   ? new IPEndPoint(IPAddress.IPv6Any, 0)
-                                   : new IPEndPoint(IPAddress.Any, 0);
+        EndPoint fragmentAny = AnyFor(remoteAddress.AddressFamily);
         using (var window = new CancellationTokenSource(Math.Min(waitMs, fragmentTimeoutMs)))
         {
             try
@@ -330,7 +331,7 @@ internal static class ForwardedUdpSuite
         Install(device, blob, 1, listenerPort, localIp, family);
         device.ResetForwardedStats();
 
-        using var host = BindUdpOn(hostFragmentPort, hostFragmentAddress);
+        using var host = BindUdpOn(hostFragmentPort, SocketHelpers.WithScope(hostFragmentAddress, ifIndex));
         Console.WriteLine($"[forwarded-udp] READY phase=fragment-host host={hostFragmentAddress}:{hostFragmentPort} " +
                           $"remote={remoteAddress}:{remotePort} expect=host-datagram");
 
@@ -342,9 +343,7 @@ internal static class ForwardedUdpSuite
         {
             try
             {
-                EndPoint hostAny = hostFragmentAddress.AddressFamily == AddressFamily.InterNetworkV6
-                                       ? new IPEndPoint(IPAddress.IPv6Any, 0)
-                                       : new IPEndPoint(IPAddress.Any, 0);
+                EndPoint hostAny = AnyFor(hostFragmentAddress.AddressFamily);
                 var result = await host.ReceiveFromAsync(new byte[65535], SocketFlags.None,
                                                          hostAny, window.Token);
                 received = result.ReceivedBytes > 0;
@@ -387,7 +386,7 @@ internal static class ForwardedUdpSuite
         Install(device, blob, 1, listenerPort, localIp, family);
         device.ResetForwardedStats();
 
-        using var listener = BindUdp(listenerPort);
+        using var listener = BindUdp(listenerPort, FamilyOf(family));
         Console.WriteLine($"[forwarded-udp] READY phase=capacity listener={listenerPort} " +
                           $"remote={remoteAddress}:{remotePort} capacity={capacity} sweep={capacity + 1} base={sweepBase}");
         Console.Out.Flush();
@@ -396,7 +395,7 @@ internal static class ForwardedUdpSuite
         using (var window = new CancellationTokenSource(Math.Max(waitMs, 180000)))
         {
             byte[] buffer = new byte[65535];
-            EndPoint any = new IPEndPoint(IPAddress.Any, 0);
+            EndPoint any = AnyFor(FamilyOf(family));
             while (received < capacity)
             {
                 using var slice = CancellationTokenSource.CreateLinkedTokenSource(window.Token);
@@ -446,7 +445,7 @@ internal static class ForwardedUdpSuite
         Install(device, blob, 1, listenerPort, localIp, family);
         device.ResetForwardedStats();
 
-        using var listener = BindUdp(listenerPort);
+        using var listener = BindUdp(listenerPort, FamilyOf(family));
         Console.WriteLine($"[forwarded-udp] READY phase=reject listener={listenerPort} " +
                           $"remote={remoteAddress}:{remotePort} upstream={upstream.EndPoint} expect=no-response");
         Console.Out.Flush();
@@ -456,7 +455,7 @@ internal static class ForwardedUdpSuite
         using (var window = new CancellationTokenSource(Math.Min(waitMs, 10000)))
         {
             byte[] buffer = new byte[65535];
-            EndPoint any = new IPEndPoint(IPAddress.Any, 0);
+            EndPoint any = AnyFor(FamilyOf(family));
             while (received < 3)
             {
                 SocketReceiveFromResult result =
@@ -513,7 +512,7 @@ internal static class ForwardedUdpSuite
         Install(device, blob, 2, listenerPort, localIp, family);
         device.ResetForwardedStats();
 
-        using var listener = BindUdp(listenerPort);
+        using var listener = BindUdp(listenerPort, FamilyOf(family));
         using var verifyListener = StartVerifyListener(verifyPort);
         var associations = new Dictionary<AssociationKey, Socks5UdpProbeClient>();
         Console.WriteLine($"[forwarded-udp] READY phase=socks5 listener={listenerPort} verify_port={verifyPort} " +
@@ -528,7 +527,7 @@ internal static class ForwardedUdpSuite
             while (records.Count < expectDatagrams * 2)
             {
                 byte[] buffer = new byte[65535];
-                EndPoint any = new IPEndPoint(IPAddress.Any, 0);
+                EndPoint any = AnyFor(FamilyOf(family));
                 SocketReceiveFromResult received =
                     await listener.ReceiveFromAsync(buffer, SocketFlags.None, any, window.Token);
                 if (received.RemoteEndPoint is not IPEndPoint client || received.ReceivedBytes <= 0)
@@ -567,6 +566,11 @@ internal static class ForwardedUdpSuite
         Check.Equal(1, upstream1.Associations, "upstream 1 只收到一次 UDP ASSOCIATE（关联复用）");
         Check.Equal(0, upstream0.AssociationFailures, "upstream 0 没有失败");
         Check.Equal(0, upstream1.AssociationFailures, "upstream 1 没有失败");
+        if (remoteAddress.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            Check.AtLeast(expectDatagrams, upstream0.V6Datagrams, "upstream 0 收到 atyp=4 UDP 数据");
+            Check.AtLeast(expectDatagrams, upstream1.V6Datagrams, "upstream 1 收到 atyp=4 UDP 数据");
+        }
         Check.AtLeast(2, (long)stats.UdpCreated, "两个目的地各建一条表项");
         Check.AtLeast(expectDatagrams * 2, (long)stats.UdpIngress, "入口 DNAT 注入全部 datagram");
         Check.AtLeast(expectDatagrams * 2, (long)stats.UdpReturn, "回程 SNAT 注入全部 datagram");
@@ -615,7 +619,7 @@ internal static class ForwardedUdpSuite
         device.SetForwardedConfig(DisabledConfig(listenerPort));
         device.ResetForwardedStats();
 
-        using var listener = BindUdp(listenerPort);
+        using var listener = BindUdp(listenerPort, FamilyOf(family));
         Console.WriteLine($"[forwarded-udp] READY phase=fail listener={listenerPort} " +
                           $"verify_port={listenerPort + 1000} remote={remoteAddress}:{remotePort} expect=no-datagram");
         Console.Out.Flush();
@@ -626,7 +630,7 @@ internal static class ForwardedUdpSuite
             try
             {
                 _ = await listener.ReceiveFromAsync(new byte[65535], SocketFlags.None,
-                                                    new IPEndPoint(IPAddress.Any, 0), window.Token);
+                                                    AnyFor(FamilyOf(family)), window.Token);
                 received = true;
             }
             catch (OperationCanceledException)
@@ -694,7 +698,26 @@ internal static class ForwardedUdpSuite
         return query;
     }
 
-    private static Socket BindUdp(int port) => BindUdpFor(port, AddressFamily.InterNetwork);
+    private static AddressFamily FamilyOf(byte family) =>
+        family == 6 ? AddressFamily.InterNetworkV6 : AddressFamily.InterNetwork;
+
+    private static EndPoint AnyFor(AddressFamily family) =>
+        family == AddressFamily.InterNetworkV6
+            ? new IPEndPoint(IPAddress.IPv6Any, 0)
+            : new IPEndPoint(IPAddress.Any, 0);
+
+    private static Socket BindUdp(int port, AddressFamily family)
+    {
+        Socket socket = new(family, SocketType.Dgram, ProtocolType.Udp);
+        if (family == AddressFamily.InterNetworkV6)
+        {
+            socket.DualMode = false;
+        }
+
+        socket.Bind(new IPEndPoint(family == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, port));
+        return socket;
+    }
+
     private static Socket BindUdpOn(int port, IPAddress address)
     {
         Socket socket = new(address.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
@@ -707,31 +730,19 @@ internal static class ForwardedUdpSuite
         return socket;
     }
 
-    private static Socket BindUdpFor(int port, AddressFamily family)
-    {
-        Socket socket = new(family, SocketType.Dgram, ProtocolType.Udp);
-        if (family == AddressFamily.InterNetworkV6)
-        {
-            socket.DualMode = false;
-            socket.Bind(new IPEndPoint(IPAddress.IPv6Any, port));
-        }
-        else
-        {
-            socket.Bind(new IPEndPoint(IPAddress.Any, port));
-        }
-
-        return socket;
-    }
-
-
-    private static Socket? TryBindDecoy(IPAddress remoteAddress, int remotePort)
+    private static Socket? TryBindDecoy(IPAddress remoteAddress, int remotePort, uint ifIndex)
     {
         for (int attempt = 0; attempt < 30; ++attempt)
         {
             try
             {
-                Socket decoy = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-                decoy.Bind(new IPEndPoint(remoteAddress, remotePort));
+                Socket decoy = new(remoteAddress.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
+                if (remoteAddress.AddressFamily == AddressFamily.InterNetworkV6)
+                {
+                    decoy.DualMode = false;
+                }
+
+                decoy.Bind(new IPEndPoint(SocketHelpers.WithScope(remoteAddress, ifIndex), remotePort));
                 return decoy;
             }
             catch (SocketException exception) when (exception.SocketErrorCode == SocketError.AddressNotAvailable)
@@ -749,10 +760,15 @@ internal static class ForwardedUdpSuite
         return null;
     }
 
-    private static Socket BindEphemeralUdp()
+    private static Socket BindEphemeralUdp(AddressFamily family)
     {
-        Socket socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+        Socket socket = new(family, SocketType.Dgram, ProtocolType.Udp);
+        if (family == AddressFamily.InterNetworkV6)
+        {
+            socket.DualMode = false;
+        }
+
+        socket.Bind(new IPEndPoint(family == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
         return socket;
     }
 
@@ -1080,7 +1096,7 @@ internal static class ForwardedUdpSuite
         {
             foreach (UnicastIPAddressInformation unicast in adapter.GetIPProperties().UnicastAddresses)
             {
-                if (!unicast.Address.Equals(wanted))
+                if (!SocketHelpers.SameAddress(unicast.Address, wanted))
                 {
                     continue;
                 }
@@ -1141,6 +1157,7 @@ internal sealed class Socks5UdpFakeServer : IAsyncDisposable
     private int _associations;
     private int _associationFailures;
     private int _datagrams;
+    private int _v6Datagrams;
 
     public Socks5UdpFakeServer(bool rejectAssociate = false)
     {
@@ -1157,6 +1174,8 @@ internal sealed class Socks5UdpFakeServer : IAsyncDisposable
     public int AssociationFailures => Volatile.Read(ref _associationFailures);
 
     public int Datagrams => Volatile.Read(ref _datagrams);
+
+    public int V6Datagrams => Volatile.Read(ref _v6Datagrams);
 
     private async Task AcceptLoopAsync()
     {
@@ -1250,6 +1269,11 @@ internal sealed class Socks5UdpFakeServer : IAsyncDisposable
                     }
 
                     Interlocked.Increment(ref _datagrams);
+                    if (buffer[3] == 0x04)
+                    {
+                        Interlocked.Increment(ref _v6Datagrams);
+                    }
+
                     await data.SendToAsync(buffer.AsMemory(0, received.ReceivedBytes), SocketFlags.None,
                                            received.RemoteEndPoint, session.Token);
                 }
