@@ -13,6 +13,12 @@ internal static partial class StartupLog
     [LoggerMessage(Level = LogLevel.Information, EventName = "cli.target.local", Message = "Local target {Target} is available at {Endpoint}.")]
     public static partial void LocalTargetAvailable(ILogger logger, string target, string endpoint);
 
+    [LoggerMessage(Level = LogLevel.Information, EventName = "cli.backend.selected", Message = "Backend driver provider {Provider} selected (WinForwardKernel.DriverServiceName: {DriverServiceName}).")]
+    public static partial void BackendSelected(ILogger logger, string provider, string driverServiceName);
+
+    [LoggerMessage(Level = LogLevel.Error, EventName = "cli.backend.unavailable", Message = "The WinForward.Kernel backend is not available in this build; set WinForward.BackendDriver.Provider to WinpkFilter and restart. The Kernel driver and its host TCP data path arrive in a later milestone.")]
+    public static partial void KernelBackendUnavailable(ILogger logger);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Pre-flight capture scope resolved to {Adapters} adapter(s) in tunnel mode.")]
     public static partial void CaptureScopePreflightResolved(ILogger logger, int adapters);
 

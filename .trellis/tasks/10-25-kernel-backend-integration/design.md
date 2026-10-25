@@ -132,8 +132,8 @@ repository-retirement decision and the migration note in `kernel/MIGRATION.md`.
 ```
 
 - `BackendDriver` is optional; absent means `Provider = WinpkFilter` and the current defaults.
-- `Provider` is case-sensitive PascalCase like every other key; accepted values are exactly
-  `WinpkFilter` and `WinForward.Kernel`.
+- `Provider` values are matched case-insensitively and canonicalized to `WinpkFilter` /
+  `WinForward.Kernel`; keys themselves remain case-sensitive.
 - `WinpkFilter` holds WinpkFilter-only settings; `KernelPassCache` moves here from the top level.
 - `WinForwardKernel` holds Kernel-only settings. Milestone 1 exposes only `DriverServiceName`
   (default `wfprobe`) for diagnostics and driver-operation messages; other keys are added later

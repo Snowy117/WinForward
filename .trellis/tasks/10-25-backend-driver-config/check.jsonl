@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the implemented config shape and capability gate against the parent design."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/gap-analysis.md", "reason": "Verify each Kernel capability refusal maps to a real gap and no unsupported capability is silently accepted."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify strict schema behavior, analyzer/format/test gates and no weakened validation."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify every refusal path is path-qualified, fail-closed and not a silent fallback."}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "Verify the host/forwarded domain and selector semantics were not changed for WinpkFilter."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Verify the 511-byte/process-path boundary and the deferred existence check are stated accurately."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify the new backend events have stable identities, levels and no sensitive path leakage."}

@@ -127,10 +127,17 @@ capture path.
 
 ## Configuration
 
-`WinForward.KernelPassCache` is a boolean, default **false**. Enabled, it claims the driver's static
-filter table (see ownership); disabled, no cache object exists, the executor observer is null, and
-the driver table is never touched. The README key table and `appsettings.example.json` carry the
-key. The strict reader rejects wrong casing/types like any other key.
+`WinForward.BackendDriver.WinpkFilter.KernelPassCache` is a boolean, default **false**. Enabled, it
+claims the driver's static filter table (see ownership); disabled, no cache object exists, the
+executor observer is null, and the driver table is never touched. The README key table and
+`appsettings.example.json` carry the key. The strict reader rejects wrong casing/types like any other
+key.
+
+The top-level `WinForward.KernelPassCache` spelling is a one-release migration alias: under
+`Provider = WinpkFilter` it still resolves to this key and emits a validation warning naming the
+nested path, setting both locations is an ambiguity error, and under `Provider = WinForward.Kernel`
+the top-level key is an error — together with the whole `WinpkFilter` object, which is rejected as an
+unselected-provider object.
 
 ## Measured behavior (Windows, 2026-10-18)
 

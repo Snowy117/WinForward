@@ -32,9 +32,17 @@ public sealed partial class WinForwardConfigDto
     public int? SetupWorkerCount { get; init; }
 
     /// <summary>
-    /// Opts into mirroring decided policy passes into the NDISAPI static filter table. Off by default:
-    /// enabling it claims the driver's process-global table and accepts a bounded 5-tuple reuse
-    /// window, which is a deliberate operator decision.
+    /// Backend-driver selection. Absent means <see cref="BackendProvider.WinpkFilter"/> with the code
+    /// defaults, which is exactly the configuration every pre-existing document describes.
+    /// </summary>
+    [JsonPropertyName("BackendDriver")]
+    public BackendDriverDto? BackendDriver { get; init; }
+
+    /// <summary>
+    /// The legacy top-level spelling of the WinpkFilter pass mirror. It is accepted only under
+    /// <see cref="BackendProvider.WinpkFilter"/>, maps to
+    /// <c>BackendDriver.WinpkFilter.KernelPassCache</c>, and warns so the operator moves the key during
+    /// the one-release migration window.
     /// </summary>
     [JsonPropertyName("KernelPassCache")]
     public bool? KernelPassCache { get; init; }
@@ -182,6 +190,15 @@ public sealed partial record ValidatedConfiguration(
     /// threshold) surfaced alongside an otherwise valid configuration.
     /// </summary>
     public IReadOnlyList<ConfigDiagnostic> Warnings { get; init; } = [];
+
+    /// <summary>
+    /// The selected backend driver and its provider-specific settings. The positional
+    /// <see cref="KernelPassCache"/> parameter is the WinpkFilter runtime's projection of
+    /// <see cref="BackendDriverConfiguration.KernelPassCache"/> until that runtime reads this property;
+    /// the loader sets both from one resolved value, and a direct construction that passes only the
+    /// positional argument leaves this property at <see cref="BackendDriverConfiguration.Default"/>.
+    /// </summary>
+    public BackendDriverConfiguration BackendDriver { get; init; } = BackendDriverConfiguration.Default;
 }
 
 public static partial class ConfigurationLoader
@@ -214,6 +231,7 @@ public static partial class ConfigurationLoader
         var warnings = new List<ConfigDiagnostic>();
         var targets = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase);
         var limits = ConfigurationLimits.Parse(dto, errors, warnings);
+        var backendDriver = ConfigurationBackendDriver.Resolve(dto, errors, warnings);
 
         ConfigurationTargets.Validate(dto, targets, errors, warnings);
 
@@ -221,6 +239,13 @@ public static partial class ConfigurationLoader
         var forwardedRules = new List<PolicyRule>();
         var hostFallback = ConfigurationRules.ParseDomain(dto.Host, FlowOriginKind.Host, targets, hostRules, errors);
         var forwardedFallback = ConfigurationRules.ParseDomain(dto.Forwarded, FlowOriginKind.Forwarded, targets, forwardedRules, errors);
+
+        // The gate names rules by configuration index, which is the parsed index only while every rule
+        // parsed; a document that already failed ordinary rule validation gets that diagnostic alone.
+        if (backendDriver.Provider == BackendProvider.WinForwardKernel && errors.Count == 0)
+        {
+            ConfigurationKernelCapabilities.Validate(dto, hostRules, forwardedRules, forwardedFallback ?? FlowAction.Pass, errors, warnings);
+        }
 
         ValidateFailureActions(dto, errors);
 
@@ -243,10 +268,11 @@ public static partial class ConfigurationLoader
             limits.SetupWorkerCount,
             limits.UdpSessionCapacity,
             limits.UdpRelayReceiveBufferBytes,
-            dto.KernelPassCache ?? false)
+            backendDriver.KernelPassCache)
         {
             Warnings = warnings,
             UdpSessionIdleTimeout = limits.UdpSessionIdleTimeout,
+            BackendDriver = backendDriver,
         };
         diagnostics = [];
         return true;

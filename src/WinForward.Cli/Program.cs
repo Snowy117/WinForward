@@ -150,6 +150,13 @@ internal static class Program
         {
             ReportResolvedRun(loaded, logger);
             foreach (var warning in loaded.Validated.Warnings) StartupLog.ConfigurationWarning(logger, warning.ToString());
+            if (loaded.Validated.BackendDriver.Provider != BackendProvider.WinpkFilter)
+            {
+                // Refused before RunInterceptionAsync opens NDISAPI: a Kernel-provider run must never
+                // fall back to WinpkFilter's capture path and pretend the selection was honoured.
+                StartupLog.KernelBackendUnavailable(logger);
+                return 1;
+            }
             return await RunInterceptionAsync(loaded.Validated, loggerFactory, logger).ConfigureAwait(false);
         }
         catch (DllNotFoundException)
@@ -203,6 +210,7 @@ internal static class Program
             relayBufferKiB,
             idleSeconds,
             processPaths);
+        StartupLog.BackendSelected(logger, configuration.BackendDriver.ProviderName, configuration.BackendDriver.DriverServiceName);
 
         foreach (var target in configuration.Targets.Values.OrderBy(static target => target.Name, StringComparer.Ordinal))
         {
@@ -445,6 +453,7 @@ internal static class Program
 
         PrintSources(loaded.Sources);
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Configuration is valid. tcpFlowCapacity: {loaded.Validated.TcpFlowCapacity}"));
+        Console.WriteLine($"Provider: {loaded.Validated.BackendDriver.ProviderName}");
         foreach (var warning in loaded.Validated.Warnings)
         {
             Console.Error.WriteLine($"warning {warning}");

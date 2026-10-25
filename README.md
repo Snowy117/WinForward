@@ -138,6 +138,10 @@ fully before interception starts and kept immutable for the lifetime of a run.
     "LocalTargets": [
       { "Name": "dns-in", "Host": "127.0.0.1", "Port": 53 }
     ],
+    "BackendDriver": {
+      "Provider": "WinpkFilter",
+      "WinpkFilter": { "KernelPassCache": false }
+    },
     "Host": {
       "FallbackAction": "pass",
       "Rules": [
@@ -166,12 +170,15 @@ fully before interception starts and kept immutable for the lifetime of a run.
 }
 ```
 
-The section holds 27 key names across five objects; `Host`, `Name`, and `Port` are each used by more
+The section holds 32 key names across eight objects; `Host`, `Name`, and `Port` are each used by more
 than one of them:
 
 | Object | Keys |
 | --- | --- |
-| `WinForward` (12) | `Socks5Servers`, `LocalTargets`, `Host`, `Forwarded`, `ProxyUnavailableAction`, `ProcessingFailureAction`, `TcpFlowCapacity`, `SetupWorkerCount`, `UdpSessionCapacity`, `UdpRelayReceiveBufferKb`, `UdpSessionIdleSeconds`, `KernelPassCache` |
+| `WinForward` (12) | `Socks5Servers`, `LocalTargets`, `Host`, `Forwarded`, `ProxyUnavailableAction`, `ProcessingFailureAction`, `TcpFlowCapacity`, `SetupWorkerCount`, `UdpSessionCapacity`, `UdpRelayReceiveBufferKb`, `UdpSessionIdleSeconds`, `BackendDriver` |
+| a `BackendDriver` object (3) | `Provider`, `WinpkFilter`, `WinForwardKernel` |
+| a `WinpkFilter` object (1) | `KernelPassCache` |
+| a `WinForwardKernel` object (1) | `DriverServiceName` |
 | a `Host` or `Forwarded` domain (2) | `FallbackAction`, `Rules` |
 | a `Socks5Servers` entry (6) | `Name`, `Host`, `Port`, `Username`, `Password`, `UdpOverTcp` |
 | a `LocalTargets` entry (3) | `Name`, `Host`, `Port` |
@@ -198,6 +205,29 @@ ranges — only key names changed case.
   `Host` that is not a loopback address is accepted with a validation warning naming the address
   and both consequences: the payload leaves this host in the clear, and the endpoint's replies are
   attributed to the flow's original destination.
+- `BackendDriver`: optional backend-driver selection; omitting the section selects `WinpkFilter`.
+  `Provider` names the interception backend — `WinpkFilter` (the default) or `WinForward.Kernel`,
+  matched case-insensitively — and the object holds exactly one nested object per provider. The
+  unselected provider's object must be absent and unknown keys are errors, so a provider mismatch is
+  reported rather than silently ignored. `WinForwardKernel.DriverServiceName` names the Kernel
+  driver's device/service (`wfprobe` when omitted) and must not be empty.
+- `BackendDriver.WinpkFilter.KernelPassCache`: optional kernel-side pass mirror, `true` or `false`,
+  default `false`. When it is enabled, a TCP flow the policy decides `pass` is copied into the
+  NDISAPI driver's static filter table
+  as two exact-match `FILTER_PACKET_PASS` rules, so the flow's later packets take the driver's normal
+  network path instead of crossing into user mode and back; the pump stops seeing them. The table
+  belongs to the driver, not to this process: enabling the feature claims exclusive ownership of it (a
+  second WinpkFilter client's rules would be replaced), and it is PASS-only by construction, so a crash
+  leaves at worst a benign pass-through rule that the next start with the feature enabled clears. Only
+  TCP flows are mirrored — UDP, WinForward's own traffic, non-flow frames, and the reverse leg of a
+  proxied flow keep today's path.
+  A rule is removed 2 s after its last matched packet, which is also the window in which a
+  recycled TCP 5-tuple could inherit it. When the feature is off, no cache object exists and the
+  driver's table is never touched.
+  The top-level `WinForward.KernelPassCache` spelling is a one-release migration alias: under
+  `Provider = WinpkFilter` it is still read, resolves to this key, and emits a validation warning
+  naming the new location; setting both locations is an ambiguity error, and under
+  `Provider = WinForward.Kernel` the top-level key is an error.
 - `Host` / `Forwarded`: the two policy domains. `Host` is **required** and governs flows the machine
   itself originates; `Forwarded` is optional and governs flows observed arriving on another NIC.
   Each domain owns its own ordered `Rules` list and its own `FallbackAction`. A rule belongs to the
@@ -238,19 +268,6 @@ ranges — only key names changed case.
   `4096` are accepted with a validation warning about port-pool pressure. Omitting the field
   deliberately tightens the limit from the previous implicit 16,384 sessions; configure a higher
   value explicitly (max 8192) if more concurrent flows are required.
-- `KernelPassCache`: optional kernel-side pass mirror, `true` or `false`, default `false`. When it is
-  enabled, a TCP flow the policy decides `pass` is copied into the NDISAPI driver's static filter table
-  as two exact-match `FILTER_PACKET_PASS` rules, so the flow's later packets take the driver's normal
-  network path instead of crossing into user mode and back; the pump stops seeing them. The table
-  belongs to the driver, not to this process: enabling the feature claims exclusive ownership of it (a
-  second WinpkFilter client's rules would be replaced), and it is PASS-only by construction, so a crash
-  leaves at worst a benign pass-through rule that the next start with the feature enabled clears. Only
-  TCP flows are mirrored — UDP, WinForward's own traffic, non-flow frames, and the reverse leg of a
-  proxied flow keep today's path.
-  A rule is removed 2 s after its last matched packet, which is also the window in which a
-  recycled TCP 5-tuple could inherit it. When the feature is off, no cache object exists and the
-  driver's table is never touched.
-
 - `SetupWorkerCount`: optional setup worker count, `1..256`; omitted means automatic. It bounds the
   threads that drain new-flow setup — TCP handshake completion, deferred process attribution, and
   UDP session setup — so it is worth raising only when setup queueing is the measured bottleneck.
@@ -274,6 +291,34 @@ ranges — only key names changed case.
   control connection) are released with it; nothing is kept warm for a later flow. The sweeper's
   UDP cadence derives from this value: half the idle timeout, at least 5 s, and never longer than
   the 60 s main sweep interval (15 s at the default).
+
+**`Provider = WinForward.Kernel` — milestone-1 capability boundary.** The Kernel provider validates
+the whole configuration before it touches the driver and refuses, at the configuration path of the
+offending rule, the settings the Kernel driver cannot execute yet:
+
+- host `AdapterId` / `AdapterName` selectors (`WinForward.Host.Rules[i].AdapterId` /
+  `WinForward.Host.Rules[i].AdapterName`): the Kernel host layer classifies at ALE connect and has no
+  interface index;
+- a host `proxy` rule whose `Protocol` selector is absent or contains `udp`
+  (`WinForward.Host.Rules[i].Protocol`): there is no host UDP relay yet, so a Kernel host proxy rule
+  must select exactly `tcp`; `pass` and `block` rules may match any protocol, because the driver
+  executes those in-kernel;
+- the forwarded domain (`WinForward.Forwarded`): no forwarded rules and no non-default forwarded
+  fallback in this milestone;
+- `KernelPassCache`: it is a WinpkFilter-only setting, so the legacy top-level key is an error and
+  the nested `WinpkFilter` object is rejected as an unselected provider object.
+
+A host process selector must also fit the Kernel host-rule blob's 511 UTF-8 bytes as configured
+(`WinForward.Host.Rules[i].Process`). The Kernel compiler additionally resolves a path selector to an
+existing `\device\...` path and re-checks the limit on that resolved string, which is longer in
+general; that existence, normalization and strict-UTF-8/control-character validation belongs to the
+compiler and is not performed by configuration validation. Non-default `UdpSessionCapacity`,
+`UdpRelayReceiveBufferKb` and `UdpSessionIdleSeconds` are accepted with a warning that they are inert
+until host UDP lands, rather than being silently ignored; `TcpFlowCapacity` and `SetupWorkerCount`
+keep their meanings (active relay sessions and setup concurrency). `validate` prints the selected
+provider, and `run` with `Provider = WinForward.Kernel` exits `1` with an actionable diagnostic in
+this build: the Kernel backend and its host TCP data path arrive in a later milestone, and the run
+never silently falls back to WinpkFilter.
 
 **UDP resource shape.** Every live UDP flow owns its own authenticated association: the SOCKS5
 control connection that carried its `UDP ASSOCIATE`, and the relay socket that association
