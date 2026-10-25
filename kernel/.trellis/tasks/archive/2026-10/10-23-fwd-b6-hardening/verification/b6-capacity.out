@@ -1,0 +1,24 @@
+ASSERT PASS: 解析入口 ifIndex (ifindex=5 local-ip=192.168.100.2)
+ASSERT PASS: 驱动 ABI 版本与夹具一致 (expected=6 actual=6)
+ASSERT PASS: forwarded blob installed=1 (expected=1 actual=1)
+ASSERT PASS: forwarded 规则数回读一致 (expected=1 actual=1)
+ASSERT PASS: config 回读 enabled=1 (expected=1 actual=1)
+ASSERT PASS: config 回读 listener_port (expected=40400 actual=40400)
+ASSERT PASS: config 回读 family (expected=4 actual=4)
+[forwarded-udp] 看门狗已启动：120s 后恢复空 permit 表与 disabled config generation=13
+[forwarded-udp] READY phase=capacity listener=40400 remote=192.168.100.99:40250 capacity=4096 sweep=4097 base=41001
+[forwarded-udp] capacity stats: calls=8220 in=8208 out=12 redirected=4096 udp_created=4096 udp_ingress=4096 udp_return=0 udp_blocked=1 no_config=0 capacity=1 fragmented=0 inject_failed=0 return_failed=0 return_miss=0 expired=0 multi_nb=0 complete=4096/0
+ASSERT PASS: capacity：listener 收到全部 DNAT datagram (expected=4096 actual=4096)
+ASSERT PASS: capacity：表项数等于容量 (expected=4096 actual=4096)
+ASSERT PASS: capacity：第 N+1 条触发 udp_capacity (expected=1 actual=1)
+ASSERT PASS: capacity：第 N+1 条被 block (expected=1 actual=1)
+ASSERT PASS: capacity：容量内的 datagram 全部注入 (expected=4096 actual=4096)
+ASSERT PASS: capacity：每条 datagram 都成功注入或被 block (expected=4097 actual=4097)
+ASSERT PASS: capacity：classify_calls == no_write_right + in + out (expected=8220 actual=8220)
+ASSERT PASS: capacity：帧去向守恒 (expected=8220 actual=8220)
+ASSERT PASS: capacity：permitted == matched_permit + fallback_permit + udp_return_miss (expected=27 actual=27)
+ASSERT PASS: capacity：matched_redirect + udp_fragmented == tcp/udp ingress + blocked (expected=4097 actual=4097)
+ASSERT PASS: capacity：blocked 拆分含 UDP (expected=1 actual=1)
+ASSERT PASS: capacity：redirected == ingress + return（TCP+UDP） (expected=4096 actual=4096)
+ASSERT PASS: capacity：udp_blocked 拆分 (expected=1 actual=1)
+[forwarded-udp] 已恢复 rules=0 fallback=permit config=disabled

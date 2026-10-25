@@ -1,0 +1,33 @@
+{
+  "id": "quality-gates-modernization",
+  "name": "quality-gates-modernization",
+  "title": "仓库质量门禁与工具链现代化",
+  "description": "把散落的一次性脚本收敛成可移植、会失败的质量门禁（host check 入口 + 驱动侧死符号/警告检查 + VM 脚本去硬编码）",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Snowy117",
+  "assignee": "Snowy117",
+  "createdAt": "2026-10-21",
+  "completedAt": "2026-10-21",
+  "branch": "main",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-21-b1-host-gate",
+    "10-21-b2-driver-analysis",
+    "10-21-b3-windows-scripts",
+    "10-21-b4-mutation-markers",
+    "10-21-b5-forbidden-hook",
+    "10-21-b6-codeql"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

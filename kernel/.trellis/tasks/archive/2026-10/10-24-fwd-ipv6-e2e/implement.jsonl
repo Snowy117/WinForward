@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "Forwarded IPv6 数据流、地址族、分片闸、已知边界与计数器"}
+{"file": ".trellis/spec/backend/forwarded-rule-blob.md", "reason": "forwarded 规则 blob 的 family/CIDR/ABI 语义"}
+{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "wfprobe C# 工具链、命名与构建约定"}
+{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "若 E2E 暴露驱动缺陷，修复需遵守 C++ 内核方言与质量门禁"}
+{"file": ".trellis/tasks/10-24-fwd-ipv6-e2e/research/environment.md", "reason": "本机/VM 地址清单、夹具缺口与地址方案"}

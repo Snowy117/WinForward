@@ -1,0 +1,1431 @@
+===== 构建驱动 =====
+
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Building 'wfprobe' with toolset 'WindowsKernelModeDriver10.0' and the 'Desktop' target platform.
+  block_filters.cpp
+  probe_classify.cpp
+  redirect_target.cpp
+  process_path.cpp
+  probe_control.cpp
+  probe_driver.cpp
+  probe_forwarded.cpp
+  probe_forwarded_classify.cpp
+  probe_forwarded_frame.cpp
+  probe_forwarded_redirect.cpp
+  probe_forwarded_path.cpp
+  probe_forwarded_return.cpp
+  rule_table.cpp
+  Generating Code...
+  wfprobe.vcxproj -> C:\workspace\WinForward.Kernel\src\driver\x64\Debug\wfprobe.sys
+  Inf2Cat task was skipped as there were no inf files to process
+  
+  DrvCat task was skipped as there was no catalog file to process
+  
+
+ASSERT PASS: 驱动构建 0 warning (msbuild)
+===== 签名并安装 =====
+签名状态：Valid
+ASSERT PASS: 签名状态 Valid (Valid)
+服务状态：STATE              : 4  RUNNING
+ASSERT PASS: 驱动进入 RUNNING (STATE              : 4  RUNNING)
+驱动 SHA256：B57257DD5FAA1D65913BA35227B6B86A7244E5E4114C208C2CC21F6FEF644FAC
+boot time: 10/22/2026 15:31:46
+===== PREfast 静态分析 =====
+
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Building 'wfprobe' with toolset 'WindowsKernelModeDriver10.0' and the 'Desktop' target platform.
+  block_filters.cpp
+  probe_classify.cpp
+  redirect_target.cpp
+  process_path.cpp
+  probe_control.cpp
+  probe_driver.cpp
+  probe_forwarded.cpp
+  probe_forwarded_classify.cpp
+  probe_forwarded_frame.cpp
+  probe_forwarded_redirect.cpp
+  probe_forwarded_path.cpp
+  probe_forwarded_return.cpp
+  rule_table.cpp
+  Running Code Analysis for C/C++...
+  Generating Code...
+  wfprobe.vcxproj -> C:\workspace\WinForward.Kernel\src\driver\x64\Debug\wfprobe.sys
+  Inf2Cat task was skipped as there were no inf files to process
+  
+  DrvCat task was skipped as there was no catalog file to process
+  
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:37.90
+
+ASSERT PASS: PREfast 0 告警 (exit=0 analysis-ran=True analysis-warnings=0 summary-warnings=0)
+===== 设备 DACL =====
+
+Accesschk v6.15 - Reports effective permissions for securable objects
+Copyright (C) 2006-2022 Mark Russinovich
+Sysinternals - www.sysinternals.com
+
+\Device\WfProbe
+  Type: Device
+  RW NT AUTHORITY\SYSTEM
+  RW BUILTIN\Administrators
+
+ASSERT PASS: DACL 含 SYSTEM (accesschk)
+ASSERT PASS: DACL 含 Administrators (accesschk)
+ASSERT PASS: DACL 不含 Everyone (accesschk)
+===== 构建测试程序 =====
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:00.21
+===== 进程选择器契约 =====
+[appid] path=C:\workspace\WinForward.Kernel\tools\wfprobe\bin\Release\net11.0\wfprobe.exe
+[appid] normalized=\device\harddiskvolume3\workspace\winforward.kernel\tools\wfprobe\bin\release\net11.0\wfprobe.exe
+ASSERT PASS: appid 归一化可用 (appid)
+===== 规则表 / IOCTL / 计数器（含 A1/A2/A3/A4/A6/A8）=====
+[rules] pid=2376 app-id=\device\harddiskvolume3\workspace\winforward.kernel\tools\wfprobe\bin\release\net11.0\wfprobe.exe
+[rules] config: abi=6 enabled=1 listener-pid=2376 port=53717 self-pids=[]
+ASSERT PASS: 冲突规则在编译期被拒绝并指出两条规则 (规则 #0（action=0 port=50001-50001 protocol=6 family=0 process=\device\harddiskvolume3\workspace\winforward.kernel\tools\wfprobe\bin\release\net11.0\wfprobe.exe network=any）会先于 block 规则 #1（action=1 port=50001-50001 protocol=6 family=0 process=\device\harddiskvolume3\workspace\winforward.kernel\tools\wfprobe\bin\release\net11.0\wfprobe.exe network=any）命中同一批连接；block 在驱动里编译成独立 filter，无法保持“首个命中”的语义。请收窄条件或调整顺序。)
+ASSERT PASS: 冲突 blob 被驱动独立拒绝 (STATUS_INVALID_PARAMETER)
+ASSERT PASS: 冲突 blob 不改变 generation (expected=0 actual=0)
+[rules] conflict: builder-rejected=True driver-rejected=True generation=0->0
+ASSERT PASS: fallback=block 冲突：编译期拒绝 (fallback=block 会生成无条件的 block filter，与规则 #0（action=0 port=50003-50003 protocol=6 family=0 process=\device\harddiskvolume3\workspace\winforward.kernel\tools\wfprobe\bin\release\net11.0\wfprobe.exe network=any）冲突：那条规则永远不会生效。请去掉非 block 规则，或把 fallback 改回 permit。)
+ASSERT PASS: fallback=block 冲突 blob 被驱动拒绝 (STATUS_INVALID_PARAMETER)
+ASSERT PASS: fallback 冲突 blob 不改变 generation (expected=0 actual=0)
+[rules] fallback-conflict: builder-rejected=True driver-rejected=True generation=0->0
+ASSERT PASS: 规则表已安装 (expected=1 actual=1)
+ASSERT PASS: 规则数与下发一致 (expected=3 actual=3)
+ASSERT PASS: 兜底动作与下发一致 (expected=0 actual=0)
+ASSERT PASS: 规则 blob 总长与下发一致 (expected=188 actual=188)
+ASSERT PASS: permit 规则允许连接 ()
+ASSERT PASS: permit 规则连接到达真实目的地 (echo=6B)
+ASSERT PASS: matched_permit +1 (expected=1 actual=1)
+ASSERT PASS: 命中时 fallback 不计数 (expected=0 actual=0)
+ASSERT PASS: permit 不增加 blocked (expected=0 actual=0)
+ASSERT PASS: block 规则拒绝连接（AUTH_CONNECT 层执行） (SocketException: An attempt was made to access a socket in a way forbidden by its access permissions.)
+ASSERT PASS: block 规则下服务器没有 accept (expected=0 actual=0)
+ASSERT PASS: matched_block +1 (expected=1 actual=1)
+ASSERT PASS: blocked +1 (expected=1 actual=1)
+ASSERT PASS: deferred_blocks +1 (expected=1 actual=1)
+ASSERT PASS: block 事件带上命中规则序号 (port=53714)
+ASSERT PASS: 进程串匹配的 block 规则拒绝连接 (SocketException: An attempt was made to access a socket in a way forbidden by its access permissions.)
+ASSERT PASS: 进程串不匹配的 block 规则不拦连接 ()
+ASSERT PASS: 进程串不匹配时连接到达目的地 (expected=1 actual=1)
+ASSERT PASS: 网段匹配的 block 规则拒绝连接 (SocketException: An attempt was made to access a socket in a way forbidden by its access permissions.)
+ASSERT PASS: 网段不匹配的 block 规则不拦连接 ()
+ASSERT PASS: 网段不匹配时连接到达目的地 (expected=2 actual=2)
+ASSERT PASS: 中文进程路径归一化保留非 ASCII (\device\harddiskvolume3\users\张三\工具.exe)
+ASSERT PASS: 中文路径的 block 规则命中 (exit=3)
+ASSERT PASS: 中文路径在 redirect 层命中 block 规则（matcher 也看到了非 ASCII） (expected>=1 actual=1)
+ASSERT PASS: 中文路径规则不误伤其他端口 (expected=0 actual=0)
+[rules] chinese-path: app-id=\device\harddiskvolume3\users\张三\工具.exe blocked-exit=3 allowed-exit=0
+ASSERT PASS: 511 字节路径完整通过 (expected=511 actual=511)
+ASSERT PASS: 511 字节路径内容一致 (expected=511 actual=511)
+ASSERT PASS: 512 字节路径整条不匹配（置 0，不截断） (expected=0 actual=0)
+ASSERT PASS: 代理对按 4 字节 UTF-8 展开 (expected=6 actual=6)
+ASSERT PASS: 代理对内容正确 (a😀b)
+ASSERT PASS: 孤立高代理项整条不匹配 (expected=0 actual=0)
+ASSERT PASS: 结尾的孤立高代理项整条不匹配 (expected=0 actual=0)
+ASSERT PASS: 路径中间的孤立高代理项整条不匹配 (expected=0 actual=0)
+ASSERT PASS: 路径中间的孤立低代理项整条不匹配 (expected=0 actual=0)
+ASSERT PASS: 3 字节序列的 511 边界通过 (expected=511 actual=511)
+ASSERT PASS: 3 字节序列的 512 边界被拒 (expected=0 actual=0)
+[rules] boundary: utf8-511=511 utf8-512=0 emoji=6 surrogate=0
+ASSERT PASS: 超长 selector 的 permit blob 被驱动拒绝 (STATUS_INVALID_PARAMETER)
+ASSERT PASS: 超长 selector 不改变 generation (expected=10 actual=10)
+ASSERT PASS: 仅大小写不同的 selector 视为重叠（编译期） (case-fold)
+[rules] selector-guard: long-rejected=True case-overlap=True
+ASSERT PASS: redirect 规则允许连接（目标被改写） ()
+ASSERT PASS: 监听端接到被重定向的连接 (port=53717)
+ASSERT PASS: 重定向 context 36B (expected=36 actual=36)
+ASSERT PASS: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: context 记录命中规则序号 (expected=2 actual=2)
+ASSERT PASS: context pid 是发起进程 (expected=2376 actual=2376)
+ASSERT PASS: context 原始端口 (expected=53715 actual=53715)
+ASSERT PASS: context 地址族 (expected=4 actual=4)
+ASSERT PASS: 重定向连接可以传输数据 (received=8B)
+ASSERT PASS: matched_redirect +1 (expected=1 actual=1)
+ASSERT PASS: redirected +1 (expected=1 actual=1)
+ASSERT PASS: contexts_allocated +1 (expected=1 actual=1)
+ASSERT PASS: 重定向计数与连接数同步 (connections=1)
+ASSERT PASS: fallback=permit 时未命中连接放行 ()
+ASSERT PASS: fallback=permit 连接到达真实目的地 (echo=8B)
+ASSERT PASS: fallback_permit +1 (expected=1 actual=1)
+ASSERT PASS: 未命中时 matched_permit 不变 (expected=0 actual=0)
+ASSERT PASS: fallback=block 时未命中连接被拒 (SocketException: An attempt was made to access a socket in a way forbidden by its access permissions.)
+ASSERT PASS: fallback=block 下服务器没有 accept (expected=1 actual=1)
+ASSERT PASS: fallback_block +1 (expected>=1 actual=1)
+ASSERT PASS: blocked +1（fallback） (expected>=1 actual=1)
+ASSERT PASS: fallback=block 事件 (port=53716)
+ASSERT PASS: fallback=block 下命中规则仍被拒 (SocketException: An attempt was made to access a socket in a way forbidden by its access permissions.)
+ASSERT PASS: 命中规则仍走 matched_block (expected>=1 actual=1)
+ASSERT PASS: block 规则生效（禁用前） (SocketException: An attempt was made to access a socket in a way forbidden by its access permissions.)
+ASSERT PASS: enabled=0 解除 block filter（连接放行） ()
+ASSERT PASS: enabled=0 时连接到达目的地 (expected=4 actual=4)
+ASSERT PASS: enabled=1 重新挂上 block filter (SocketException: An attempt was made to access a socket in a way forbidden by its access permissions.)
+[rules] disabled: filter-off=True filter-on=True
+ASSERT PASS: 进程串不匹配时规则不命中（fallback=permit） ()
+ASSERT PASS: 进程串不匹配时连接按 fallback 放行 (echo=13B)
+ASSERT PASS: 进程串不匹配时 matched_permit 不变 (expected=0 actual=0)
+ASSERT PASS: 进程串不匹配时 fallback_permit +1 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：magic 错 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：magic 错 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：magic 错 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：magic 错 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：magic 错 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：版本错 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：版本错 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：版本错 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：版本错 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：版本错 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：header_size 错 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：header_size 错 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：header_size 错 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：header_size 错 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：header_size 错 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：fallback 越界 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：fallback 越界 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：fallback 越界 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：fallback 越界 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：fallback 越界 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：截断 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：截断 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：截断 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：截断 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：截断 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：短于头部 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：短于头部 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：短于头部 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：短于头部 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：短于头部 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：rules_offset 越界 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：rules_offset 越界 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：rules_offset 越界 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：rules_offset 越界 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：rules_offset 越界 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：rules_offset 未对齐 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：rules_offset 未对齐 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：rules_offset 未对齐 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：rules_offset 未对齐 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：rules_offset 未对齐 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：process_pool 越界 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：process_pool 越界 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：process_pool 越界 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：process_pool 越界 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：process_pool 越界 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：network_pool 越界 (error=87)
+ASSERT PASS: 拒绝后 generation 不变：network_pool 越界 (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：network_pool 越界 (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：network_pool 越界 (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：network_pool 越界 (expected=1 actual=1)
+ASSERT PASS: 非法 blob 被拒绝：进程池末尾非 NUL (error=87)
+ASSERT PASS: 拒绝后 generation 不变：进程池末尾非 NUL (expected=15 actual=15)
+ASSERT PASS: 拒绝后规则数不变：进程池末尾非 NUL (expected=3 actual=3)
+ASSERT PASS: 拒绝后兜底动作不变：进程池末尾非 NUL (expected=0 actual=0)
+ASSERT PASS: rejected_blobs +1：进程池末尾非 NUL (expected=1 actual=1)
+ASSERT PASS: 非法 blob 之后旧表仍然生效 ( echo=12B)
+ASSERT PASS: 旧表规则仍然命中 (expected=1 actual=1)
+ASSERT PASS: 替换开始前后台连接已经跑起来 (echo=3)
+ASSERT PASS: 连续替换全部成功 (iterations=100)
+ASSERT PASS: 连续替换 generation +100 (expected=100 actual=100)
+ASSERT PASS: 替换后规则数与最后一块 blob 一致 (expected=4 actual=4)
+ASSERT PASS: 替换期间 classify 持续放行 (echo=14)
+ASSERT PASS: 替换压力之后重定向仍然工作 (port=53717)
+ASSERT PASS: 替换压力之后 context 仍然 36B (expected=36 actual=36)
+ASSERT PASS: 池标签在测量窗口内可读 (ok)
+ASSERT PASS: context 池分配次数等于重定向次数 (expected=2 actual=2)
+ASSERT PASS: context 池释放次数等于重定向次数（WFP 释放） (expected=2 actual=2)
+ASSERT PASS: context 池 outstanding 回到运行前基线 (expected=149 actual=149)
+ASSERT PASS: redirect 层没有 PROCESS_PATH metadata（实测） (expected=0 actual=0)
+[rules] stats: classify=32 permitted=21 blocked=8 redirected=2 replaced=116 rejected=14
+[rules] stats: matched permit/block/redirect=16/7/2 fallback permit/block/redirect=5/1/0
+[rules] verdict=PASS failures=0
+ASSERT PASS: rules 套件 (exit=0)
+===== MAC 帧层 forwarded（F1/F2/F3/F6；F2/F4 用固定源端口收窄，不碰 WinRM）=====
+[forwarded] abi=6 info_abi=6 installed=0 generation=0
+ASSERT PASS: 驱动 ABI 版本与夹具一致 (expected=6 actual=6)
+ASSERT PASS: forwarded_info ABI 版本与夹具一致 (expected=6 actual=6)
+ASSERT PASS: 解析出入口 ifIndex (ifindex=5 local-ip=192.168.100.2)
+ASSERT PASS: 测试源端口基数合法 (base=40310（需要 base+8 ≤ 65535）)
+ASSERT PASS: 测试源端口段与 WinRM 管理端口不重叠 (base=40310)
+[forwarded] ifindex=5 local=192.168.100.2 peer=192.168.100.4:40250 inbound_port=40260 inbound_wait_ms=0 source_port_base=40310
+[forwarded] source_ports pass=40310 block=40311 order=40312/40313 f5=40314/40315/40316
+[forwarded] 看门狗已启动：90s 后恢复空 permit 表（进程被杀时的兜底）
+ASSERT PASS: F1：下发后 installed=1 (expected=1 actual=1)
+ASSERT PASS: F1：规则数回读一致 (expected=1 actual=1)
+ASSERT PASS: F1：fallback 回读一致 (expected=0 actual=0)
+ASSERT PASS: F1：blob 长度回读一致 (expected=656 actual=656)
+ASSERT PASS: F1：generation 递增 1 (expected=1 actual=1)
+[forwarded] F1 stats: calls=4 in=1 out=3 permitted=4 blocked=0 matched=4 (permit=4 block=0) fallback=0 (permit=0 block=0) self_injected=0 no_table=0 malformed=0 non_ip=0
+ASSERT PASS: F1 命中 permit：连接成功 ()
+ASSERT PASS: F1 命中 permit：matched_permit 增加 (expected>=1 actual=4)
+ASSERT PASS: F1 命中 permit：permitted 增加 (expected>=1 actual=4)
+ASSERT PASS: F1 命中 permit：没有 block (expected=0 actual=0)
+ASSERT PASS: F1：classify_calls == no_write_right + in + out (expected=4 actual=4)
+ASSERT PASS: F1：帧去向守恒 (expected=4 actual=4)
+ASSERT PASS: F1：permitted == matched_permit + fallback_permit + udp_return_miss (expected=4 actual=4)
+ASSERT PASS: F1：blocked == matched_block + fallback_block + redirect 失败 + udp 失败 (expected=0 actual=0)
+ASSERT PASS: F1：matched == permit + block + redirect (expected=4 actual=4)
+ASSERT PASS: F1：fallback == fallback_permit + fallback_block (expected=0 actual=0)
+ASSERT PASS: F2：下发后 installed=1 (expected=1 actual=1)
+ASSERT PASS: F2：规则数回读一致 (expected=1 actual=1)
+ASSERT PASS: F2：fallback 回读一致 (expected=0 actual=0)
+ASSERT PASS: F2：blob 长度回读一致 (expected=656 actual=656)
+ASSERT PASS: F2：generation 递增 1 (expected=2 actual=2)
+[forwarded] F2 stats: calls=2 in=0 out=2 permitted=0 blocked=2 matched=2 (permit=0 block=2) fallback=0 (permit=0 block=0) self_injected=0 no_table=0 malformed=0 non_ip=0
+ASSERT PASS: F2 命中 block：连接失败或超时 (OperationCanceledException: The operation was canceled.)
+ASSERT PASS: F2 命中 block：matched_block 增加 (expected>=1 actual=2)
+ASSERT PASS: F2 命中 block：blocked 增加 (expected>=1 actual=2)
+ASSERT PASS: F2 命中 block：没有 permit (expected=0 actual=0)
+ASSERT PASS: F2：classify_calls == no_write_right + in + out (expected=2 actual=2)
+ASSERT PASS: F2：帧去向守恒 (expected=2 actual=2)
+ASSERT PASS: F2：permitted == matched_permit + fallback_permit + udp_return_miss (expected=0 actual=0)
+ASSERT PASS: F2：blocked == matched_block + fallback_block + redirect 失败 + udp 失败 (expected=2 actual=2)
+ASSERT PASS: F2：matched == permit + block + redirect (expected=2 actual=2)
+ASSERT PASS: F2：fallback == fallback_permit + fallback_block (expected=0 actual=0)
+ASSERT PASS: F3：下发后 installed=1 (expected=1 actual=1)
+ASSERT PASS: F3：规则数回读一致 (expected=0 actual=0)
+ASSERT PASS: F3：fallback 回读一致 (expected=0 actual=0)
+ASSERT PASS: F3：blob 长度回读一致 (expected=40 actual=40)
+ASSERT PASS: F3：generation 递增 1 (expected=3 actual=3)
+[forwarded] F3 fallback=permit stats: calls=4 in=1 out=3 permitted=4 blocked=0 matched=0 (permit=0 block=0) fallback=4 (permit=4 block=0) self_injected=0 no_table=0 malformed=0 non_ip=0
+ASSERT PASS: F3 fallback=permit：未命中规则仍然放行 ()
+ASSERT PASS: F3 fallback=permit：matched=0 (expected=0 actual=0)
+ASSERT PASS: F3 fallback=permit：fallback_permit 增加 (expected>=1 actual=4)
+ASSERT PASS: F3 fallback=permit：classify_calls == no_write_right + in + out (expected=4 actual=4)
+ASSERT PASS: F3 fallback=permit：帧去向守恒 (expected=4 actual=4)
+ASSERT PASS: F3 fallback=permit：permitted == matched_permit + fallback_permit + udp_return_miss (expected=4 actual=4)
+ASSERT PASS: F3 fallback=permit：blocked == matched_block + fallback_block + redirect 失败 + udp 失败 (expected=0 actual=0)
+ASSERT PASS: F3 fallback=permit：matched == permit + block + redirect (expected=0 actual=0)
+ASSERT PASS: F3 fallback=permit：fallback == fallback_permit + fallback_block (expected=4 actual=4)
+ASSERT PASS: F3 fallback=block：下发后 installed=1 (expected=1 actual=1)
+ASSERT PASS: F3 fallback=block：规则数回读一致 (expected=1 actual=1)
+ASSERT PASS: F3 fallback=block：fallback 回读一致 (expected=1 actual=1)
+ASSERT PASS: F3 fallback=block：blob 长度回读一致 (expected=616 actual=616)
+ASSERT PASS: F3 fallback=block：generation 递增 1 (expected=4 actual=4)
+[forwarded] F3 fallback=block stats: calls=1 in=0 out=1 permitted=0 blocked=1 matched=0 (permit=0 block=0) fallback=1 (permit=0 block=1) self_injected=0 no_table=0 malformed=0 non_ip=0
+ASSERT PASS: F3 fallback=block：未命中的 ICMP 被丢弃 (TimedOut)
+ASSERT PASS: F3 fallback=block：fallback_block 增加 (expected>=1 actual=1)
+ASSERT PASS: F3 fallback=block：blocked 增加 (expected>=1 actual=1)
+ASSERT PASS: F3 fallback=block：这次的 block 全部来自兜底 (expected=1 actual=1)
+ASSERT PASS: F3 fallback=block：命中的只有 permit 白名单规则，没有规则级 block (expected=0 actual=0)
+ASSERT PASS: F3 fallback=block：classify_calls == no_write_right + in + out (expected=1 actual=1)
+ASSERT PASS: F3 fallback=block：帧去向守恒 (expected=1 actual=1)
+ASSERT PASS: F3 fallback=block：permitted == matched_permit + fallback_permit + udp_return_miss (expected=0 actual=0)
+ASSERT PASS: F3 fallback=block：blocked == matched_block + fallback_block + redirect 失败 + udp 失败 (expected=1 actual=1)
+ASSERT PASS: F3 fallback=block：matched == permit + block + redirect (expected=0 actual=0)
+ASSERT PASS: F3 fallback=block：fallback == fallback_permit + fallback_block (expected=1 actual=1)
+[forwarded] F3 fallback=block 已恢复（local=192.168.100.2）
+ASSERT PASS: F6 baseline：下发后 installed=1 (expected=1 actual=1)
+ASSERT PASS: F6 baseline：规则数回读一致 (expected=1 actual=1)
+ASSERT PASS: F6 baseline：fallback 回读一致 (expected=0 actual=0)
+ASSERT PASS: F6 baseline：blob 长度回读一致 (expected=656 actual=656)
+ASSERT PASS: F6 baseline：generation 递增 1 (expected=6 actual=6)
+ASSERT PASS: F6 非法 magic 被拒（STATUS_INVALID_PARAMETER） (win32=87)
+ASSERT PASS: F6 截断的 blob 被拒 (win32=87)
+ASSERT PASS: F6 非 redirect 带 upstream 被拒（upstream 组合非法） (win32=87)
+ASSERT PASS: F6 非法 blob 不推进 generation (expected=6 actual=6)
+ASSERT PASS: F6 非法 blob 不改规则数 (expected=1 actual=1)
+ASSERT PASS: F6 非法 blob 不改表长度 (expected=656 actual=656)
+ASSERT PASS: F6 rejected_blobs 增加 3 (expected=3 actual=3)
+[forwarded] final stats: calls=1 in=0 out=1 permitted=0 blocked=1 matched=0 (permit=0 block=0) fallback=1 (permit=0 block=1) self_injected=0 no_table=0 malformed=0 non_ip=0
+ASSERT PASS: 最终：classify_calls == no_write_right + in + out (expected=1 actual=1)
+ASSERT PASS: 最终：帧去向守恒 (expected=1 actual=1)
+ASSERT PASS: 最终：permitted == matched_permit + fallback_permit + udp_return_miss (expected=0 actual=0)
+ASSERT PASS: 最终：blocked == matched_block + fallback_block + redirect 失败 + udp 失败 (expected=1 actual=1)
+ASSERT PASS: 最终：matched == permit + block + redirect (expected=0 actual=0)
+ASSERT PASS: 最终：fallback == fallback_permit + fallback_block (expected=1 actual=1)
+[forwarded] verdict=PASS failures=0 skipped=0 required_skipped=False
+
+ASSERT PASS: forwarded-rules 套件 (exit=0)
+===== UDP：redirect/permit/block/any/进程选择器/IPv6/生命周期/热替换（U1–U13）=====
+[udp-rules] pid=9116 app-id=\device\harddiskvolume3\workspace\winforward.kernel\tools\wfprobe\bin\release\net11.0\wfprobe.exe exe=C:\workspace\WinForward.Kernel\tools\wfprobe\bin\Release\net11.0\wfprobe.exe
+[udp-rules] 选中 14 个用例：U1,U2,U3,U4,U5,U6,U7,U8,U9,U10,U11,U12,U13,clear-self
+[udp-rules] config: abi=6 enabled=1 listener-pid=9116 port=59846 self-pids=[9116]
+[udp-rules] listener dual-mode port=59846
+[udp-rules] ===== U1 unconnected redirect + context =====
+ASSERT PASS: U1: udp_classify_calls +1 (expected=1 actual=1)
+ASSERT PASS: U1: udp_redirected +1 (expected=1 actual=1)
+ASSERT PASS: U1: 回包前 udp_permitted 不变 (expected=0 actual=0)
+ASSERT PASS: U1: contexts_allocated +1 (expected=1 actual=1)
+ASSERT PASS: U1: matched_redirect +1 (expected=1 actual=1)
+ASSERT PASS: U1: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U1: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=0)
+ASSERT PASS: U1: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U1: context version (expected=1 actual=1)
+ASSERT PASS: U1: context family=4 (expected=4 actual=4)
+ASSERT PASS: U1: context protocol=17 (expected=17 actual=17)
+ASSERT PASS: U1: context 原始端口 (expected=59847 actual=59847)
+ASSERT PASS: U1: context PID 是客户端子进程 (expected=3848 actual=3848)
+ASSERT PASS: U1: context rule=0 (expected=0 actual=0)
+ASSERT PASS: U1: context 原始地址 (expected=127.0.0.1 actual=127.0.0.1)
+ASSERT PASS: U1: listener 收到的 payload (expected=u1 actual=u1)
+ASSERT PASS: U1: 事件 decision=redirected protocol=17 rule=0 pid=客户端 (redirected/proto=17/rule=0/remote-port=59847/pid=3848)
+ASSERT PASS: U1: 客户端退出码 (expected=0 actual=0)
+ASSERT PASS: U1: 客户端收到 listener 回包 (recv=2B)
+ASSERT PASS: U1: listener 回包不重新 classify（同一 listener socket） (expected=1 actual=1)
+ASSERT PASS: U1: 回包不增加 udp_permitted (expected=0 actual=0)
+ASSERT PASS: U1: 回包没有产生 self-PID 事件 (expected=0 actual=0)
+ASSERT PASS: U1 redirect: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U1 回包后: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U1: self-PID 出站 classify 一次 (expected=1 actual=1)
+ASSERT PASS: U1: self-PID 出站被放行 (expected=1 actual=1)
+ASSERT PASS: U1: 闸 4 self_process +1 (expected=1 actual=1)
+ASSERT PASS: U1: self-PID 出站没有被 redirect (expected=0 actual=0)
+ASSERT PASS: U1 self-PID: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U1: self-PID 事件 decision=permitted_self_process protocol=17 ()
+[udp-rules] ===== U12 生命周期 / WfPr 池 =====
+ASSERT PASS: U12: unconnected 客户端退出码 (expected=0 actual=0)
+ASSERT PASS: U12: unconnected redirect +1 (expected=1 actual=1)
+ASSERT PASS: U12 unconnected: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U12: unconnected context 分配数等于 redirect 数 (expected=1 actual=1)
+[udp-rules] U12 unconnected: baseline=149 allocs=+1 frees=+1 outstanding=149->149
+[udp-rules] U12 LIMIT: unconnected 基线 outstanding=149（非干净启动），不严格断言释放
+ASSERT PASS: U12: connected redirect +1 (expected=1 actual=1)
+ASSERT PASS: U12 connected: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+[udp-rules] U12 connected @1033ms (milestone=1000ms): allocs=+1 frees=+0 outstanding=149->150
+ASSERT PASS: U12: connected context 分配数等于 redirect 数 (expected=1 actual=1)
+[udp-rules] U12 LIMIT: connected UDP context 由 WFP 持有，本 boot 不做释放断言（观察窗口 1000ms）
+[udp-rules] ===== U2 connected redirect（3 条同目的地）=====
+ASSERT PASS: U2: connected 3 条 datagram 只 classify 一次 (expected=1 actual=1)
+ASSERT PASS: U2: udp_redirected +1 (expected=1 actual=1)
+ASSERT PASS: U2: contexts_allocated +1 (expected=1 actual=1)
+ASSERT PASS: U2: 回包前 udp_permitted 不变 (expected=0 actual=0)
+ASSERT PASS: U2 redirect: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U2: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U2: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=0)
+ASSERT PASS: U2: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U2: context version (expected=1 actual=1)
+ASSERT PASS: U2: connected v4 context family=4 (expected=4 actual=4)
+ASSERT PASS: U2: context protocol=17 (expected=17 actual=17)
+ASSERT PASS: U2: context 原始端口 (expected=59854 actual=59854)
+ASSERT PASS: U2: context PID 是客户端子进程 (expected=9500 actual=9500)
+ASSERT PASS: U2: context rule=0 (expected=0 actual=0)
+ASSERT PASS: U2: context 原始地址 (expected=127.0.0.1 actual=127.0.0.1)
+ASSERT PASS: U2: listener 收到的 payload (expected=u2 actual=u2)
+ASSERT PASS: U2: listener 收到的后续 payload (expected=u2 actual=u2)
+ASSERT PASS: U2: connected 同一关联 context 完全相同 (expected=57464331000000001C2500000100CEE9041100007F000001000000000000000000000000 actual=57464331000000001C2500000100CEE9041100007F000001000000000000000000000000)
+ASSERT PASS: U2: listener 收到的后续 payload (expected=u2 actual=u2)
+ASSERT PASS: U2: connected 同一关联 context 完全相同 (expected=57464331000000001C2500000100CEE9041100007F000001000000000000000000000000 actual=57464331000000001C2500000100CEE9041100007F000001000000000000000000000000)
+ASSERT PASS: U2: 客户端退出码 (expected=0 actual=0)
+ASSERT PASS: U2: connected 客户端收到全部回包 (expected=3 actual=3)
+ASSERT PASS: U2: listener 回包不重新 classify (expected=1 actual=1)
+ASSERT PASS: U2: 回包不增加 udp_permitted (expected=0 actual=0)
+ASSERT PASS: U2 回包后: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+[udp-rules] ===== U3 同一 socket/目的地 3 条 datagram =====
+ASSERT PASS: U3 redirect: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U3: 3 条 datagram 只 classify 一次（按关联） (expected=1 actual=1)
+ASSERT PASS: U3: udp_redirected 只 +1 (expected=1 actual=1)
+ASSERT PASS: U3: contexts_allocated 只 +1 (expected=1 actual=1)
+ASSERT PASS: U3: listener 收到全部 datagram (expected=3 actual=3)
+ASSERT PASS: U3: 同一关联的 context 完全相同 (datagrams=3)
+ASSERT PASS: U3: 客户端退出码 (expected=0 actual=0)
+ASSERT PASS: U3: 客户端收到全部回包 (expected=3 actual=3)
+ASSERT PASS: U3 回包后: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U3: 回包不重新 classify (expected=1 actual=1)
+ASSERT PASS: U3: 回包不增加 udp_permitted (expected=0 actual=0)
+ASSERT PASS: U3: udp_blocked 不变 (expected=0 actual=0)
+[udp-rules] ===== U4 同一 socket 两个目的地 =====
+ASSERT PASS: U4: UDP 不变式 calls=permitted+blocked+redirected (expected=2 actual=2)
+ASSERT PASS: U4: 两个目的地 classify 两次 (expected=2 actual=2)
+ASSERT PASS: U4: udp_redirected +2 (expected=2 actual=2)
+ASSERT PASS: U4: contexts_allocated +2 (expected=2 actual=2)
+ASSERT PASS: U4-a: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U4-a: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=0)
+ASSERT PASS: U4-a: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U4-a: context version (expected=1 actual=1)
+ASSERT PASS: U4-b: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U4-b: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=0)
+ASSERT PASS: U4-b: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U4-b: context version (expected=1 actual=1)
+ASSERT PASS: U4: 第一条 context 原始端口 (expected=59858 actual=59858)
+ASSERT PASS: U4: 第二条 context 原始端口 (expected=59859 actual=59859)
+ASSERT PASS: U4: 两条 context 不串 ()
+ASSERT PASS: U4: 客户端退出码 (expected=0 actual=0)
+ASSERT PASS: U4: 客户端收到两条回包 (expected=2 actual=2)
+[udp-rules] ===== U5 permit =====
+ASSERT PASS: U5: 目标端口收到 datagram ()
+ASSERT PASS: U5: permit payload (expected=u5 actual=u5)
+ASSERT PASS: U5: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U5: listener 没有收到包 (permit 直连)
+ASSERT PASS: U5: 客户端退出码 (expected=0 actual=0)
+ASSERT PASS: U5: 目标端口不回包，客户端超时 (recv-failed)
+ASSERT PASS: U5: udp_classify_calls +1 (expected=1 actual=1)
+ASSERT PASS: U5: udp_permitted +1 (expected=1 actual=1)
+ASSERT PASS: U5: 没有 redirect (expected=0 actual=0)
+ASSERT PASS: U5: 没有 context 分配 (expected=0 actual=0)
+ASSERT PASS: U5: matched_permit +1 (expected=1 actual=1)
+ASSERT PASS: U5: 事件 decision=permitted_rule protocol=17 ()
+[udp-rules] ===== U6 UDP block =====
+ASSERT PASS: U6: block 下客户端 send 成功（退出码 0） (expected=0 actual=0)
+ASSERT PASS: U6: send 返回成功 (sent=8B)
+ASSERT PASS: U6: 应用侧 recv 超时（静默丢包） (recv-failed)
+ASSERT PASS: U6: 被 block 的端口没有收到 datagram (auth 层丢弃)
+ASSERT PASS: U6: listener 没有收到包 ()
+ASSERT PASS: U6 block: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U6: udp_classify_calls +1 (expected=1 actual=1)
+ASSERT PASS: U6: udp_blocked +1 (expected=1 actual=1)
+ASSERT PASS: U6: udp_permitted 不变 (expected=0 actual=0)
+ASSERT PASS: U6: 没有 redirect (expected=0 actual=0)
+ASSERT PASS: U6: deferred_blocks +1 (expected=1 actual=1)
+ASSERT PASS: U6: matched_block +1 (expected=1 actual=1)
+ASSERT PASS: U6: 事件 decision=blocked_rule protocol=17 action=block ()
+ASSERT PASS: U6: 未 block 端口可达 ()
+ASSERT PASS: U6: 未 block 端口 payload (expected=u6-allow actual=u6-allow)
+ASSERT PASS: U6 控制组: UDP 不变式 calls=permitted+blocked+redirected (expected=2 actual=2)
+ASSERT PASS: U6: 未 block 端口走 permit (expected=1 actual=1)
+ASSERT PASS: U6: 控制组 datagram 记录为 permitted_fallback (port=59864 pid=10080)
+ASSERT PASS: U6: fallback_permit 至少 +1 (expected>=1 actual=1)
+ASSERT PASS: U6: block 与控制组各 classify 一次 (expected=2 actual=2)
+[udp-rules] ===== U7 any block + TCP 对照 + ICMP =====
+ASSERT PASS: U7: any block 下 UDP send 成功 (expected=0 actual=0)
+ASSERT PASS: U7: UDP send 返回成功 (sent=6B)
+ASSERT PASS: U7: UDP 应用侧超时 (recv-failed)
+ASSERT PASS: U7: any block 覆盖 UDP (对端收不到)
+ASSERT PASS: U7: any block 覆盖 TCP（AccessDenied） (AccessDenied (10013))
+ASSERT PASS: U7: 未被 any block 命中的 TCP 正常 ()
+ASSERT PASS: U7: 未被 any block 命中的 UDP 正常 ()
+ASSERT PASS: U7: UDP 控制组 payload (expected=u7-ok actual=u7-ok)
+ASSERT PASS: U7 block/控制组: UDP 不变式 calls=permitted+blocked+redirected (expected=2 actual=2)
+ASSERT PASS: U7: udp_blocked +1 (expected=1 actual=1)
+ASSERT PASS: U7: deferred_blocks +1 (expected=1 actual=1)
+ASSERT PASS: U7: 控制组 UDP permit +1 (expected=1 actual=1)
+ASSERT PASS: U7: 控制组 datagram 记录为 permitted_fallback (port=59868 pid=9548)
+ASSERT PASS: U7: fallback_permit 至少 +1 (expected>=1 actual=1)
+ASSERT PASS: U7: any block（端口规则）下 ICMP ping 仍通（192.168.100.4） (exit=0 replies=2)
+ASSERT PASS: U7 ICMP 后: UDP 不变式 calls=permitted+blocked+redirected (expected=0 actual=0)
+ASSERT PASS: U7: ICMP 不进入 UDP classify (expected=0 actual=0)
+ASSERT PASS: U7: 全端口 any block 下 ICMP ping 仍通（192.168.100.4） (exit=0 replies=2)
+ASSERT PASS: U7: 全端口 any block 下 UDP send 成功 (expected=0 actual=0)
+ASSERT PASS: U7: 全端口 any block 下 UDP 应用侧超时 (recv-failed)
+ASSERT PASS: U7: 全端口 any block 覆盖 UDP (对端收不到)
+ASSERT PASS: U7: 全端口 any block 覆盖 TCP（AccessDenied） (AccessDenied (10013))
+ASSERT PASS: U7: fallback block 下 ICMP ping 仍通（192.168.100.4） (exit=0 replies=2)
+[udp-rules] ===== U8 进程选择器 =====
+ASSERT PASS: U8-match: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U8-match: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=0)
+ASSERT PASS: U8-match: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U8-match: context version (expected=1 actual=1)
+ASSERT PASS: U8: 当前进程串是 wfprobe 的 ALE_APP_ID (\device\harddiskvolume3\workspace\winforward.kernel\tools\wfprobe\bin\release\net11.0\wfprobe.exe)
+ASSERT PASS: U8: 命中第一条（进程串匹配）规则 (expected=0 actual=0)
+ASSERT PASS: U8: 匹配规则 context PID (expected=9668 actual=9668)
+ASSERT PASS: U8 matched: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U8: matched_redirect +1 (expected=1 actual=1)
+[udp-rules] U8 matched: redirect+1 fallback+0 calls+1 events=redirected/proto=17/rule=0/remote-port=59872/pid=9668
+ASSERT PASS: U8 回包后: UDP 不变式 calls=permitted+blocked+redirected (expected=0 actual=0)
+[udp-rules] U8 reply: fallback+0 self+0 calls+0 events=redirected/proto=17/rule=0/remote-port=59872/pid=9668
+ASSERT PASS: U8: 进程串不匹配时按 fallback permit 直连 ()
+ASSERT PASS: U8: fallback 直连 payload (expected=u8-other actual=u8-other)
+ASSERT PASS: U8 控制组: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U8: 不匹配进程串的 datagram 记录为 permitted_fallback (port=59873 pid=6020)
+ASSERT PASS: U8: fallback_permit 至少 +1 (expected>=1 actual=1)
+ASSERT PASS: U8: 不匹配的规则没有触发 redirect ()
+ASSERT PASS: U8: 不匹配的规则 matched_redirect 不变 (expected=0 actual=0)
+[udp-rules] U8 other: fallback+1 self+0 calls+1 events=redirected/proto=17/rule=0/remote-port=59872/pid=9668, permitted_fallback/proto=17/rule=-/remote-port=59873/pid=6020
+[udp-rules] ===== U9 fallback redirect / permit =====
+ASSERT PASS: U9-redirect: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U9-redirect: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=0)
+ASSERT PASS: U9-redirect: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U9-redirect: context version (expected=1 actual=1)
+ASSERT PASS: U9: fallback redirect rule=0xFFFFFFFF (expected=4294967295 actual=4294967295)
+ASSERT PASS: U9: fallback redirect 事件 protocol=17 rule=0xFFFFFFFF (port=59876)
+ASSERT PASS: U9 fallback redirect: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U9: fallback_redirect +1 (expected>=1 actual=1)
+ASSERT PASS: U9: udp_redirected +1 (expected>=1 actual=1)
+ASSERT PASS: U9: fallback permit 直连可达 ()
+ASSERT PASS: U9: fallback permit payload (expected=u9-permit actual=u9-permit)
+ASSERT PASS: U9 fallback permit: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U9: fallback permit 不 redirect ()
+ASSERT PASS: U9: fallback permit datagram 记录为 permitted_fallback (port=59879 pid=8292)
+ASSERT PASS: U9: fallback_permit 至少 +1 (expected>=1 actual=1)
+ASSERT PASS: U9: udp_permitted +1 (expected>=1 actual=1)
+[udp-rules] ===== U10 IPv6 / dual-mode =====
+ASSERT PASS: U10 v4-mapped unconnected: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U10 v4-mapped unconnected: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=0)
+ASSERT PASS: U10 v4-mapped unconnected: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U10 v4-mapped unconnected: context version (expected=1 actual=1)
+ASSERT PASS: U10: v4-mapped unconnected family=4 (expected=4 actual=4)
+ASSERT PASS: U10: v4-mapped unconnected 原始端口 (expected=59881 actual=59881)
+ASSERT PASS: U10: v4-mapped unconnected 原始地址是纯 v4 (expected=127.0.0.1 actual=127.0.0.1)
+ASSERT PASS: U10: v4-mapped unconnected context PID (expected=3728 actual=3728)
+ASSERT PASS: U10: v4-mapped unconnected 客户端退出码 (expected=0 actual=0)
+ASSERT PASS: U10: v4-mapped unconnected 收到回包 (recv=4B)
+ASSERT PASS: U10 v4-mapped unconnected: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U10: v4-mapped unconnected redirect +1 (expected=1 actual=1)
+ASSERT PASS: U10 v4-mapped connected: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U10 v4-mapped connected: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=41)
+ASSERT PASS: U10 v4-mapped connected: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U10 v4-mapped connected: context version (expected=1 actual=1)
+ASSERT PASS: U10: v4-mapped connected family=6 (expected=6 actual=6)
+ASSERT PASS: U10: v4-mapped connected 地址是 v4-mapped (::ffff:127.0.0.1)
+ASSERT PASS: U10 v4-mapped connected: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U10: v4-mapped connected redirect +1 (expected=1 actual=1)
+ASSERT PASS: U10 native v6 unconnected: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U10 native v6 unconnected: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=41)
+ASSERT PASS: U10 native v6 unconnected: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U10 native v6 unconnected: context version (expected=1 actual=1)
+ASSERT PASS: U10: native v6 unconnected family=6 (expected=6 actual=6)
+ASSERT PASS: U10: native v6 unconnected 原始端口 (expected=59883 actual=59883)
+ASSERT PASS: U10: native v6 unconnected 原始地址 (expected=::1 actual=::1)
+ASSERT PASS: U10: native v6 unconnected 客户端退出码 (expected=0 actual=0)
+ASSERT PASS: U10: native v6 unconnected 收到回包 (recv=4B)
+ASSERT PASS: U10 native v6 unconnected: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U10: native v6 unconnected redirect +1 (expected=1 actual=1)
+ASSERT PASS: U10 native v6 connected: context 长度 36B (expected=36 actual=36)
+ASSERT PASS: U10 native v6 connected: cmsg level 是 IPPROTO_IP/IPPROTO_IPV6 (level=41)
+ASSERT PASS: U10 native v6 connected: context magic (expected=826492503 actual=826492503)
+ASSERT PASS: U10 native v6 connected: context version (expected=1 actual=1)
+ASSERT PASS: U10: native v6 connected family=6 (expected=6 actual=6)
+ASSERT PASS: U10: native v6 connected 原始地址 (expected=::1 actual=::1)
+ASSERT PASS: U10 native v6 connected: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U10: native v6 connected redirect +1 (expected=1 actual=1)
+[udp-rules] ===== U11 enabled 0↔1 =====
+ASSERT PASS: U11: enabled=0 时直连 ()
+ASSERT PASS: U11: enabled=0 直连 payload (expected=u11-off actual=u11-off)
+ASSERT PASS: U11 enabled=0: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U11: enabled=0 不 redirect ()
+ASSERT PASS: U11: enabled=0 仍 classify 并计数 (expected>=1 actual=1)
+ASSERT PASS: U11: enabled=0 记 permitted (expected>=1 actual=1)
+ASSERT PASS: U11: enabled=0 无 redirect (expected=0 actual=0)
+ASSERT PASS: U11: enabled=0 无 context (expected=0 actual=0)
+ASSERT PASS: U11: enabled=1 恢复 redirect (expected=u11-on actual=u11-on)
+ASSERT PASS: U11: enabled=1 时没有直连包 ()
+ASSERT PASS: U11 enabled=1: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U11: enabled=1 客户端退出码 (expected=0 actual=0)
+ASSERT PASS: U11: enabled=1 收到回包 (recv=6B)
+ASSERT PASS: U11: enabled=1 redirect +1 (expected>=1 actual=1)
+ASSERT PASS: U11: enabled=1 存在这条连接的 redirected 事件（事件窗口有效） (redirected/proto=17/rule=0/remote-port=59889/pid=3848)
+ASSERT PASS: U11: enabled=1 首包没有走 permit（回包另计） (port=59889 pid=3848)
+[udp-rules] ===== U13 规则热替换 =====
+ASSERT PASS: U13: permit 阶段对端收到包 ()
+ASSERT PASS: U13: permit 阶段 payload (expected=hot-1 actual=hot-1)
+ASSERT PASS: U13: 旧关联首包 permit 并收到回包 (recv=5B)
+ASSERT PASS: U13: 换 block 后旧关联 datagram 没有回包 (recv-failed)
+ASSERT PASS: U13: 旧关联 datagram 被 auth 层丢弃 ()
+ASSERT PASS: U13 旧关联: UDP 不变式 calls=permitted+blocked+redirected (expected=0 actual=0)
+ASSERT PASS: U13: 旧关联不增加 udp_blocked (expected=0 actual=0)
+ASSERT PASS: U13: 旧关联不增加 deferred_blocks (expected=0 actual=0)
+ASSERT PASS: U13: 旧关联没有新 classify 事件 (expected=0 actual=0)
+[udp-rules] U13 old-association events: 
+ASSERT PASS: U13: 新关联按新 blob 被 block (recv-failed)
+ASSERT PASS: U13: 新关联 datagram 对端收不到 ()
+ASSERT PASS: U13 新关联: UDP 不变式 calls=permitted+blocked+redirected (expected=1 actual=1)
+ASSERT PASS: U13: 新关联 classify 一次 (expected=1 actual=1)
+ASSERT PASS: U13: 新关联 udp_blocked +1 (expected=1 actual=1)
+ASSERT PASS: U13: 新关联 deferred_blocks +1 (expected=1 actual=1)
+ASSERT PASS: U13: 新关联事件 decision=blocked_rule protocol=17 ()
+ASSERT PASS: U13: 客户端退出码 (expected=0 actual=0)
+[udp-rules] ===== control --clear-self 工具回归 =====
+[control] config: abi=6 enabled=1 listener-pid=9116 port=59846 self-pids=[]
+ASSERT PASS: control --clear-self: 退出码 (expected=0 actual=0)
+ASSERT PASS: control --clear-self: self_process_count=0 (expected=0 actual=0)
+ASSERT PASS: control --clear-self: self_process_ids 全部清零 (expected=0 actual=0)
+[udp-rules] stats: classify=1 permitted=0 blocked=1 redirected=0 contexts=0
+[udp-rules] udp: calls=1 permitted=0 blocked=1 redirected=0
+[udp-rules] verdict=PASS failures=0
+ASSERT PASS: udp-rules 套件 (exit=0)
+===== dual-mode 之前的 V4 重定向 =====
+[selftest] config: abi=6 enabled=1 listener-pid=8612 port=53755 self-pids=[]
+ASSERT PASS: selftest 规则数 (expected=1 actual=1)
+ASSERT PASS: selftest 兜底动作 (expected=0 actual=0)
+[selftest] #0 context raw=5746433100000000A421000001003A9D04060000C0A86404000000000000000000000000 pid=8612 family=4 original=192.168.100.4:40250
+[selftest] iterations=3 completed=3 failures=0 contexts_ok=3 contexts_failed=0 echo_ok=3
+[selftest] endpoints: 127.0.0.1:53755x3
+[selftest] stats: classify=3 redirected=3 contexts_allocated=3 alloc_failures=0 apply_failures=0
+[selftest] events(recent 3): redirected=3 any_to_loopback=3 local_address=0
+ASSERT PASS: 连接数 (expected=3 actual=3)
+ASSERT PASS: context 全部读回并通过校验 (expected=3 actual=3)
+ASSERT PASS: echo 全部成功 (expected=3 actual=3)
+ASSERT PASS: redirected 计数与连接数一致 (expected=3 actual=3)
+ASSERT PASS: contexts_allocated 与连接数一致 (expected=3 actual=3)
+ASSERT PASS: accepted 端点在预期地址族 (127.0.0.1:53755)
+[selftest] verdict=PASS dual=False family=4
+ASSERT PASS: selftest V4 (exit=0)
+===== dual-mode IPv6（.NET TcpClient.Connect(string,int)）=====
+[selftest] config: abi=6 enabled=1 listener-pid=6668 port=53759 self-pids=[]
+ASSERT PASS: selftest 规则数 (expected=1 actual=1)
+ASSERT PASS: selftest 兜底动作 (expected=0 actual=0)
+[selftest] #0 context raw=57464331000000000C1A000001003A9D0606000000000000000000000000FFFFC0A86404 pid=6668 family=6 original=::ffff:192.168.100.4:40250
+[selftest] iterations=3 completed=3 failures=0 contexts_ok=3 contexts_failed=0 echo_ok=3
+[selftest] endpoints: ::1:53759x3
+[selftest] stats: classify=3 redirected=3 contexts_allocated=3 alloc_failures=0 apply_failures=0
+[selftest] events(recent 3): redirected=3 any_to_loopback=3 local_address=0
+ASSERT PASS: 连接数 (expected=3 actual=3)
+ASSERT PASS: context 全部读回并通过校验 (expected=3 actual=3)
+ASSERT PASS: echo 全部成功 (expected=3 actual=3)
+ASSERT PASS: redirected 计数与连接数一致 (expected=3 actual=3)
+ASSERT PASS: contexts_allocated 与连接数一致 (expected=3 actual=3)
+ASSERT PASS: accepted 端点在预期地址族 (::1:53759)
+[selftest] verdict=PASS dual=True family=6
+ASSERT PASS: selftest dual-mode V6 (exit=0)
+===== 四道防循环闸 =====
+[gates] pid=6916 app-id=\device\harddiskvolume3\workspace\winforward.kernel\tools\wfprobe\bin\release\net11.0\wfprobe.exe
+[gates] config: abi=6 enabled=1 listener-pid=9480 port=53764 self-pids=[]
+ASSERT PASS: 闸 1：连接监听端口成功 ()
+ASSERT PASS: 闸 1：relay 正常退出 (expected=0 actual=0)
+ASSERT PASS: 闸 1：连接没有被再次重定向（无 redirect context） (accept idx=0 context=0B)
+ASSERT PASS: 闸 1：事件 decision=permitted_listener_port (port=53764)
+[gates] config: abi=6 enabled=1 listener-pid=6512 port=53766 self-pids=[6512]
+ASSERT PASS: 闸 4：原始连接被重定向后完成 ()
+ASSERT PASS: 闸 4：代理接到带 context 的连接 (accept idx=0 context=36B)
+ASSERT PASS: 闸 4：代理出站连接直达真实目的地 (outbound=echo)
+ASSERT PASS: 闸 4：没有第二次 accept（没有成环） (accepts=1)
+ASSERT PASS: 闸 4：relay 退出码 (expected=0 actual=0)
+ASSERT PASS: 闸 4：事件 decision=permitted_self_process (pid=6512)
+[gates] config: abi=6 enabled=1 listener-pid=8784 port=53769 self-pids=[]
+ASSERT PASS: 闸 3：原始连接被重定向后完成 ()
+ASSERT PASS: 闸 3：代理拿到 redirect records (relay records=)
+ASSERT PASS: 闸 3：带 records 的出站连接直达目的地 (outbound=echo)
+ASSERT PASS: 闸 3：没有第二次 accept（没有成环） (accepts=1)
+ASSERT PASS: 闸 3：relay 退出码 (expected=0 actual=0)
+ASSERT PASS: 闸 3：事件 decision=permitted_redirect_state (pid=8784)
+[gates] 闸 3 场景观察到的 decision：permitted_listener_port,redirected,permitted_self_process,permitted_redirect_state
+[gates] verdict=PASS failures=0
+ASSERT PASS: gates 套件 (exit=0)
+===== 不绕过 Windows 防火墙 =====
+firewall profile: Domain enabled=True
+firewall profile: Private enabled=True
+firewall profile: Public enabled=True
+ASSERT PASS: 至少一个防火墙配置文件已启用 (enabled=3)
+ASSERT PASS: 无防火墙规则时连接成功 ([blockprobe] remote=192.168.100.4:40250 rule-port=65000 connected=True elapsed=19ms blocked=0 matched_block=0 error=)
+ASSERT PASS: 防火墙拒绝仍然生效（未被子层 PERMIT 截胡） ([blockprobe] remote=192.168.100.4:40250 rule-port=65000 connected=False elapsed=27ms blocked=0 matched_block=0 error=SocketException: An attempt was made to access a socket in a way forbidden by its access permissions.)
+ASSERT PASS: 撤掉防火墙规则后连接恢复 ([blockprobe] remote=192.168.100.4:40250 rule-port=65000 connected=True elapsed=19ms blocked=0 matched_block=0 error=)
+firewall-check verdict: PASS
+ASSERT PASS: firewall-check (exit=0)
+===== 构建用户态（控制器、配置层、IOCTL 客户端、中继）=====
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:01.33
+ASSERT PASS: 用户态构建成功 (exit=0)
+===== 用户态单测（含配置、冲突检查、ABI 一致性、夹具）=====
+[pass] forwarded-layout/头部 40 字节
+[pass] forwarded-layout/头部逐字段偏移
+[pass] forwarded-layout/规则 24 字节
+[pass] forwarded-layout/规则逐字段偏移
+[pass] forwarded-layout/网段记录复用 host 的 20 字节布局
+[pass] forwarded-layout/头部黄金字节序列
+[pass] forwarded-layout/规则黄金字节序列
+[pass] forwarded-layout/blob 头部魔数在内存中是 WFB1
+[pass] forwarded-layout/布局常量与 C++ 一致
+[pass] forwarded-adapter/按稳定 id 解析 ifIndex
+[pass] forwarded-adapter/按接口名解析 ifIndex
+[pass] forwarded-adapter/id 与名字同时给时要求一致
+[pass] forwarded-adapter/找不到 id 时拒绝
+[pass] forwarded-adapter/找不到名字时拒绝
+[pass] forwarded-adapter/两个选择器指向不同接口时拒绝
+[pass] forwarded-adapter/接口没有 ifIndex 时拒绝
+[pass] forwarded-adapter/ifIndex 为 0 时拒绝
+[pass] forwarded-adapter/空选择器拒绝
+[pass] forwarded-adapter/没有接口时错误可读
+[pass] forwarded-compiler/空表只产出 40 字节头部
+[pass] forwarded-compiler/各段起点 4 字节对齐且不重叠
+[pass] forwarded-compiler/规则字段原样写入
+[pass] forwarded-compiler/任意入口与无上游写成哨兵
+[pass] forwarded-compiler/0 是合法的具体适配器与上游编号
+[pass] forwarded-compiler/网段索引是池内字节偏移
+[pass] forwarded-compiler/网段去重且按首次出现排序
+[pass] forwarded-compiler/IPv4 地址只占前 4 字节
+[pass] forwarded-compiler/UDP 协议写成 17
+[pass] forwarded-compiler/兜底动作写入头部
+[pass] forwarded-compiler/规则与头部保留位为 0
+[pass] forwarded-compiler/规则数上限含端
+[pass] forwarded-compiler/网段池上限含端
+[pass] forwarded-invalid/空表为 null
+[pass] forwarded-invalid/规则为 null
+[pass] forwarded-invalid/兜底动作不允许 redirect
+[pass] forwarded-invalid/兜底动作未知
+[pass] forwarded-invalid/动作未知
+[pass] forwarded-invalid/协议未知
+[pass] forwarded-invalid/地址族未知
+[pass] forwarded-invalid/端口区间颠倒
+[pass] forwarded-invalid/入口适配器不能是任意哨兵
+[pass] forwarded-invalid/redirect 缺少上游
+[pass] forwarded-invalid/redirect 上游不能是无上游哨兵
+[pass] forwarded-invalid/非 redirect 不得带上游
+[pass] forwarded-invalid/规则族与 clientCidr 不一致
+[pass] forwarded-invalid/规则族与 remoteCidr 不一致
+[pass] forwarded-invalid/两个网段族不同
+[pass] forwarded-invalid/规则数超过上限
+[pass] forwarded-invalid/网段池 4097 条拒绝
+[pass] forwarded-invalid/错误消息带规则序号
+[pass] forwarded-config/最小配置解析成功
+[pass] forwarded-config/省略字段走默认值
+[pass] forwarded-config/多上游按数组顺序分配 id
+[pass] forwarded-config/旧 socks5 作为 default 上游
+[pass] forwarded-config/旧配置没有 forwarded 时表为 null
+[pass] forwarded-config/forwarded 规则拒绝 process 字段
+[pass] forwarded-config/redirect 必须带 target
+[pass] forwarded-config/permit 不得带 target
+[pass] forwarded-config/target 不存在报规则路径
+[pass] forwarded-config/上游重名报数组路径
+[pass] forwarded-config/旧 socks5 与 default 冲突
+[pass] forwarded-config/adapterName 经 resolver 解析
+[pass] forwarded-config/没有 resolver 时 adapter 规则拒绝
+[pass] forwarded-config/adapter 解析失败带路径
+[pass] forwarded-config/adapterId 与 adapterName 冲突
+[pass] forwarded-config/适配器任意哨兵拒绝
+[pass] forwarded-config/clientCidr 与 family 不一致
+[pass] forwarded-config/clientCidr 与 remoteCidr 族不同
+[pass] forwarded-config/remotePorts 区间颠倒
+[pass] forwarded-config/forwarded 兜底不允许 redirect
+[pass] forwarded-config/forwarded 规则未知字段带路径
+[pass] forwarded-config/socks5Servers 必须是数组
+[pass] forwarded-config/socks5Servers 缺少 name
+[pass] forwarded-config/socks5Servers 端口越界
+[pass] forwarded-config/forwarded.rules 必须是数组
+[pass] forwarded-config/forwarded 必须是对象
+[pass] forwarded-config/同一入口两个 clientCidr 分开编号
+[pass] forwarded-config/旧 socks5 的 default 排在上游最后
+[pass] forwarded-config/controller-forwarded 报告格式
+[pass] forwarded-config/controller-forwarded-installed 报告格式
+[pass] forwarded-config/socks5Servers 名字不能为空
+[pass] forwarded-config/remotePorts 越界
+[pass] forwarded-config/编译结果符合 B1 布局
+[pass] forwarded-config/redirect 规则在 B4b 允许下发
+[pass] layout/头部 40 字节
+[pass] layout/头部逐字段偏移
+[pass] layout/规则 16 字节
+[pass] layout/规则逐字段偏移
+[pass] layout/网段记录 20 字节
+[pass] layout/网段逐字段偏移
+[pass] layout/托管尺寸与 Marshal 尺寸一致
+[pass] layout/ABI v6 事件、统计与 forwarded 结构
+[pass] layout/头部黄金字节序列
+[pass] layout/blob 头部魔数在内存中是 WRB1
+[pass] layout/部署目标是主机小端
+[pass] compiler/空规则表只产出 40 字节头部
+[pass] compiler/各段起点 4 字节对齐且不重叠
+[pass] compiler/规则顺序与字段原样写入
+[pass] compiler/UDP 协议写成 17
+[pass] compiler/进程串小写、去重、NUL 结尾
+[pass] compiler/进程索引是池内字节偏移
+[pass] compiler/网段主机位清零并去重
+[pass] compiler/IPv4 地址只占前 4 字节
+[pass] compiler/网段索引是 20 的倍数
+[pass] compiler/任意选择器写成 0xFFFFFFFF
+[pass] compiler/兜底动作写入头部
+[pass] compiler/规则保留位为 0
+[pass] compiler/端口区间端点原样写入
+[pass] compiler/进程串池末尾是 NUL
+[pass] compiler/进程串池按 UTF-8 字节计数
+[pass] compiler/进程路径归一化可替换
+[pass] compiler/解析不到的 DOS 路径拒绝编译
+[pass] compiler/真实解析器只能在 Windows 上用
+[pass] invalid/空规则表为 null
+[pass] invalid/规则为 null
+[pass] invalid/兜底动作未知
+[pass] invalid/动作未知
+[pass] invalid/协议未知
+[pass] invalid/地址族未知
+[pass] invalid/端口区间颠倒
+[pass] invalid/规则族与网段族不一致
+[pass] invalid/进程串为空
+[pass] invalid/进程串含控制字符
+[pass] invalid/进程串含 NUL
+[pass] invalid/进程串含孤立代理项
+[pass] invalid/IPv4 前缀越界
+[pass] invalid/IPv6 前缀越界
+[pass] invalid/CIDR 缺少前缀
+[pass] invalid/CIDR 地址非法
+[pass] invalid/归一化结果非法
+[pass] process/恰好 511 字节可以编译
+[pass] process/512 字节拒绝编译
+[pass] process/标准代理对按 4 字节 UTF-8 落盘
+[pass] process/孤立代理项拒绝编译
+[pass] differential/用例表精确覆盖 33 组 × 15 条连接
+[fixtures] 33 个用例写入 C:\workspace\WinForward.Kernel\build\diff-fixtures
+[pass] differential/夹具落盘且与模型自洽
+[pass] config/完整规则逐字段解析
+[pass] config/protocol 接受 udp
+[pass] config/省略字段走默认值
+[pass] config/端口写法 *、单端口、区间
+[pass] config/未知字段带 JSON 路径报错
+[pass] config/缺少兜底动作报错
+[pass] config/缺少动作报错并带规则序号
+[pass] config/未知动作报错
+[pass] config/端口不是整数报错
+[pass] config/非法 CIDR 报错
+[pass] config/JSON 语法错误报错
+[pass] config/根节点必须是对象
+[pass] config/端口区间颠倒交给编译器并带序号
+[pass] config/从文件读取配置
+[pass] config/进程路径含控制字符报错
+[pass] rule-order/完全重叠的 permit 使 block 被拒
+[pass] rule-order/端口区间相交被拒
+[pass] rule-order/端口区间不相交被接受
+[pass] rule-order/地址族不相交被接受
+[pass] rule-order/任一侧地址族为任意即重叠被拒
+[pass] rule-order/网段不相交被接受
+[pass] rule-order/网段嵌套被拒
+[pass] rule-order/任一侧网段为任意即重叠被拒
+[pass] rule-order/进程选择器不同被接受
+[pass] rule-order/进程选择器相同被拒
+[pass] rule-order/任一侧进程为任意即重叠被拒
+[pass] rule-order/两条 block 规则互不检查
+[pass] rule-order/block 在前的 permit 不影响
+[pass] rule-order/redirect 也会遮蔽 block
+[pass] rule-order/兜底动作为 block 且无规则被接受
+[pass] rule-order/IPv6 网段推出地址族
+[pass] rule-order/报错消息带两条规则的条件摘要
+[pass] rule-order/协议谓词对非 TCP 也生效
+[pass] rule-order/TCP 与 UDP 规则不重叠
+[pass] rule-order/协议文案会显示 udp
+[pass] rule-order/绕过检查可以产出驱动会拒绝的 blob
+[pass] rule-order/兜底 block 与 permit 规则共存被拒
+[pass] rule-order/兜底 block 与全部 block 规则被接受
+[pass] rule-order/兜底 permit 与混合规则被接受
+[pass] rule-order/进程选择器按 ASCII 折叠比较
+[pass] device/布局断言在打开设备前就会跑
+[pass] device/配置结构字段按 C++ 头的顺序写进字节
+[pass] device/启用配置拒绝非法参数
+[pass] device/关闭配置只带版本号
+[pass] device/MakeIoctl 与常量一致
+[pass] device/事件结构可往返字节
+[pass] device/统计结构可往返字节
+[pass] device/重定向上下文可往返字节
+[pass] device/重定向目的地解析 TCP 与 UDP 上下文
+[pass] device/中继拒绝非 TCP redirect context
+[pass] device/forwarded 结构可往返字节
+[pass] device/forwarded config 与 redirect 查询结构可往返字节
+[pass] socks5/IPv4 目标：请求是 05 01 00 01 + 4 字节地址 + 端口
+[pass] socks5/IPv6 目标：请求是 05 01 00 04 + 16 字节地址 + 端口
+[pass] socks5/域名目标：请求是 05 01 00 03 + 长度 + ASCII + 端口
+[pass] socks5/rep 非 0 抛 Socks5Exception 并带 rep 码与目标
+[pass] socks5/上游不可达时立即抛 Socks5Exception
+[pass] socks5/上游回复 0xFF 表示拒绝 no-auth
+[pass] socks5/上游不回话时超时报错而不是挂住
+[pass] socks5/上游回复版本不对时报错
+[pass] socks5/非 ASCII 域名在碰网络之前被拒绝
+[pass] socks5/没有上游时直连可用
+[pass] socks5/上游失败时不回退直连
+[pass] socks5/经上游 CONNECT 后数据面双向可通
+[pass] socks5-udp/IPv4 封装：RSV/FRAG/ATYP/地址/端口/payload 的顺序
+[pass] socks5-udp/IPv6 封装与解封装往返一致
+[pass] socks5-udp/FRAG 非 0 的响应被拒绝
+[pass] socks5-udp/域名响应被拒绝
+[pass] socks5-udp/截断响应被拒绝
+[pass] socks5-udp/ASSOCIATE 请求是固定的 10 字节
+[pass] config/socks5 段解析出上游主机与端口
+[pass] config/没有 socks5 段时上游为 null（直连）
+[pass] config/socks5 段未知字段带路径报错
+[pass] config/socks5 缺少 host 报错
+[pass] config/socks5 端口越界报错
+[pass] config/socks5 端口不是整数报错
+[pass] config/socks5 不是对象报错
+[pass] relay/单方向 RST 后兄弟泵 1 秒内退出
+[pass] relay/双向 EOF 保留半关闭且数据完整
+[pass] abi/头文件布局与自身 static_assert 一致
+[pass] abi/产品结构尺寸与头文件一致
+[pass] abi/产品结构字段与头文件逐项一致
+[pass] abi/产品 IOCTL 常量与头文件一致
+[pass] abi/产品枚举取值与头文件一致
+[pass] abi/产品布局断言常量与头文件一致
+[pass] abi/夹具结构尺寸与头文件一致
+[pass] abi/夹具结构字段与头文件逐项一致
+[pass] abi/夹具 IOCTL 常量与头文件一致
+[pass] abi/夹具枚举取值与头文件一致
+[pass] abi/redirect_context 常量三处一致
+[tests] total=226 passed=226 failed=0
+ASSERT PASS: 用户态单测 (exit=0)
+===== VM 契约：结构尺寸 / 511-512 边界 / 规则顺序差分 =====
+[vm-check] OK   ABI 握手
+[vm-check] OK   配置 ABI 版本
+[vm-check] OK   规则信息 ABI 版本
+[vm-check] OK   probe_config 60 字节被驱动拒绝
+[vm-check] OK   probe_config 64 字节被驱动接受
+[vm-check] OK   probe_stats 输出 264 字节
+[vm-check] OK   probe_stats 输出短 8 字节被驱动拒绝
+[vm-check] OK   probe_rule_info 输出 32 字节
+[vm-check] OK   probe_event 每个 64 字节
+[vm-check] OK   PolicyLimits 与内核共用 511 上限
+[vm-check] OK   UTF-8 511 字节通过
+[vm-check] OK   511 字节内容一致
+[vm-check] OK   UTF-8 512 字节整条不匹配
+[vm-check] OK   中文路径按 UTF-8 返回
+[vm-check] OK   配置往返
+[vm-check] OK   rule-order 只有 block 规则：产品与驱动结论一致
+[vm-check] OK   rule-order 只有 block 规则：换表 generation +1
+[vm-check] OK   rule-order permit 全重叠后跟 block：产品与驱动结论一致
+[vm-check] OK   rule-order permit 全重叠后跟 block：拒绝时 generation 不变
+[vm-check] OK   rule-order permit 全重叠后跟 block：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order permit 全重叠后跟 block：报错可诊断
+[vm-check] OK   rule-order 端口区间相交：产品与驱动结论一致
+[vm-check] OK   rule-order 端口区间相交：拒绝时 generation 不变
+[vm-check] OK   rule-order 端口区间相交：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 端口区间相交：报错可诊断
+[vm-check] OK   rule-order 端口不相交：产品与驱动结论一致
+[vm-check] OK   rule-order 端口不相交：换表 generation +1
+[vm-check] OK   rule-order 地址族不相交：产品与驱动结论一致
+[vm-check] OK   rule-order 地址族不相交：换表 generation +1
+[vm-check] OK   rule-order 地址族任一侧任意：产品与驱动结论一致
+[vm-check] OK   rule-order 地址族任一侧任意：拒绝时 generation 不变
+[vm-check] OK   rule-order 地址族任一侧任意：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 地址族任一侧任意：报错可诊断
+[vm-check] OK   rule-order 网段不相交：产品与驱动结论一致
+[vm-check] OK   rule-order 网段不相交：换表 generation +1
+[vm-check] OK   rule-order 网段嵌套：产品与驱动结论一致
+[vm-check] OK   rule-order 网段嵌套：拒绝时 generation 不变
+[vm-check] OK   rule-order 网段嵌套：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 网段嵌套：报错可诊断
+[vm-check] OK   rule-order 网段任一侧任意：产品与驱动结论一致
+[vm-check] OK   rule-order 网段任一侧任意：拒绝时 generation 不变
+[vm-check] OK   rule-order 网段任一侧任意：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 网段任一侧任意：报错可诊断
+[vm-check] OK   rule-order 进程选择器不同：产品与驱动结论一致
+[vm-check] OK   rule-order 进程选择器不同：换表 generation +1
+[vm-check] OK   rule-order 进程选择器不同（含非 ASCII 路径）：产品与驱动结论一致
+[vm-check] OK   rule-order 进程选择器不同（含非 ASCII 路径）：换表 generation +1
+[vm-check] OK   rule-order 进程选择器同一条路径：产品与驱动结论一致
+[vm-check] OK   rule-order 进程选择器同一条路径：拒绝时 generation 不变
+[vm-check] OK   rule-order 进程选择器同一条路径：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 进程选择器同一条路径：报错可诊断
+[vm-check] OK   rule-order 进程任一侧任意：产品与驱动结论一致
+[vm-check] OK   rule-order 进程任一侧任意：拒绝时 generation 不变
+[vm-check] OK   rule-order 进程任一侧任意：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 进程任一侧任意：报错可诊断
+[vm-check] OK   rule-order 两条 block 规则：产品与驱动结论一致
+[vm-check] OK   rule-order 两条 block 规则：换表 generation +1
+[vm-check] OK   rule-order block 在前 permit 在后：产品与驱动结论一致
+[vm-check] OK   rule-order block 在前 permit 在后：换表 generation +1
+[vm-check] OK   rule-order redirect 遮蔽 block：产品与驱动结论一致
+[vm-check] OK   rule-order redirect 遮蔽 block：拒绝时 generation 不变
+[vm-check] OK   rule-order redirect 遮蔽 block：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order redirect 遮蔽 block：报错可诊断
+[vm-check] OK   rule-order IPv6 网段推出地址族：产品与驱动结论一致
+[vm-check] OK   rule-order IPv6 网段推出地址族：拒绝时 generation 不变
+[vm-check] OK   rule-order IPv6 网段推出地址族：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order IPv6 网段推出地址族：报错可诊断
+[vm-check] OK   rule-order IPv6 与 IPv4 网段不相交：产品与驱动结论一致
+[vm-check] OK   rule-order IPv6 与 IPv4 网段不相交：换表 generation +1
+[vm-check] OK   rule-order 兜底动作为 block（无规则）：产品与驱动结论一致
+[vm-check] OK   rule-order 兜底动作为 block（无规则）：换表 generation +1
+[vm-check] OK   rule-order 兜底 block 与 permit 规则：产品与驱动结论一致
+[vm-check] OK   rule-order 兜底 block 与 permit 规则：拒绝时 generation 不变
+[vm-check] OK   rule-order 兜底 block 与 permit 规则：驱动用 STATUS_INVALID_PARAMETER 拒绝
+[vm-check] OK   rule-order 兜底 block 与 permit 规则：报错可诊断
+[vm-check] OK   rule-order 兜底 block 与全部 block 规则：产品与驱动结论一致
+[vm-check] OK   rule-order 兜底 block 与全部 block 规则：换表 generation +1
+[vm-check] OK   rejected_blobs 精确增加
+[vm-check] 已恢复：enabled=0、空规则表、fallback=permit
+[vm-check] checks=78 failures=0 verdict=PASS
+ASSERT PASS: vm-check 差分 (exit=0)
+===== 端到端：真实进程 → 重定向 → 中继 → 回显（含 1 MiB 校验和与重启）=====
+ASSERT PASS: 控制器程序存在 (C:\workspace\WinForward.Kernel\src\userland\WinForward.Controller\bin\Release\net10.0\WinForward.Controller.exe)
+ASSERT PASS: 测试开始前关闭重定向 (exit=0)
+ASSERT PASS: 读取驱动基线状态 (exit=0)
+ASSERT PASS: 基线 enabled=0 (config abi=6 enabled=0 listener_port=0 listener_pid=0 self_count=0
+rule abi=6 installed=1 generation=177 count=0 fallback=0 total_size=40 process_pool=0 networks=0
+stats abi=6 last_status=0x00000000
+stat classify_calls 23
+stat permitted 1
+stat blocked 0
+stat redirected 0
+stat rules_replaced 35
+stat rejected_blobs 10
+stat contexts_allocated 0
+stat context_alloc_failures 0
+stat apply_failures 0
+stat redirect_failures 0
+stat permitted_listener_port 0
+stat permitted_condition_flags 0
+stat permitted_redirect_state 0
+stat permitted_already_redirected 0
+stat permitted_self_process 0
+stat permitted_rule 0
+stat blocked_rule 0
+stat redirected_rule 0
+stat fallback_permit 1
+stat fallback_block 0
+stat fallback_redirect 0
+stat deferred_blocks 0
+stat process_path_metadata_seen 0
+stat udp_classify_calls 0
+stat udp_permitted 0
+stat udp_blocked 0
+stat udp_redirected 0)
+ASSERT PASS: echo 服务就绪 (echo-ready port=53818 pid=8844)
+echo port = 53818
+ASSERT PASS: 合法配置编译通过 (exit=0)
+ASSERT PASS: 歧义配置在编译期被拒 (exit=2)
+ASSERT PASS: 报错带两条规则序号 (check FAIL C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\conflict.json
+       PolicyCompileException: 规则 #0（permit 任意协议 任意族 端口 53818..53818 网段 任意网段 进程 任意进程）会遮蔽后面的 block 规则 #1（block 任意协议 任意族 端口 53818..53818 网段 任意网段 进程 任意进程）：两者在协议、地址族、端口区间、网段与进程选择器上都可能命中同一条连接。block 规则被编译成独立的 AUTH_CONNECT 过滤器、不参与规则顺序比较，驱动会整块拒绝这份规则表，请收窄条件或调整顺序。)
+ASSERT PASS: 兜底 block 与 permit 规则共存被拒 (exit=2)
+ASSERT PASS: 报错指向兜底动作（fallbackAction） (check FAIL C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\fallback-block.json
+       PolicyCompileException: 兜底动作（fallbackAction）是 block，但规则 #0 是 permit：驱动会按 TCP(6) / UDP(17) 各创建一条 AUTH_CONNECT block filter（IPv4 / IPv6 每层一对），把所有 TCP/UDP 连接都拒掉，这条规则永远不会生效（classify 却仍会记成放行，计数与真实结果不一致）。请把兜底动作改成 permit/redirect，或把这条规则改成 block。)
+ASSERT PASS: 端口区间颠倒被拒 (exit=2)
+ASSERT PASS: 端口颠倒报错带规则序号 (check FAIL C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\reversed.json
+       PolicyCompileException: 规则 #1：远端端口区间颠倒：9000..8000)
+ASSERT PASS: 控制器就绪 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag)
+ASSERT PASS: A1 规则数与兜底动作回读一致 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag)
+ASSERT PASS: 监听端口已告知驱动 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag)
+ASSERT PASS: V4 客户端经重定向后回显成功 (client target=127.0.0.1:53818 family=4 bytes=1048576 seed=1
+client sent=1048576 received=1048576
+client sha256 sent=12541F236C1CAFCB0C30C4106363B591C2F7E0CD315474CE302E27D9CCB16AB4 received=12541F236C1CAFCB0C30C4106363B591C2F7E0CD315474CE302E27D9CCB16AB4
+client OK bytes=1048576 sha256=12541F236C1CAFCB0C30C4106363B591C2F7E0CD315474CE302E27D9CCB16AB4)
+ASSERT PASS: V6 客户端经重定向后回显成功 (client target=[::1]:53818 family=6 bytes=1048576 seed=1
+client sent=1048576 received=1048576
+client sha256 sent=12541F236C1CAFCB0C30C4106363B591C2F7E0CD315474CE302E27D9CCB16AB4 received=12541F236C1CAFCB0C30C4106363B591C2F7E0CD315474CE302E27D9CCB16AB4
+client OK bytes=1048576 sha256=12541F236C1CAFCB0C30C4106363B591C2F7E0CD315474CE302E27D9CCB16AB4)
+ASSERT PASS: 控制器按停止信号退出 (timeout=60000ms)
+ASSERT PASS: 控制器第一次退出码 0 (exit=0)
+ASSERT PASS: 退出时关闭重定向 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=4552 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53820 records=866
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+relay accept #2 original=::1:53818 source=host family=IPv6 protocol=TCP pid=9796 rule=0 upstream_id=- ingress=0 upstream=direct client=[::1]:53822 records=866
+relay connected #2 to=::1:53818 via=direct
+relay close #2 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53819
+controller-forwarded-installed generation=9 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=2 refused=0 bytes_in=2097152 bytes_out=2097152
+controller-exit code=0)
+ASSERT PASS: A3/V4 原始目的地读回正确 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=4552 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53820 records=866
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+relay accept #2 original=::1:53818 source=host family=IPv6 protocol=TCP pid=9796 rule=0 upstream_id=- ingress=0 upstream=direct client=[::1]:53822 records=866
+relay connected #2 to=::1:53818 via=direct
+relay close #2 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53819
+controller-forwarded-installed generation=9 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=2 refused=0 bytes_in=2097152 bytes_out=2097152
+controller-exit code=0)
+ASSERT PASS: A3/V6 原始目的地读回正确 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=4552 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53820 records=866
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+relay accept #2 original=::1:53818 source=host family=IPv6 protocol=TCP pid=9796 rule=0 upstream_id=- ingress=0 upstream=direct client=[::1]:53822 records=866
+relay connected #2 to=::1:53818 via=direct
+relay close #2 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53819
+controller-forwarded-installed generation=9 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=2 refused=0 bytes_in=2097152 bytes_out=2097152
+controller-exit code=0)
+ASSERT PASS: A4 两条会话各搬运 1048576 字节 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=4552 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53820 records=866
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+relay accept #2 original=::1:53818 source=host family=IPv6 protocol=TCP pid=9796 rule=0 upstream_id=- ingress=0 upstream=direct client=[::1]:53822 records=866
+relay connected #2 to=::1:53818 via=direct
+relay close #2 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53819
+controller-forwarded-installed generation=9 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=2 refused=0 bytes_in=2097152 bytes_out=2097152
+controller-exit code=0)
+ASSERT PASS: 退出摘要 2 条连接、双向 2097152 字节 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=4552 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53820 records=866
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+relay accept #2 original=::1:53818 source=host family=IPv6 protocol=TCP pid=9796 rule=0 upstream_id=- ingress=0 upstream=direct client=[::1]:53822 records=866
+relay connected #2 to=::1:53818 via=direct
+relay close #2 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53819
+controller-forwarded-installed generation=9 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=2 refused=0 bytes_in=2097152 bytes_out=2097152
+controller-exit code=0)
+ASSERT PASS: 没有第二条 accept（没有成环） (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=4552 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53820 records=866
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+relay accept #2 original=::1:53818 source=host family=IPv6 protocol=TCP pid=9796 rule=0 upstream_id=- ingress=0 upstream=direct client=[::1]:53822 records=866
+relay connected #2 to=::1:53818 via=direct
+relay close #2 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53819
+controller-forwarded-installed generation=9 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=2 refused=0 bytes_in=2097152 bytes_out=2097152
+controller-exit code=0)
+ASSERT PASS: 控制器输出退出码 0 行 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=4552 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53820 records=866
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+relay accept #2 original=::1:53818 source=host family=IPv6 protocol=TCP pid=9796 rule=0 upstream_id=- ingress=0 upstream=direct client=[::1]:53822 records=866
+relay connected #2 to=::1:53818 via=direct
+relay close #2 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53819
+controller-forwarded-installed generation=9 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=2 refused=0 bytes_in=2097152 bytes_out=2097152
+controller-exit code=0)
+ASSERT PASS: A5 第一轮中继带 records（闸 2 路径） (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=True socks5=none
+controller-rules installed=1 generation=178 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=8 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53819 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53819 listener_pid=5488 self_count=1
+controller-ready pid=5488 port=53819 listener=0.0.0.0:53819,[::]:53819
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=4552 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53820 records=866
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+relay accept #2 original=::1:53818 source=host family=IPv6 protocol=TCP pid=9796 rule=0 upstream_id=- ingress=0 upstream=direct client=[::1]:53822 records=866
+relay connected #2 to=::1:53818 via=direct
+relay close #2 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53819
+controller-forwarded-installed generation=9 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=2 refused=0 bytes_in=2097152 bytes_out=2097152
+controller-exit code=0)
+ASSERT PASS: 退出后驱动仍加载且规则表仍在 (config abi=6 enabled=0 listener_port=0 listener_pid=0 self_count=0
+rule abi=6 installed=1 generation=178 count=1 fallback=0 total_size=56 process_pool=0 networks=0
+stats abi=6 last_status=0x00000000
+stat classify_calls 27
+stat permitted 3
+stat blocked 0
+stat redirected 2
+stat rules_replaced 36
+stat rejected_blobs 10
+stat contexts_allocated 2
+stat context_alloc_failures 0
+stat apply_failures 0
+stat redirect_failures 0
+stat permitted_listener_port 0
+stat permitted_condition_flags 0
+stat permitted_redirect_state 2
+stat permitted_already_redirected 0
+stat permitted_self_process 0
+stat permitted_rule 0
+stat blocked_rule 0
+stat redirected_rule 2
+stat fallback_permit 1
+stat fallback_block 0
+stat fallback_redirect 0
+stat deferred_blocks 0
+stat process_path_metadata_seen 0
+stat udp_classify_calls 0
+stat udp_permitted 0
+stat udp_blocked 0
+stat udp_redirected 0)
+ASSERT PASS: 退出后 enabled=0 (config abi=6 enabled=0 listener_port=0 listener_pid=0 self_count=0
+rule abi=6 installed=1 generation=178 count=1 fallback=0 total_size=56 process_pool=0 networks=0
+stats abi=6 last_status=0x00000000
+stat classify_calls 27
+stat permitted 3
+stat blocked 0
+stat redirected 2
+stat rules_replaced 36
+stat rejected_blobs 10
+stat contexts_allocated 2
+stat context_alloc_failures 0
+stat apply_failures 0
+stat redirect_failures 0
+stat permitted_listener_port 0
+stat permitted_condition_flags 0
+stat permitted_redirect_state 2
+stat permitted_already_redirected 0
+stat permitted_self_process 0
+stat permitted_rule 0
+stat blocked_rule 0
+stat redirected_rule 2
+stat fallback_permit 1
+stat fallback_block 0
+stat fallback_redirect 0
+stat deferred_blocks 0
+stat process_path_metadata_seen 0
+stat udp_classify_calls 0
+stat udp_permitted 0
+stat udp_blocked 0
+stat udp_redirected 0)
+ASSERT PASS: A5 redirected 精确 +2 (delta=2)
+ASSERT PASS: A5 contexts_allocated 精确 +2 (delta=2)
+ASSERT PASS: A5 中继出站带 records，走闸 2（redirect_state +2） (delta=2)
+ASSERT PASS: A5 第一轮不走 self-PID 闸（self_process +0） (delta=0)
+ASSERT PASS: 规则表替换一次 (delta=1)
+ASSERT PASS: 旧监听端口已释放 (port=53819)
+ASSERT PASS: 重启后控制器就绪 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=False socks5=none
+controller-rules installed=1 generation=179 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=10 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53825 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53825 listener_pid=5884 self_count=1
+controller-ready pid=5884 port=53825 listener=0.0.0.0:53825,[::]:53825
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag)
+ASSERT PASS: A6 重启后客户端仍能回显 (client target=127.0.0.1:53818 family=4 bytes=1048576 seed=1
+client sent=1048576 received=1048576
+client sha256 sent=12541F236C1CAFCB0C30C4106363B591C2F7E0CD315474CE302E27D9CCB16AB4 received=12541F236C1CAFCB0C30C4106363B591C2F7E0CD315474CE302E27D9CCB16AB4
+client OK bytes=1048576 sha256=12541F236C1CAFCB0C30C4106363B591C2F7E0CD315474CE302E27D9CCB16AB4)
+ASSERT PASS: 重启后的控制器退出 (timeout=60000ms)
+ASSERT PASS: 控制器第二次退出码 0 (exit=0)
+ASSERT PASS: 重启后的退出摘要 1 条连接 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=False socks5=none
+controller-rules installed=1 generation=179 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=10 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53825 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53825 listener_pid=5884 self_count=1
+controller-ready pid=5884 port=53825 listener=0.0.0.0:53825,[::]:53825
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=5528 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53826 records=0
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53825
+controller-forwarded-installed generation=11 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=1 refused=0 bytes_in=1048576 bytes_out=1048576
+controller-exit code=0)
+ASSERT PASS: 重启后 enabled 又回到 0 (config abi=6 enabled=0 listener_port=0 listener_pid=0 self_count=0
+rule abi=6 installed=1 generation=179 count=1 fallback=0 total_size=56 process_pool=0 networks=0
+stats abi=6 last_status=0x00000000
+stat classify_calls 30
+stat permitted 4
+stat blocked 0
+stat redirected 3
+stat rules_replaced 37
+stat rejected_blobs 10
+stat contexts_allocated 3
+stat context_alloc_failures 0
+stat apply_failures 0
+stat redirect_failures 0
+stat permitted_listener_port 0
+stat permitted_condition_flags 0
+stat permitted_redirect_state 2
+stat permitted_already_redirected 0
+stat permitted_self_process 1
+stat permitted_rule 0
+stat blocked_rule 0
+stat redirected_rule 3
+stat fallback_permit 1
+stat fallback_block 0
+stat fallback_redirect 0
+stat deferred_blocks 0
+stat process_path_metadata_seen 0
+stat udp_classify_calls 0
+stat udp_permitted 0
+stat udp_blocked 0
+stat udp_redirected 0)
+ASSERT PASS: 规则表替换累计 +2 (delta=2)
+ASSERT PASS: A5 闸 4：不带 records 时由 self-PID 放行（self_process +1） (delta=1)
+ASSERT PASS: A5 闸 4 路径不再命中闸 2（redirect_state +0） (delta=0)
+ASSERT PASS: A5 第二轮 accept 行 records=0 (policy rules=1 fallback=Permit blob=56 config=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\policy.json records=False socks5=none
+controller-rules installed=1 generation=179 count=1 fallback=0 blob=56 process_pool=0 networks=0
+controller-forwarded-installed generation=10 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-forwarded-config enabled=0 listener_port=53825 reason=no-forwarded-policy
+controller-config enabled=1 listener_port=53825 listener_pid=5884 self_count=1
+controller-ready pid=5884 port=53825 listener=0.0.0.0:53825,[::]:53825
+controller-run duration_ms=0 stop_file=C:\Users\Neko\AppData\Local\Temp\wf-userland-e2e-4ffe97a4f8674a7d82f8c90210f81b64\stop.flag
+relay accept #1 original=127.0.0.1:53818 source=host family=IPv4 protocol=TCP pid=5528 rule=0 upstream_id=- ingress=0 upstream=direct client=127.0.0.1:53826 records=0
+relay connected #1 to=127.0.0.1:53818 via=direct
+relay close #1 in=1048576 out=1048576
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=53825
+controller-forwarded-installed generation=11 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=1 refused=0 bytes_in=1048576 bytes_out=1048576
+controller-exit code=0)
+ASSERT PASS: echo 服务处理了 3 条连接 (echo-ready port=53818 pid=8844
+echo-done connections=3 bytes=3145728)
+ASSERT PASS: echo 总回显字节 3145728 (echo-ready port=53818 pid=8844
+echo-done connections=3 bytes=3145728)
+ASSERT PASS: echo 退出码 0 (exit=0)
+===== userland-e2e 全部通过：48 条断言 =====
+E2E-RESULT=PASS checks=48
+ASSERT PASS: userland-e2e (exit=0)
+===== 运行后状态 =====
+ASSERT PASS: 全部套件之后驱动仍 RUNNING（无崩溃） (STATE              : 4  RUNNING)
+ASSERT PASS: VM 没有重启（无蓝屏） (boot=10/22/2026 15:31:46)
+===== 全部通过 =====
+===== 卸载 =====
+卸载前 WfPr outstanding：153
+卸载前 WfIj outstanding：1
+卸载前 WfTr outstanding：5
+卸载后 WfPr outstanding：153
+ASSERT PASS: 卸载没有新增 WfPr outstanding (153 -> 153)
+卸载后 WfIj outstanding：0
+ASSERT PASS: 卸载没有新增 WfIj outstanding (1 -> 0)
+卸载后 WfTr outstanding：0
+ASSERT PASS: 卸载没有新增 WfTr outstanding (5 -> 0)
+GATE-RESULT=PASS

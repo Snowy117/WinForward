@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/design.md", "reason": "§6 CodeQL 设计：命令、包版本、成本与许可"}
+{"file": "tools/windows/gate.ps1", "reason": "参考 Windows 侧脚本的参数与工具发现风格（不要改它）"}
+{"file": "tools/windows/WfBuild.psm1", "reason": "Resolve-MSBuild 等既有工具发现实现"}

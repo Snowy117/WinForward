@@ -1,0 +1,19 @@
+policy rules=0 fallback=Permit blob=40 config=C:\workspace\wf-b5-controller.json records=True socks5=none
+controller-rules installed=1 generation=49 count=0 fallback=0 blob=40 process_pool=0 networks=0
+controller-forwarded-installed generation=38 count=1 fallback=0 blob=84
+controller-forwarded count=1 upstreams=1 blob=84
+controller-forwarded-config enabled=0 listener_port=51562 (redirect table cleared)
+controller-forwarded-config enabled=1 listener_port=51562 listener=192.168.100.2 family=4
+udp-relay start port=51562 listeners=2 upstreams=1
+controller-config enabled=1 listener_port=51562 listener_pid=7060 self_count=1
+controller-ready pid=7060 port=51562 listener=0.0.0.0:51562,[::]:51562
+controller-run duration_ms=120000 stop_file=C:\workspace\b5-product-stop.flag
+udp-relay association client=192.168.100.4:40621 server=192.168.100.99:40250 upstream_id=0 via=192.168.100.4:40500
+udp-relay associated client=192.168.100.4:40621 relay=192.168.100.4:40600 upstream_id=0
+controller-config-disabled enabled=0
+controller-forwarded-config-disabled enabled=0 port=51562
+udp-relay stop in=10 relayed=10 back=10 associations=1 failures=0 drops=0
+controller-forwarded-installed generation=39 count=0 fallback=0 blob=40
+controller-forwarded-cleared rules=0 fallback=permit
+controller-stop accepted=0 refused=0 bytes_in=0 bytes_out=0
+controller-exit code=0

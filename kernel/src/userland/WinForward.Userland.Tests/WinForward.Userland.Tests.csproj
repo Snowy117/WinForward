@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      自带的零依赖测试驱动程序，不引 xunit：仓库的构建面只有 nix devShell 与 Windows VM，
+      两者都不保证能访问 NuGet。入口是 dotnet run 的 test 子命令，退出码即门禁结果。
+    -->
+    <OutputType>Exe</OutputType>
+    <AssemblyName>WinForward.Userland.Tests</AssemblyName>
+    <RootNamespace>WinForward.Userland.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../WinForward.Userland/WinForward.Userland.csproj" />
+    <ProjectReference Include="../WinForward.Controller/WinForward.Controller.csproj" />
+  </ItemGroup>
+
+</Project>

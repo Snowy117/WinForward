@@ -1,0 +1,40 @@
+== Linux ip -br -4 addr
+lo               UNKNOWN        127.0.0.1/8 
+eth0             UP             192.168.100.4/24 
+eth1             UP             192.168.77.4/24 
+nebula.vpn       UNKNOWN        192.168.101.4/24 
+br-pg            UP             10.89.2.1/24 
+br-axonhub       UP             10.89.1.1/24 
+br-deeix         UP             10.89.0.1/24 
+== Linux route get .99
+192.168.100.99 dev eth0 src 192.168.100.4 uid 1000 
+    cache 
+== Linux route from .4
+192.168.100.99 from 192.168.100.4 dev eth0 uid 1000 
+    cache 
+== Linux neigh .99
+192.168.100.99 dev eth0 lladdr 00:15:5d:03:72:8d REACHABLE 
+== Linux ping .99
+PING 192.168.100.99 (192.168.100.99) 56(84) bytes of data.
+64 bytes from 192.168.100.99: icmp_seq=1 ttl=128 time=0.762 ms
+64 bytes from 192.168.100.99: icmp_seq=2 ttl=128 time=0.800 ms
+
+--- 192.168.100.99 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1047ms
+rtt min/avg/max/mdev = 0.762/0.781/0.800/0.019 ms
+== Windows alias/firewall
+
+IPAddress      : 192.168.100.99
+InterfaceIndex : 5
+AddressState   : Preferred
+PrefixLength   : 24
+SkipAsSource   : False
+
+
+
+Protocol LocalPort
+-------- ---------
+TCP      41400
+UDP      40400
+
+

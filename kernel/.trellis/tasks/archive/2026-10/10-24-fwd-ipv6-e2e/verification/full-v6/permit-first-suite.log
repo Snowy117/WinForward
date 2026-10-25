@@ -1,0 +1,34 @@
+SUITE-PID=8596
+SUITE-EXIT=0
+
+--- suite output ---
+ASSERT PASS: 解析入口 ifIndex (ifindex=5 local-ip=192.168.100.2)
+ASSERT PASS: 驱动 ABI 版本与夹具一致 (expected=8 actual=8)
+ASSERT PASS: Install 解析入口 ifIndex (local-ip=192.168.100.2)
+ASSERT PASS: forwarded blob installed=1 (expected=1 actual=1)
+ASSERT PASS: forwarded 规则数回读一致 (expected=2 actual=2)
+ASSERT PASS: config 回读 enabled=1 (count=1)
+ASSERT PASS: config 回读一条入口记录 (expected=1 actual=1)
+ASSERT PASS: config 回读 ifindex (expected=5 actual=5)
+ASSERT PASS: config 回读 listener_port (expected=40400 actual=40400)
+ASSERT PASS: config 回读 family (expected=4 actual=4)
+[forwarded-udp] 看门狗已启动：120s 后恢复空 permit 表与 disabled config generation=157 log=C:\Users\Neko\AppData\Local\Temp\wfprobe-watchdog-40400.log
+[forwarded-udp] READY phase=fragment listener=40400 remote=192.168.100.99:40250 expect_fragments=9 permit_first_port=9999 expect=no-datagram
+[forwarded-udp] fragment stats: calls=21 in=11 out=10 redirected=0 udp_created=0 udp_ingress=0 udp_return=0 udp_blocked=9 no_config=0 capacity=0 fragmented=9 inject_failed=0 return_failed=0 return_miss=0 miss_blocked=0 expired=0 multi_nb=0 complete=0/0
+ASSERT PASS: U6/U1：分片 datagram 不会到达 listener (received=False)
+ASSERT PASS: 每个分片都精确计入 udp_fragmented (expected=9 actual=9)
+ASSERT PASS: 分片全部精确计入 udp_blocked (expected=9 actual=9)
+ASSERT PASS: 分片不建表 (expected=0 actual=0)
+ASSERT PASS: 分片没有 DNAT 注入 (expected=0 actual=0)
+ASSERT PASS: 分片没有回程注入 (expected=0 actual=0)
+ASSERT PASS: 分片：udp_blocked == udp_fragmented (expected=9 actual=9)
+ASSERT PASS: fragment：classify_calls == no_write_right + in + out (expected=21 actual=21)
+ASSERT PASS: fragment：帧去向守恒 (expected=21 actual=21)
+ASSERT PASS: fragment：permitted == matched_permit + fallback_permit + udp_return_miss (expected=12 actual=12)
+ASSERT PASS: fragment：matched_redirect + udp_fragmented == tcp/udp ingress + blocked (expected=9 actual=9)
+ASSERT PASS: fragment：blocked 拆分含 UDP 与歧义 (expected=9 actual=9)
+ASSERT PASS: fragment：redirected == ingress + return（TCP+UDP） (expected=0 actual=0)
+ASSERT PASS: fragment：udp_blocked 拆分 (expected=9 actual=9)
+[forwarded-udp] 已恢复 rules=0 fallback=permit config=disabled
+
+

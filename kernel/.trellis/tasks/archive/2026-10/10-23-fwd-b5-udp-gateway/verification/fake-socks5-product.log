@@ -1,0 +1,12 @@
+[socks5-udp] listening tcp 40500
+[socks5-udp] associate peer=('192.168.100.2', 51566) relay=0.0.0.0:40600
+[socks5-udp] datagram #1 len=74 peer=('192.168.100.2', 61440)
+[socks5-udp] datagram #2 len=74 peer=('192.168.100.2', 61440)
+[socks5-udp] datagram #3 len=74 peer=('192.168.100.2', 61440)
+[socks5-udp] datagram #4 len=74 peer=('192.168.100.2', 61440)
+[socks5-udp] datagram #5 len=74 peer=('192.168.100.2', 61440)
+[socks5-udp] datagram #6 len=74 peer=('192.168.100.2', 61440)
+[socks5-udp] datagram #7 len=74 peer=('192.168.100.2', 61440)
+[socks5-udp] datagram #8 len=74 peer=('192.168.100.2', 61440)
+[socks5-udp] datagram #9 len=74 peer=('192.168.100.2', 61440)
+[socks5-udp] datagram #10 len=74 peer=('192.168.100.2', 61440)

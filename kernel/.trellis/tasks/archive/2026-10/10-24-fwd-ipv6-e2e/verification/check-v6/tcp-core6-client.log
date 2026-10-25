@@ -1,0 +1,4 @@
+$ python3 /home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_tcp_client.py --target fe80::99%eth0:40250 --bytes 65536 --verify 192.168.100.2:41400
+[client] port=51414 bytes=65536 acked=65537 sha=ef4636928161808e87035fa51983821677527ccd9661991c5d0126a778b2268a ok=1
+
+

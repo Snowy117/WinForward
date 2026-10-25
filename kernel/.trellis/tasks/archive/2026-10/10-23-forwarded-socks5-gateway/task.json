@@ -1,0 +1,52 @@
+{
+  "id": "forwarded-socks5-gateway",
+  "name": "forwarded-socks5-gateway",
+  "title": "Forwarded SOCKS5 网关：按入口网卡选上游",
+  "description": "为 Forwarded 域增加按入口网卡选择 SOCKS5 上游的透明网关：驱动做入口识别、DNAT 到本机 listener、回程源地址还原与注入；用户态复用 SOCKS5 TCP CONNECT/UDP ASSOCIATE 中继；不改系统路由表，第一版覆盖主机栈可见的入口。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "backend",
+  "package": null,
+  "priority": "P1",
+  "creator": "Snowy117",
+  "assignee": "Snowy117",
+  "createdAt": "2026-10-23",
+  "completedAt": "2026-10-23",
+  "branch": "main",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-23-fwd-b1-forwarded-blob",
+    "10-23-fwd-b2-config-wiring",
+    "10-23-fwd-b3-l2-spike",
+    "10-23-fwd-b4a-l2-skeleton",
+    "10-23-fwd-b4b-tcp-dnat",
+    "10-23-fwd-b5-udp-gateway",
+    "10-23-fwd-b6-hardening"
+  ],
+  "parent": null,
+  "relatedFiles": [
+    "src/driver/probe_driver.cpp",
+    "src/driver/probe_classify.cpp",
+    "src/driver/probe_control.cpp",
+    "src/common/rule_blob.h",
+    "src/common/matcher.h",
+    "src/userland/WinForward.Userland/Relay/RelayServer.cs",
+    "src/userland/WinForward.Userland/Control/WfpController.cs",
+    ".trellis/spec/backend/wfp-architecture.md"
+  ],
+  "notes": "规划已就绪，待 review 后 start。关键未决：D1 驱动形态需先做 L2 spike（WFP MAC 层 vs 独立 NDIS LWF）；External switch 纯桥接不在第一版。不 hook ipnat，不用 wintun。",
+  "meta": {
+    "upstream": "socks5",
+    "protocols": [
+      "tcp",
+      "udp"
+    ],
+    "route_table": "no-global-changes",
+    "driver_form": "wfp-l2-spike-or-ndis-lwf",
+    "first_scope": "host-stack-visible-ingress"
+  }
+}

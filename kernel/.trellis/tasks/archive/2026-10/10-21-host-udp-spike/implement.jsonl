@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/10-21-host-udp-spike/prd.md","reason":"本批次验收标准与边界"}
+{"file":".trellis/tasks/10-21-host-udp-spike/implement.md","reason":"执行步骤与临时改动清单"}
+{"file":".trellis/tasks/10-21-host-udp-production/design.md","reason":"父任务技术设计与待验证假设"}
+{"file":".trellis/tasks/archive/2026-10/10-21-host-udp-route-a-probe/research/route-a-findings.md","reason":"探针已有结论与命令"}
+{"file":".trellis/spec/backend/wfp-architecture.md","reason":"WFP 层、context 所有权与 block 约束"}
+{"file":".trellis/spec/backend/cpp-conventions.md","reason":"驱动方言与测试约定"}

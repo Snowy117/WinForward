@@ -1,0 +1,23 @@
+# 独立复核复跑（2026-10-23，驱动 EA271858…59C0A95）
+
+# --- forwarded-tcp core 44 PASS ---
+[client] port=60844 bytes=65536 acked=65537 sha=ef4636928161808e87035fa51983821677527ccd9661991c5d0126a778b2268a ok=1
+
+# --- forwarded-tcp multi 42 PASS (source 40500 cross, 40501 same-ingress two L) ---
+[client] target=192.168.100.99:40250 local=192.168.100.4:40500 bytes=2048 sha=a152db2545dc06e110974fb34ca6a39c96648b297e405b4edba5581a0ae9042a ok=1
+[client] target=192.168.77.99:40250 local=192.168.77.4:40500 bytes=2048 sha=c31163ec4cd08520582a299f29d6dd932b54b60dd1042599632aae1897b25582 ok=1
+[client] target=192.168.100.99:40250 local=192.168.100.4:40501 bytes=2048 sha=a152db2545dc06e110974fb34ca6a39c96648b297e405b4edba5581a0ae9042a ok=1
+[client] target=192.168.100.99:40251 local=192.168.100.4:40501 bytes=2048 sha=c31163ec4cd08520582a299f29d6dd932b54b60dd1042599632aae1897b25582 ok=1
+
+# --- forwarded-tcp hotswap 27 PASS (old connection post-swap) ---
+[client] post-swap target=192.168.100.99:40250 local=192.168.100.4:40510 bytes=2048 sha=80e1fd07c4b2912528b409bc5f374dc839120bd8a061aa7823f9dbbbfe7838bb ok=1
+[client] target=192.168.100.99:40250 local=192.168.100.4:40510 bytes=2048 sha=a152db2545dc06e110974fb34ca6a39c96648b297e405b4edba5581a0ae9042a ok=1
+[client] target=192.168.100.99:40250 local=192.168.100.4:39777 bytes=2048 sha=c31163ec4cd08520582a299f29d6dd932b54b60dd1042599632aae1897b25582 ok=1
+
+# --- forwarded-udp core 85 PASS ---
+[client] verify port ready 192.168.100.2:41400
+[client] target=192.168.100.99:40250 received=10/10 source_ok=True last_source=192.168.100.99:40250
+client_port=40600 target_port=40250 bytes=640 count=10 sha=deac6833105d28fb41b0faffec7f4b19006284613d9137d4aa39245baacf587a source=192.168.100.99:40250 source_ok=1 ok=1
+
+# --- forwarded-tcp noingress 18 PASS（外部 SYN 被 block，无 listener） ---
+python connect 192.168.77.99:40250 -> TimeoutError（预期：fail-closed block，不回退 fallback permit）

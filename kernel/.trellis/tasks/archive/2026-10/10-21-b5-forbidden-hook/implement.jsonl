@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/design.md", "reason": "§4.5 禁止模式设计、§3 退出码、§7 文件布局"}
+{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "§5.1 禁止清单与 §8 门禁要求"}
+{"file": "tools/check.sh", "reason": "要接入新检查的宿主入口"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "空模板要替换为指针"}

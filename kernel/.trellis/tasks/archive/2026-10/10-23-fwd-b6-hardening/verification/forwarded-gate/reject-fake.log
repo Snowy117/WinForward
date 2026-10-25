@@ -1,0 +1,5 @@
+[socks5-udp] listening tcp 40500 reject=True
+[socks5-udp] associate-failed peer=('192.168.100.2', 54630) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 54631) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 54632) rep=7
+[socks5-udp] summary associations=0 failures=3 datagrams=0

@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-23-fwd-b4b-tcp-dnat/prd.md", "reason": "本批范围与验收"}
+{"file": ".trellis/tasks/10-23-fwd-b4b-tcp-dnat/design.md", "reason": "config/ABI/redirect 表/DNAT/回程/E2E 设计"}
+{"file": ".trellis/tasks/10-23-fwd-b4b-tcp-dnat/implement.md", "reason": "执行步骤与验证"}
+{"file": ".trellis/tasks/archive/2026-10/10-23-fwd-b3-l2-spike/research/spike-l2.md", "reason": "B3 硬约束：原帧消费、流级触发、防环、VLAN/出向 59"}
+{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "B4a 事实与 B4b 边界"}
+{"file": ".trellis/spec/backend/forwarded-rule-blob.md", "reason": "forwarded blob/redirect 配置映射"}
+{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "C++ 规范"}
+{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "C# 规范"}

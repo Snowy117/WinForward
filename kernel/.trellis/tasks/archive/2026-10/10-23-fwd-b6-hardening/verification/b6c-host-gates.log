@@ -1,0 +1,22 @@
+[gates] pid=9604 app-id=\device\harddiskvolume3\workspace\winforward.kernel\tools\wfprobe\bin\release\net11.0\wfprobe.exe
+[gates] config: abi=7 enabled=1 listener-pid=8764 port=54702 self-pids=[]
+ASSERT PASS: 闸 1：连接监听端口成功 ()
+ASSERT PASS: 闸 1：relay 正常退出 (expected=0 actual=0)
+ASSERT PASS: 闸 1：连接没有被再次重定向（无 redirect context） (accept idx=0 context=0B)
+ASSERT PASS: 闸 1：事件 decision=permitted_listener_port (port=54702)
+[gates] config: abi=7 enabled=1 listener-pid=8836 port=54704 self-pids=[8836]
+ASSERT PASS: 闸 4：原始连接被重定向后完成 ()
+ASSERT PASS: 闸 4：代理接到带 context 的连接 (accept idx=0 context=36B)
+ASSERT PASS: 闸 4：代理出站连接直达真实目的地 (outbound=echo)
+ASSERT PASS: 闸 4：没有第二次 accept（没有成环） (accepts=1)
+ASSERT PASS: 闸 4：relay 退出码 (expected=0 actual=0)
+ASSERT PASS: 闸 4：事件 decision=permitted_self_process (pid=8836)
+[gates] config: abi=7 enabled=1 listener-pid=7820 port=54707 self-pids=[]
+ASSERT PASS: 闸 3：原始连接被重定向后完成 ()
+ASSERT PASS: 闸 3：代理拿到 redirect records (relay records=)
+ASSERT PASS: 闸 3：带 records 的出站连接直达目的地 (outbound=echo)
+ASSERT PASS: 闸 3：没有第二次 accept（没有成环） (accepts=1)
+ASSERT PASS: 闸 3：relay 退出码 (expected=0 actual=0)
+ASSERT PASS: 闸 3：事件 decision=permitted_redirect_state (pid=7820)
+[gates] 闸 3 场景观察到的 decision：permitted_listener_port,redirected,permitted_self_process,permitted_redirect_state
+[gates] verdict=PASS failures=0

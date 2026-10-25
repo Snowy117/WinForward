@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/10-21-host-udp-spike/prd.md","reason":"逐条核对 spike 验收"}
+{"file":".trellis/tasks/10-21-host-udp-spike/implement.md","reason":"核对执行与清理"}
+{"file":".trellis/spec/backend/wfp-architecture.md","reason":"核对 WFP 结论不违反既有约束"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"门禁断言与证据要求"}

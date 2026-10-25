@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/design.md", "reason": "§4.6 驱动静态分析：/WX 与 PREfast 的口径、基线构成"}
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/prd.md", "reason": "R4 / AC5 / AC9"}
+{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "§5 内核方言与 §8 门禁要求"}
+{"file": "src/driver/wfprobe.vcxproj", "reason": "要加警告级别与警告即错误"}
+{"file": "src/driver/probe_driver.cpp", "reason": "DriverEntry、dispatch、probe_lock/unlock 所在文件"}
+{"file": "src/driver/probe_control.cpp", "reason": "dispatch_device_control 所在文件"}

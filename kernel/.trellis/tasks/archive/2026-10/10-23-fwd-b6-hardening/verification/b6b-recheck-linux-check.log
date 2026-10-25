@@ -1,0 +1,12 @@
+[check] 环境 ... PASS（git 2.56.0，clang-format 21.1.8，cppcheck 2.22.0，python3 3.14.8，cmake 4.4.4，ninja 1.13.2，dotnet 10.0.401，clang-tidy 21.1.8）
+[check] 格式 ... PASS（工作区 41 个文件）
+[check] 有效行 ... PASS（163 个文件均未超过 500 行）
+[check] cppcheck ... PASS（31 个文件）
+[check] 禁止模式 ... PASS（扫描 31 个文件，命中 0 处）
+[check] 配置 ... PASS（build/check）
+[check] clang-tidy ... PASS（7 个翻译单元）
+[check] wf_check ... PASS（C# 测试与 ctest 全绿）
+
+[check] 汇总：8 PASS，0 FAIL，0 SKIP（共 8 项，耗时 104.551 s）
+[check] 结论：PASS
+CHECK=0

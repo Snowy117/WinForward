@@ -1,0 +1,100 @@
+===== StateCommand =====
+config abi=7 enabled=0 listener_port=65364 listener_pid=6308 self_count=1
+self pid=6308
+rule abi=7 installed=1 generation=83 count=1 fallback=0 total_size=56 process_pool=0 networks=0
+stats abi=7 last_status=0x00000000
+stat classify_calls 3
+stat permitted 0
+stat blocked 1
+stat redirected 0
+stat rules_replaced 0
+stat rejected_blobs 0
+stat contexts_allocated 0
+stat context_alloc_failures 0
+stat apply_failures 0
+stat redirect_failures 0
+stat permitted_listener_port 0
+stat permitted_condition_flags 0
+stat permitted_redirect_state 0
+stat permitted_already_redirected 0
+stat permitted_self_process 0
+stat permitted_rule 0
+stat blocked_rule 1
+stat redirected_rule 0
+stat fallback_permit 0
+stat fallback_block 0
+stat fallback_redirect 0
+stat deferred_blocks 1
+stat process_path_metadata_seen 0
+stat udp_classify_calls 1
+stat udp_permitted 0
+stat udp_blocked 1
+stat udp_redirected 0
+forwarded abi=7 installed=1 generation=18 rules=0 fallback=0 total_size=40 networks=0 enabled=0 ingresses=0
+forwarded-stats abi=7 last_status=0xC000000D redirect_active=0 redirect_high_water=0
+forwarded-stat classify_calls 469
+forwarded-stat inbound_frames 275
+forwarded-stat outbound_frames 194
+forwarded-stat permitted 462
+forwarded-stat blocked 1
+forwarded-stat matched 5
+forwarded-stat matched_permit 5
+forwarded-stat matched_block 0
+forwarded-stat matched_redirect 0
+forwarded-stat fallback 458
+forwarded-stat fallback_permit 457
+forwarded-stat fallback_block 1
+forwarded-stat self_injected 0
+forwarded-stat no_table 0
+forwarded-stat malformed 0
+forwarded-stat non_ip 6
+forwarded-stat no_write_right 0
+forwarded-stat rejected_blobs 3
+forwarded-stat tables_replaced 3
+forwarded-stat redirected 0
+forwarded-stat redirect_created 0
+forwarded-stat redirect_ingress 0
+forwarded-stat redirect_return 0
+forwarded-stat redirect_blocked 0
+forwarded-stat redirect_return_failed 0
+forwarded-stat redirect_return_miss 0
+forwarded-stat redirect_return_ambiguous 0
+forwarded-stat redirect_no_config 0
+forwarded-stat redirect_no_state 0
+forwarded-stat redirect_no_ingress 0
+forwarded-stat redirect_capacity 0
+forwarded-stat redirect_non_tcp 0
+forwarded-stat redirect_inject_failed 0
+forwarded-stat redirect_expired 0
+forwarded-stat redirect_multi_nb 0
+forwarded-stat redirect_multi_l 0
+forwarded-stat udp_created 0
+forwarded-stat udp_ingress 0
+forwarded-stat udp_return 0
+forwarded-stat udp_blocked 0
+forwarded-stat udp_return_failed 0
+forwarded-stat udp_return_miss 0
+forwarded-stat udp_return_ambiguous 0
+forwarded-stat udp_no_config 0
+forwarded-stat udp_no_state 0
+forwarded-stat udp_no_ingress 0
+forwarded-stat udp_capacity 0
+forwarded-stat udp_fragmented 0
+forwarded-stat udp_inject_failed 0
+forwarded-stat udp_expired 0
+forwarded-stat udp_multi_nb 0
+forwarded-stat udp_multi_l 0
+forwarded-stat udp_return_miss_blocked 0
+forwarded-stat inject_complete_calls 0
+forwarded-stat inject_complete_failed 0
+===== driver sha / service =====
+EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95
+
+SERVICE_NAME: wfprobe 
+        TYPE               : 1  KERNEL_DRIVER  
+        STATE              : 4  RUNNING 
+                                (STOPPABLE, NOT_PAUSABLE, IGNORES_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+        SERVICE_EXIT_CODE  : 0  (0x0)
+        CHECKPOINT         : 0x0
+        WAIT_HINT          : 0x0

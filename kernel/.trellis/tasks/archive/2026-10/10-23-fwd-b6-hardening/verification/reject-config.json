@@ -1,0 +1,20 @@
+{
+  "fallbackAction": "permit",
+  "socks5Servers": [
+    { "name": "main", "host": "192.168.100.4", "port": 40500 }
+  ],
+  "forwarded": {
+    "fallbackAction": "permit",
+    "rules": [
+      {
+        "name": "udp-b5",
+        "remoteCidr": "192.168.100.99/32",
+        "remotePorts": "40250",
+        "protocol": "udp",
+        "family": "ipv4",
+        "action": "redirect",
+        "target": "main"
+      }
+    ]
+  }
+}

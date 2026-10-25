@@ -1,0 +1,18 @@
+$ python3 /home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_udp_client.py --target 192.168.100.99:40250 --count 10 --verify 192.168.100.2:41400 --source-port-base 44001
+[client] verify port ready 192.168.100.2:41400
+[client] target=192.168.100.99:40250 received=0/10 source_ok=True last_source=
+
+Traceback (most recent call last):
+  File "/home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_udp_client.py", line 209, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_udp_client.py", line 202, in main
+    with socket.create_connection((verify_host, int(verify_port)), timeout=5.0) as conn:
+         ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nix/store/xahxrjs30p3mw0a42bqg9ikgkikskw8m-python3-3.14.8/lib/python3.14/socket.py", line 874, in create_connection
+    raise exceptions[0]
+  File "/nix/store/xahxrjs30p3mw0a42bqg9ikgkikskw8m-python3-3.14.8/lib/python3.14/socket.py", line 859, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+TimeoutError: timed out
+

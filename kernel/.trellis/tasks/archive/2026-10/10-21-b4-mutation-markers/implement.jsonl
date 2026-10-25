@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-21-quality-gates-modernization/design.md", "reason": "§5 变异锚点的设计（区域标记语法与失败语义）"}
+{"file": "tools/windows/mutation.ps1", "reason": "要改写的变异脚本与 16 条用例"}
+{"file": "src/driver/probe_classify.cpp", "reason": "变异区域最集中的文件"}
+{"file": "src/driver/rule_table.cpp", "reason": "规则表相关变异"}
+{"file": "src/driver/probe_control.cpp", "reason": "IOCTL 相关变异"}
+{"file": "src/driver/probe_driver.cpp", "reason": "V6 filter 变异"}

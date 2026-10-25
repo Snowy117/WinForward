@@ -1,0 +1,20 @@
+<Project>
+
+  <!--
+    src/userland 下全部 .NET 工程的公共属性。
+
+    目标框架固定 net10.0：Linux 侧由 devShell 提供 dotnet-sdk_10（见 flake.nix 与
+    .trellis/spec/backend/csharp-conventions.md §1），Windows VM 上是 SDK 11。
+    改目标框架等于同时改两侧工具链，别顺手升。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

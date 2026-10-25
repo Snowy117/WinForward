@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 产品入口：配置 → 规则编译 → IOCTL 下发 → 监听 → 中继。 -->
+    <OutputType>Exe</OutputType>
+    <AssemblyName>WinForward.Controller</AssemblyName>
+    <RootNamespace>WinForward.Controller</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../WinForward.Userland/WinForward.Userland.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinForward.Userland.Tests" />
+  </ItemGroup>
+
+</Project>

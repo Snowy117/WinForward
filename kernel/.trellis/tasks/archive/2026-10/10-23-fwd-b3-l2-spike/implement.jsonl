@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-23-fwd-b3-l2-spike/prd.md", "reason": "本批需求与验收标准"}
+{"file": ".trellis/tasks/10-23-fwd-b3-l2-spike/design.md", "reason": "拓扑降级、注入验证与判据"}
+{"file": ".trellis/tasks/10-23-fwd-b3-l2-spike/implement.md", "reason": "执行步骤与清理要求"}
+{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "现有 WFP 架构与 D1/D3 背景"}

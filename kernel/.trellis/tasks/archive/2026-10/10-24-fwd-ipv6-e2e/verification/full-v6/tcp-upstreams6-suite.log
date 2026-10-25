@@ -1,0 +1,54 @@
+SUITE-PID=2324
+SUITE-EXIT=0
+
+--- suite output ---
+ASSERT PASS: 解析入口 ifIndex (ifindex=5 local-ip=fe80::8ca8:508a:7f89:be57)
+ASSERT PASS: 驱动 ABI 版本与夹具一致 (expected=8 actual=8)
+ASSERT PASS: Install 解析入口 ifIndex (local-ip=fe80::8ca8:508a:7f89:be57)
+ASSERT PASS: forwarded blob installed=1 (expected=1 actual=1)
+ASSERT PASS: forwarded 规则数回读一致 (expected=2 actual=2)
+ASSERT PASS: config 回读 enabled=1 (count=1)
+ASSERT PASS: config 回读一条入口记录 (expected=1 actual=1)
+ASSERT PASS: config 回读 ifindex (expected=5 actual=5)
+ASSERT PASS: config 回读 listener_port (expected=40400 actual=40400)
+ASSERT PASS: config 回读 family (expected=6 actual=6)
+[forwarded-tcp] 看门狗已启动：120s 后恢复空 permit 表与 disabled config generation=165 log=C:\Users\Neko\AppData\Local\Temp\wfprobe-watchdog-40400.log
+[forwarded-tcp] READY phase=upstreams listener=40400 verify_port=41400 ports=40250,40251 backend=192.168.100.4:40250 socks5=127.0.0.1:57779,127.0.0.1:57780
+[forwarded-tcp] verify port=52838 bytes=2048 acked=2049 sha=7c7272c96bd53928d659650ce0d351531ccca5b7ce618d14f48ec5c8ffd4919f ok=1
+[forwarded-tcp] verify port=37468 bytes=2048 acked=2049 sha=7c7272c96bd53928d659650ce0d351531ccca5b7ce618d14f48ec5c8ffd4919f ok=1
+ASSERT PASS: 客户端回报了验证记录 (client_port=52838 records=2/2)
+ASSERT PASS: 客户端声明数据完整 (client_port=52838)
+ASSERT PASS: 客户端实际收到完整字节数 (expected=2048 actual=2048)
+ASSERT PASS: 客户端收到的字节内容 SHA-256 一致 (expected=7c7272c96bd5 actual=7c7272c96bd53928d659650ce0d351531ccca5b7ce618d14f48ec5c8ffd4919f)
+ASSERT PASS: 客户端 TCP 已确认全部发送字节（tcpi_bytes_acked） (expected=2048..2049 actual=2049)
+ASSERT PASS: 客户端回报了验证记录 (client_port=37468 records=2/2)
+ASSERT PASS: 客户端声明数据完整 (client_port=37468)
+ASSERT PASS: 客户端实际收到完整字节数 (expected=2048 actual=2048)
+ASSERT PASS: 客户端收到的字节内容 SHA-256 一致 (expected=7c7272c96bd5 actual=7c7272c96bd53928d659650ce0d351531ccca5b7ce618d14f48ec5c8ffd4919f)
+ASSERT PASS: 客户端 TCP 已确认全部发送字节（tcpi_bytes_acked） (expected=2048..2049 actual=2049)
+[forwarded-tcp] upstreams stats: calls=86 in=46 out=40 redirected=22 (ingress=13 return=9) created=2 active=2/2 blocked=0 redirect_blocked=0 no_config=0 no_state=0 capacity=0 non_tcp=0 inject_failed=0 return_failed=0 return_miss=0 expired=0 multi_nb=4 complete=24/failed=0 self_injected=24
+ASSERT PASS: 客户端都触发 accept (2/2)
+ASSERT PASS: upstream 0 收到 atyp=4 CONNECT (expected=1 actual=1)
+ASSERT PASS: upstream 1 收到 atyp=4 CONNECT (expected=1 actual=1)
+ASSERT PASS: upstream 0 收到一次 CONNECT (expected=1 actual=1)
+ASSERT PASS: upstream 1 收到一次 CONNECT (expected=1 actual=1)
+ASSERT PASS: 端口映射到 upstream 0 (upstream=0)
+ASSERT PASS: 端口映射到 upstream 1 (upstream=1)
+ASSERT PASS: 两条流都命中 redirect 表 (expected=0 actual=0)
+ASSERT PASS: 每个成功注入都有完成回调 (expected>=22 actual=24)
+ASSERT PASS: 注入完成状态全部成功 (expected=0 actual=0)
+ASSERT PASS: upstream 中继收到客户端数据 (2048B port=40250)
+ASSERT PASS: upstream 回程数据回到客户端 (2048B port=40250)
+ASSERT PASS: upstream 中继收到客户端数据 (2048B port=40251)
+ASSERT PASS: upstream 回程数据回到客户端 (2048B port=40251)
+ASSERT PASS: upstreams：classify_calls == no_write_right + in + out (expected=86 actual=86)
+ASSERT PASS: upstreams：帧去向守恒（含 redirected） (expected=86 actual=86)
+ASSERT PASS: upstreams：permitted == matched_permit + fallback_permit + udp_return_miss (expected=40 actual=40)
+ASSERT PASS: upstreams：blocked == matched_block + fallback_block + redirect 失败 + 歧义 + udp 失败 (expected=0 actual=0)
+ASSERT PASS: upstreams：matched == permit + block + redirect (expected=13 actual=13)
+ASSERT PASS: upstreams：matched_redirect + udp_fragmented == ingress + blocked (expected=13 actual=13)
+ASSERT PASS: upstreams：redirect_blocked 拆分 (expected=0 actual=0)
+ASSERT PASS: upstreams：redirected == ingress + return (expected=22 actual=22)
+[forwarded-tcp] 已恢复 rules=0 fallback=permit config=disabled
+
+

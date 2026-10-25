@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "WFP 层选择、block 历史结论、Host UDP 与 ABI 事实"}
+{"file": ".trellis/spec/backend/host-rule-blob.md", "reason": "blob v2 布局、matcher 语义、当前 block 边界与预算"}
+{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "C++ 两套方言、命名与有效行限制"}
+{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "C# 工具链、ABI 布局断言与零依赖测试"}
+{"file": "src/driver/README.md", "reason": "驱动模块职责、控制面 ABI 与测试入口"}
+{"file": ".trellis/tasks/archive/2026-10/10-24-host-rule-arrays-process-match/research/winforward-rule-semantics.md", "reason": "block 的 WFP 表达边界与 VM 实测"}
+{"file": ".trellis/spec/backend/wfp-connected-udp-record-refcount-leak.md", "reason": "connected UDP redirect 泄漏事实"}

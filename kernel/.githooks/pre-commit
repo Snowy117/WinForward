@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# 提交前钩子：只调用宿主门禁的快速档，格式与禁止模式检查的是索引内容。
+#
+# 安装：.githooks/install.sh
+# 卸载：.githooks/install.sh --uninstall
+# 绕过：git commit --no-verify（不建议；tools/check.sh --fast 仍是最终判据）
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    printf '.githooks/pre-commit: 不在 git 仓库里，无法确定仓库根目录。\n' >&2
+    exit 1
+}
+
+"${repo_root}/tools/check.sh" --fast --staged
+status=$?
+
+if (( status != 0 )); then
+    printf '\n提交被拦下：上面的检查没通过。修好并重新 git add 之后再提交。\n'
+    printf '确实要绕过时用 git commit --no-verify；tools/check.sh --fast 仍会检查工作区。\n'
+fi
+
+exit "${status}"

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "blob/进程选择器/block 与顺序语义的既有决策（D2/D3/D4、§7.9、§7.10）"}
+{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "src/common 内核方言、命名、有效行与测试约定"}
+{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "C# 模型、错误处理、ABI 镜像与布局断言约定"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "门禁入口与验证要求"}
+{"file": ".trellis/tasks/10-24-host-rule-arrays-process-match/research/winforward-rule-semantics.md", "reason": "WinForward 语义、VM 实测与 block 表达边界"}

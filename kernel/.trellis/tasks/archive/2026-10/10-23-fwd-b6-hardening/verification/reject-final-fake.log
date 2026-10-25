@@ -1,0 +1,16 @@
+[socks5-udp] listening tcp 40500 reject=True
+[socks5-udp] associate-failed peer=('192.168.100.2', 52891) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52893) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52894) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52898) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52899) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52900) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52906) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52907) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52908) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52917) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52918) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52919) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52939) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52940) rep=7
+[socks5-udp] associate-failed peer=('192.168.100.2', 52941) rep=7
