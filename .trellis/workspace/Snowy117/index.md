@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-10-24
+- **Total Sessions**: 8
+- **Last Active**: 2026-10-25
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~239 | Active |
+| `journal-1.md` | ~263 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-10-25 | Forwarded IPv6 数据面 E2E 验收 | `309ee29`, `e36532d`, `99d214b` | `feat/block-sink` |
 | 7 | 2026-10-24 | Host block classify sink | `53255e5` | `feat/block-sink` |
 | 6 | 2026-10-24 | Host 规则数组与进程选择器 parity | `3a73653` | `feat/host-rule-arrays-process-match` |
 | 4 | 2026-10-21 | Host UDP 路线 A 实验验证 | `c3ce6bf` | `main` |

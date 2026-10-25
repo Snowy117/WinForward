@@ -237,3 +237,27 @@ block 改为 classify 首命中 + sink 端口，固定 4 条 auth filter；删�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Forwarded IPv6 数据面 E2E 验收
+<!-- trellis-session: v=2 fp=ea44a4405c3303a3 -->
+
+**Date**: 2026-10-25
+**Task**: Forwarded IPv6 数据面 E2E 验收
+**Branch**: `feat/block-sink`
+
+### Summary
+
+新增 --include-v6 门禁，覆盖 TCP/UDP core、upstreams、UDP socks5、同入口多 L 与 Internal/External 两入口；修复 UDP v6 listener 与 v4 backend 共用 Any 端点；v6/v4 门禁、check.sh --full、Userland 254 全绿；环境清理无残留。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `309ee29` | feat(forwarded): 补齐 native IPv6 E2E 与 Linux 门禁覆盖 |
+| `e36532d` | docs(forwarded): 更新 IPv6 验证状态与边界 |
+| `99d214b` | docs(task): 记录 forwarded IPv6 E2E 验收 |
+
+### Status
+
+[OK] **Completed**
