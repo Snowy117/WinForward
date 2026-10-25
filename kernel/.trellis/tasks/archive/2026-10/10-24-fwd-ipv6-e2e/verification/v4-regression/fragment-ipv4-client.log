@@ -1,4 +1,0 @@
-$ podman run --rm --network=host --cap-add=NET_RAW -v /home/paff/Projects/WinForward.Kernel/tools/linux:/work:ro docker.io/library/python:3.12-alpine python /work/raw_fragment_sender.py --family 4 --source 192.168.100.4 --target 192.168.100.99:40250 --fragments 9 --identification 46791
-[raw-frag] family=4 target=192.168.100.99:40250 fragments=9 datagram_bytes=552 fragment_payload=64 identification=0xb6c7 source_port=50000
-
-

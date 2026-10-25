@@ -1,6 +1,0 @@
-$ python3 /home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_tcp_b6b.py --mode swap --target 192.168.100.99:40250 --bind-address 192.168.100.4 --source-port 40600 --second-source-port 40601 --payload-size 2048 --gap 3 --timeout 20
-[client] post-swap target=192.168.100.99:40250 local=192.168.100.4:40600 bytes=2048 sha=80e1fd07c4b2912528b409bc5f374dc839120bd8a061aa7823f9dbbbfe7838bb ok=1
-[client] target=192.168.100.99:40250 local=192.168.100.4:40600 bytes=2048 sha=a152db2545dc06e110974fb34ca6a39c96648b297e405b4edba5581a0ae9042a ok=1
-[client] target=192.168.100.99:40250 local=192.168.100.4:40601 bytes=2048 sha=c31163ec4cd08520582a299f29d6dd932b54b60dd1042599632aae1897b25582 ok=1
-
-

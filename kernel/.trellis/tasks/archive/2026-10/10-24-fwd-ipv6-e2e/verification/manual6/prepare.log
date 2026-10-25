@@ -1,2 +1,0 @@
-B6C-ENV-READY address=192.168.100.99 ifIndex=5 state=Preferred prefix=24
-B6C-V6-READY internal_l1=fe80::8ca8:508a:7f89:be57 internal_l2=fe80::98 internal_target=fe80::99 external_l1=fe80::a09e:8f4a:9bb4:71fc external_target=fe80::199 internal_ifindex=5 external_ifindex=14

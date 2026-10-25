@@ -1,1 +1,0 @@
-& 'C:/workspace/forwarded-gate-suite.ps1' -Exe 'C:/workspace/WinForward.Kernel/tools/wfprobe/bin/Release/net11.0/wfprobe.exe' -Out 'C:/workspace/forwarded-udp.out' -ArgumentLine 'forwarded-udp --phase core --remote-address 192.168.100.99 --remote-port 40250 --listener-port 40400 --backend 192.168.100.4:40250 --verify-port 41400 --expect-datagrams 200 --wait-ms 60000'

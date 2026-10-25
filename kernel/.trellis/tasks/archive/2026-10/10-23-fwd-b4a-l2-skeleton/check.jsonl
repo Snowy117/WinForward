@@ -1,4 +1,0 @@
-{"file": ".trellis/tasks/10-23-fwd-b4a-l2-skeleton/prd.md", "reason": "对照范围与验收"}
-{"file": ".trellis/tasks/10-23-fwd-b4a-l2-skeleton/design.md", "reason": "对照 ABI/匹配/block 语义"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门禁与审查标准"}
-{"file": ".trellis/tasks/archive/2026-10/10-23-fwd-b3-l2-spike/research/spike-l2.md", "reason": "B4 硬约束不得被绕过"}

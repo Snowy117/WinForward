@@ -1,1 +1,0 @@
-& 'C:/workspace/forwarded-gate-suite.ps1' -Exe 'C:/workspace/WinForward.Kernel/tools/wfprobe/bin/Release/net11.0/wfprobe.exe' -Out 'C:/workspace/fg-fail-udp.out' -ArgumentLine 'forwarded-udp --phase fail --remote-address 192.168.100.99 --remote-port 40250 --listener-port 40400 --wait-ms 15000'

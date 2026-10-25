@@ -1,0 +1,13 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/gap-analysis.md", "reason": "Parent evidence inventory: what to keep from the Kernel repo, what to retire, and why the research/spec migration matters."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Parent design: the kernel/ layout, import strategy, spec/research destination and gate boundaries this batch implements."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/implement.md", "reason": "Parent phase-0 checklist that this batch starts; keep the later phases out of scope."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec hub to extend with the Kernel Driver family without disturbing existing rows."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Project/layout and file-length rules for the import and the new spec family."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Root quality gates and suppression policy that the imported tree and native tools must not weaken."}
+{"file": "../WinForward.Kernel/README.md", "reason": "Source native build, gates and VM workflow to adapt under kernel/."}
+{"file": "../WinForward.Kernel/AGENTS.md", "reason": "Source native rules, integration seam and current priorities; preserve the live parts in kernel/AGENTS.md."}
+{"file": "../WinForward.Kernel/.trellis/spec/backend/wfp-architecture.md", "reason": "Primary live Kernel spec to migrate into .trellis/spec/backend/kernel/."}
+{"file": "../WinForward.Kernel/.trellis/spec/backend/host-rule-blob.md", "reason": "Live host blob ABI spec to migrate; it also explains the rule-index contract used later."}
+{"file": "../WinForward.Kernel/.trellis/spec/backend/forwarded-rule-blob.md", "reason": "Live forwarded blob ABI spec to migrate for the later forwarded milestone."}
+{"file": "../WinForward.Kernel/.trellis/spec/backend/quality-guidelines.md", "reason": "Source quality gate contract to preserve when adapting kernel/tools/check.sh."}
+{"file": "../WinForward.Kernel/.trellis/spec/backend/cpp-conventions.md", "reason": "Source C++ conventions that the native tree and its clang checks depend on."}

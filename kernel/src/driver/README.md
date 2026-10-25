@@ -185,7 +185,7 @@ unconnected UDP 的 redirect context 随客户端 socket 关闭释放（B0 实�
 **已知 WFP 缺陷（26100）**：connected UDP 每发一条 datagram，`tcpip` 会给 redirect record
 加一次引用且不归还，36B `WfPr` 与 `Arcl` record 直到重启才释放；实测 1/3/100 条 datagram →
 record refcount 1/3/100。详见
-[`wfp-connected-udp-record-refcount-leak.md`](../../.trellis/spec/backend/wfp-connected-udp-record-refcount-leak.md)。
+[`wfp-connected-udp-record-refcount-leak.md`](../../../.trellis/spec/backend/kernel/wfp-connected-udp-record-refcount-leak.md)。
 
 ### 验证
 
@@ -652,4 +652,4 @@ pwsh -File tools/windows/gate.ps1 -Remote <测试目标地址:端口>
 - B6b 验收时驱动 SHA-256：`EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`
   （ABI v7）；当前 ABI v8 的驱动 SHA 以各批次 `verification.md` 为准。
   这是 B6c 收口的历史构建（Host 规则 blob 尚未升到 v2 的时期），保留作记录；Host 规则数组 /
-  blob v2 批次的最终驱动 SHA 见 `.trellis/tasks/10-24-host-rule-arrays-process-match/verification.md`。
+  blob v2 批次的最终驱动 SHA 见 `.trellis/spec/backend/kernel/research/10-24-host-rule-arrays-process-match/verification.md`。

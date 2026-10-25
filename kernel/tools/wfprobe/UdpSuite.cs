@@ -860,7 +860,7 @@ internal static class UdpSuite
 
         // connected：WFP 在本 boot 内不回收该 context，只记录窗口，不做任何释放断言。
         // 26100 的根因是每包 AleRedirectRecordReference 不归还；详见
-        // .trellis/spec/backend/wfp-connected-udp-record-refcount-leak.md。
+        // .trellis/spec/backend/kernel/wfp-connected-udp-record-refcount-leak.md。
         PoolTagUsage connectedBaseline = Pool();
         int connectedPort = FreeUdpPort();
         context.SetBlob(new[] { TestRule.RedirectPort(connectedPort, null, Protocol.RuleProtocolUdp) });

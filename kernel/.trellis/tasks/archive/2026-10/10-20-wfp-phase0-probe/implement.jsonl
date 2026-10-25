@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "本批必读"}
-{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "本批必读"}
-{"file": ".trellis/tasks/10-20-wfp-mvp/prd.md", "reason": "本批必读"}
-{"file": ".trellis/tasks/10-20-wfp-mvp/design.md", "reason": "本批必读"}
-{"file": "src/common/redirect_context.h", "reason": "重定向上下文结构，只读引用"}

@@ -1,2 +1,0 @@
-[client] target=192.168.100.4:40250 received=200/200 source_ok=True last_source=192.168.100.4:40250
-client_port=47001 target_port=40250 bytes=12800 count=200 sha=586330ab8585c94b2b5a577d8718adc33caff5437b6b4ad948a0f20841351640 source=192.168.100.4:40250 source_ok=1 ok=1

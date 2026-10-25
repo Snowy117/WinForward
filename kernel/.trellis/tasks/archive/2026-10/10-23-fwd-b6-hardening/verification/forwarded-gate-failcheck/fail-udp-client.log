@@ -1,5 +1,0 @@
-$ python3 /home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_udp_client.py --target 192.168.100.99:40250 --count 1 --timeout 1
-[client] target=192.168.100.99:40250 received=0/1 source_ok=True last_source=
-client_port=40501 target_port=40250 bytes=0 count=0 sha= source= source_ok=1 ok=0
-
-

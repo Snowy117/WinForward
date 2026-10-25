@@ -1,4 +1,0 @@
-{"file": ".trellis/tasks/10-23-fwd-b5-udp-gateway/prd.md", "reason": "对照 U1-U10"}
-{"file": ".trellis/tasks/10-23-fwd-b5-udp-gateway/design.md", "reason": "对照关联/失败/超时"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门禁"}
-{"file": ".trellis/tasks/archive/2026-10/10-23-fwd-b3-l2-spike/research/spike-l2.md", "reason": "B4 硬约束不得绕过"}

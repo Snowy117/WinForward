@@ -1,2 +1,0 @@
-[client] target=192.168.100.99:40250 received=0/3 source_ok=True last_source=
-client_port=40501 target_port=40250 bytes=0 count=0 sha= source= source_ok=1 ok=0

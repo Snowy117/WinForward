@@ -1,0 +1,13 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Check the change against the backend spec hub and the correct family for every touched layer."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify analyzer/format/test gates and the documented-suppression policy before reporting green."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify fail-closed behaviour, diagnostics and the provider capability gate's refusal paths."}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "Verify host policy parity, adapter/process selector semantics and self-traffic decisions."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify project references, namespaces, file-length limits and the no-second-userland boundary."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify event IDs, structured fields, levels and that no process path or credential leaks into logs."}
+{"file": ".trellis/spec/backend/tcp-relay-lifecycle.md", "reason": "Verify relay end-kind, stall/teardown, socket ownership and client-visible close behaviour."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Verify shutdown ordering, quiescence and that no accepted socket or relay outlives its owner."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/gap-analysis.md", "reason": "Check every M1 capability gate and accepted edition difference against the recorded evidence."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "Verify the imported Kernel architecture/evidence mapping"}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Verify the host blob and rule-index contract against the code"}
+{"file": ".trellis/spec/backend/kernel/quality-guidelines.md", "reason": "Verify the native gates were not weakened by the import"}
+{"file": ".trellis/spec/backend/kernel/research/README.md", "reason": "Verify the research index and evidence links are complete"}

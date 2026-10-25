@@ -6,6 +6,9 @@
 
 驱动在 Windows 上用 MSVC + WDK 构建，用户态用 .NET SDK；宿主侧只做可移植的编辑、格式化与纯逻辑测试。
 
+本目录是 WinForward 仓库的 `kernel/` 子树；从 `WinForward.Kernel` 导入的记录（源提交、保留/退役
+路径、spec 与研究迁移）见 [`MIGRATION.md`](./MIGRATION.md)。
+
 ## 质量门禁
 
 宿主侧的单一入口是 `tools/check.sh`。它只依赖仓库 devShell 提供的工具，不依赖任何一台机器：
@@ -75,6 +78,10 @@ std::vector<int> values;
 是不是 `.githooks`。确实需要绕过时用 `git commit --no-verify`——它只跳过钩子，
 `tools/check.sh --fast` 仍是最终判据。
 
+Monorepo note: the hook scripts still resolve the git top level, so `install.sh` must not be run
+from the WinForward root until the root hook dispatcher lands; the root gates are authoritative in
+the meantime. See `MIGRATION.md`.
+
 ## 本地配置
 
 仓库只保存「在任何同类机器上都成立」的东西；本机事实放在不入库的 `wf.local.json` 与 `local/`：
@@ -109,7 +116,7 @@ pwsh -File tools/windows/gate.ps1 -Remote <测试目标地址:端口>
 pwsh -File tools/windows/mutation.ps1 -Remote <测试目标地址:端口> -OnlyIndex 0,3
 ```
 
-`-Root` 默认由脚本位置推到仓库根；`-Remote` 没有默认值，先取参数再取 `WF_REMOTE`。
+`-Root` 默认由脚本位置上推两级到 `kernel/`；`-Remote` 没有默认值，先取参数再取 `WF_REMOTE`。
 MSBuild、signtool、accesschk 都按机器上的安装情况发现（C# 工具的 `net10.0` 类输出路径仍按工程写死，不在本批范围内）。PREfast 分析接在 gate 里，
 判定看输出里的 `warning C28xxx` 与 Summary 的 `Warning(s)`，不只看 MSBuild 退出码。
 仓库不负责把代码送到那台机器——同步与连接虚拟机属于 `local/` 或本机配置，
@@ -155,5 +162,7 @@ WDK 头里的 `__ptr32` 会让 CodeQL 2.27.3 的 C++ 前端报错退出；脚本
 | `tests/host/` | 宿主上的 C++ 单测与跨语言差分测试 |
 | `tools/` | 宿主门禁、Windows 侧脚本与测试替身 |
 | `.githooks/` | 提交前钩子与安装/卸载脚本 |
+| `AGENTS.md` | 本子树的开发规则（仓库根 `AGENTS.md` 优先） |
+| `MIGRATION.md` | 从 `WinForward.Kernel` 导入的记录与路径/门禁映射 |
 
 构建与测试的细节见 `src/driver/README.md`、`src/userland/README.md`。

@@ -70,6 +70,31 @@ The zero-allocation pipeline: what a packet is made of, what it may cost, and ho
 | [Batched Capture](./ndis-batched-capture.md) | The batched read ABI, read-shape self-heal, pump batching, the arrival-signal idle wait, buffer ownership |
 | [Batched Send](./ndis-batched-send.md) | Batched reinjection: the Pass lanes and the redirect lanes, flush points, ordering, capacity backstops, failure posture |
 
+## Windows WFP Kernel Driver — [wfp-architecture.md](./kernel/wfp-architecture.md) family
+
+The second interception backend: a WFP `ALE_CONNECT_REDIRECT` callout driver under `kernel/`, its
+shared C++ ABI and its host tests. Read these before touching `kernel/src`, `kernel/tests` or the
+native gates; WinpkFilter/NDISAPI above stays the default provider.
+
+| Guide | Description |
+|-------|-------------|
+| [WFP Architecture](./kernel/wfp-architecture.md) | **Hub.** Decisions D1–D9, component split, control ABI v8, host/forwarded implementation facts, open items |
+| [Host Rule Blob](./kernel/host-rule-blob.md) | Host rule blob v2: byte layout, `try_open_blob` checks, process-selector semantics, first-hit evaluation and the block sink |
+| [Forwarded Rule Blob](./kernel/forwarded-rule-blob.md) | Forwarded rule blob v1: layout, matching, compile-time validation, data-plane seams |
+| [Connected-UDP Record Leak](./kernel/wfp-connected-udp-record-refcount-leak.md) | The Windows 11 26100 connected-UDP redirect-record refcount leak: evidence, impact, mitigation |
+| [C++ Conventions](./kernel/cpp-conventions.md) | The two C++ dialects, naming, the 500-line ceiling, kernel-dialect bans, gates and test rules |
+| [C# Conventions](./kernel/csharp-conventions.md) | The Kernel userland's toolchain, naming and ABI layout assertions |
+| [Kernel Quality Guidelines](./kernel/quality-guidelines.md) | Which gate enforces which C++ rule, and the entry points |
+| [Kernel Research](./kernel/research/README.md) | Index of the imported research, verification and decision documents |
+
+- Paths and commands inside this family are relative to `kernel/` unless they start with `.trellis/`
+  or `kernel/`. The documents are the Kernel repository's own text, written in Chinese; only spec
+  pointers that had to follow the new location were changed.
+- The Kernel `directory-structure.md`, `error-handling.md` and `logging-guidelines.md` were unfilled
+  Trellis templates in the source (`Status: To fill`), so they were not migrated. The root
+  [Directory Structure](./directory-structure.md), [Error Handling](./error-handling.md) and
+  [Logging Guidelines](./logging-guidelines.md) own those subjects.
+
 ## Measurement Harness — [measurement-harness.md](./measurement-harness.md) family
 
 | Guide | Description |
@@ -123,6 +148,9 @@ These rules are why the library is navigable. They apply to every edit here, inc
 > `udp-relay.md` (1029), `measurement-harness.md` (607), `windows-ndisapi.md` (566) and
 > `tcp-local-redirect.md` (470) — were revised against the code and split into the families above;
 > `idle-expiry-sweep.md` was split out of `traffic-policy-lifecycle.md`, and `directory-structure.md`
-> was translated to English.
+> was translated to English. On 2026-10-25 the `WinForward.Kernel` specs and evidence moved in as the
+> Kernel Driver family under `kernel/`.
 
-**Language**: All documentation is written in **English**.
+**Language**: All documentation is written in **English**. Exception: the imported Kernel Driver
+family under `.trellis/spec/backend/kernel/` retains the source language (Chinese) and its verbatim
+evidence; new or substantially edited entries there may be translated incrementally.

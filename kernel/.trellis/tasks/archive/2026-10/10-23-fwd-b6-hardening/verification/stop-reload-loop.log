@@ -1,5 +1,0 @@
-iter=1 STATE              : 4  RUNNING [pooltag] tag=WfIj nonpaged_allocs=15608 nonpaged_frees=15607 nonpaged_outstanding=1 nonpaged_bytes=4480 paged_allocs=0 paged_frees=0
-iter=2 STATE              : 4  RUNNING [pooltag] tag=WfIj nonpaged_allocs=15609 nonpaged_frees=15608 nonpaged_outstanding=1 nonpaged_bytes=4480 paged_allocs=0 paged_frees=0
-iter=3 STATE              : 4  RUNNING [pooltag] tag=WfIj nonpaged_allocs=15610 nonpaged_frees=15609 nonpaged_outstanding=1 nonpaged_bytes=4480 paged_allocs=0 paged_frees=0
-iter=4 STATE              : 4  RUNNING [pooltag] tag=WfIj nonpaged_allocs=15611 nonpaged_frees=15610 nonpaged_outstanding=1 nonpaged_bytes=4480 paged_allocs=0 paged_frees=0
-iter=5 STATE              : 4  RUNNING [pooltag] tag=WfIj nonpaged_allocs=15612 nonpaged_frees=15611 nonpaged_outstanding=1 nonpaged_bytes=4480 paged_allocs=0 paged_frees=0

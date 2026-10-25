@@ -1,3 +1,0 @@
-[client] verify port ready 192.168.100.2:41400
-[client] target=192.168.100.99:40250 received=1/1 source_ok=True last_source=192.168.100.99:40250
-client_port=40501 target_port=40250 bytes=64 count=1 sha=39e3d7b6b5d075d37d053ad89b24b41bef4f3c29760c84447cab3f3be1882241 source=192.168.100.99:40250 source_ok=1 ok=1

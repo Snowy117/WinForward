@@ -1,7 +1,0 @@
-$ python3 /home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_tcp_b6b.py --mode multi --target fe80::99%eth0:40250 --target fe80::199%eth1:40250 --bind-address fe80::215:5dff:fe03:728a%eth0 --bind-address fe80::215:5dff:fe03:728b%eth1 --source-port 40500 --payload-size 2048 --timeout 20 && python3 /home/paff/Projects/WinForward.Kernel/tools/linux/forwarded_tcp_b6b.py --mode multi --target fe80::99%eth0:40250 --target fe80::99%eth0:40251 --bind-address fe80::215:5dff:fe03:728a%eth0 --source-port 40501 --payload-size 2048 --timeout 20
-[client] target=fe80::99%eth0:40250 local=fe80::215:5dff:fe03:728a:40500 bytes=2048 sha=a152db2545dc06e110974fb34ca6a39c96648b297e405b4edba5581a0ae9042a ok=1
-[client] target=fe80::199%eth1:40250 local=fe80::215:5dff:fe03:728b:40500 bytes=2048 sha=c31163ec4cd08520582a299f29d6dd932b54b60dd1042599632aae1897b25582 ok=1
-[client] target=fe80::99%eth0:40250 local=fe80::215:5dff:fe03:728a:40501 bytes=2048 sha=a152db2545dc06e110974fb34ca6a39c96648b297e405b4edba5581a0ae9042a ok=1
-[client] target=fe80::99%eth0:40251 local=fe80::215:5dff:fe03:728a:40501 bytes=2048 sha=c31163ec4cd08520582a299f29d6dd932b54b60dd1042599632aae1897b25582 ok=1
-
-

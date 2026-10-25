@@ -1,9 +1,0 @@
-{"file": ".trellis/tasks/10-23-fwd-b6-hardening/prd.md", "reason": "B6 范围与验收"}
-{"file": ".trellis/tasks/10-23-fwd-b6-hardening/design.md", "reason": "B6a/B6b/B6c 设计"}
-{"file": ".trellis/tasks/10-23-fwd-b6-hardening/implement.md", "reason": "分阶段步骤与验证"}
-{"file": ".trellis/tasks/archive/2026-10/10-23-fwd-b5-udp-gateway/verification.md", "reason": "B5 遗留/证据"}
-{"file": ".trellis/tasks/archive/2026-10/10-23-fwd-b5-udp-gateway/verification/README.md", "reason": "B5 证据索引"}
-{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "B4/B5 事实"}
-{"file": ".trellis/spec/backend/forwarded-rule-blob.md", "reason": "规则/配置映射"}
-{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "C++ 规范"}
-{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "C# 规范"}

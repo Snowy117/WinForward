@@ -1,2 +1,0 @@
-[forwarded-udp] ????????:expected_generation=31 installed=1 generation=32
-[forwarded-udp] restore-only rules=0 fallback=permit config=disabled generation=31

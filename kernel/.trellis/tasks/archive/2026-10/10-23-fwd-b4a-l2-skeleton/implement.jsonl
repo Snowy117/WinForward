@@ -1,8 +1,0 @@
-{"file": ".trellis/tasks/10-23-fwd-b4a-l2-skeleton/prd.md", "reason": "本批范围与验收"}
-{"file": ".trellis/tasks/10-23-fwd-b4a-l2-skeleton/design.md", "reason": "驱动/IOCTL/匹配/测试设计"}
-{"file": ".trellis/tasks/10-23-fwd-b4a-l2-skeleton/implement.md", "reason": "执行步骤与验证命令"}
-{"file": ".trellis/tasks/archive/2026-10/10-23-fwd-b3-l2-spike/research/spike-l2.md", "reason": "B3 六条 B4 硬约束、layer 58/59、NBL 解析、防环"}
-{"file": ".trellis/tasks/archive/2026-10/10-23-fwd-b3-l2-spike/research/environment.md", "reason": "VM/网卡/WinpkFilter 环境事实"}
-{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "现有 WFP 架构与 D1/D3 背景"}
-{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "C++ 代码规范"}
-{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "C# 代码规范"}

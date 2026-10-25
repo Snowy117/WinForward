@@ -1,4 +1,0 @@
-{"file": ".trellis/tasks/10-23-fwd-b4b-tcp-dnat/prd.md", "reason": "对照 B1-B9 验收"}
-{"file": ".trellis/tasks/10-23-fwd-b4b-tcp-dnat/design.md", "reason": "对照 ABI/表/注入/失败语义"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门禁"}
-{"file": ".trellis/tasks/archive/2026-10/10-23-fwd-b3-l2-spike/research/spike-l2.md", "reason": "B4 硬约束不得绕过"}

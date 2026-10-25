@@ -464,7 +464,10 @@ report_forbidden_result() { # report_forbidden_result <退出码> <脚本输出>
 
 run_forbidden_check_worktree() {
     local output status
-    output="$(python3 tools/lint/forbidden.py 2>&1)"
+    # forbidden.py 默认把 `git rev-parse --show-toplevel` 当仓库根；kernel/ 并入 monorepo 后
+    # toplevel 是外层仓库，而 forbidden-rules.txt 的 glob 按内核根写成 src/driver/**、src/common/**。
+    # 不显式传内核根时工作区扫描命中 0 个文件，脚本只发一条警告并以 0 退出，门禁会静默失效。
+    output="$(python3 tools/lint/forbidden.py --root "${repo_root}" 2>&1)"
     status=$?
     report_forbidden_result "${status}" "${output}"
 }

@@ -1,7 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "后端规范入口"}
-{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "block/UDP/ABI 既有决策"}
-{"file": ".trellis/spec/backend/host-rule-blob.md", "reason": "blob 与 matcher 契约"}
-{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "C++ 质量要求"}
-{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "C# 质量要求"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门禁入口"}
-{"file": "src/driver/README.md", "reason": "驱动 ABI/职责对照"}

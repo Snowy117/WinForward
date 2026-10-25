@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/backend/cpp-conventions.md", "reason": "核对 C++ 方言、命名与测试是否按约定实现"}
-{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "核对 C# 模型、ABI 镜像与错误处理"}
-{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "核对 block / 顺序 / 进程选择器语义未被破坏"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "执行完整门禁与质量检查"}
-{"file": ".trellis/tasks/10-24-host-rule-arrays-process-match/research/winforward-rule-semantics.md", "reason": "对照 WinForward 语义与 WFP 边界验证实现"}

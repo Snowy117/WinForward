@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/gap-analysis.md", "reason": "Verify the import kept the parts the parent evidence calls essential and retired the scaffolding."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the kernel/ layout, spec/research destinations and gate boundaries match the parent design."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Verify the Kernel Driver family was added without disturbing the existing backend families."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify no product project graph or namespace change was smuggled into the import."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify the root .NET and native gates are not weakened and the quality claims are evidence-backed."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify environment failures (exit 2) are not reported as gate passes and no failure is silently swallowed."}
+{"file": "../WinForward.Kernel/.trellis/spec/backend/quality-guidelines.md", "reason": "Verify the adapted native check.sh preserves the source gate's exit-code and staged-blob contract."}
+{"file": "../WinForward.Kernel/.trellis/spec/backend/wfp-architecture.md", "reason": "Verify the live Kernel spec was copied faithfully and the research index points at the right evidence."}

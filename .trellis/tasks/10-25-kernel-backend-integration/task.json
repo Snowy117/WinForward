@@ -1,0 +1,28 @@
+{
+  "id": "kernel-backend-integration",
+  "name": "kernel-backend-integration",
+  "title": "将 WinForward.Kernel 完整合并进 WinForward",
+  "description": "将 Kernel 仓库（驱动、共享 ABI、测试、门禁、Trellis 规范）迁入本仓库，合并重复用户态，保留 BackendDriver 双后端并退役原仓库。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-10-25",
+  "completedAt": null,
+  "branch": "feat/kernel-backend",
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-25-kernel-import-foundation"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

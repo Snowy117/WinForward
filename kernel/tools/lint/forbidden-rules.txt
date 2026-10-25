@@ -12,8 +12,7 @@
 # 排除合法写法。heap 的两行就是靠这个排除 `<new>`、placement new、operator new/delete、
 # `= delete`——它们是声明或 §5.2 明确允许的用法，不是堆分配。
 #
-# 依据：.trellis/spec/backend/cpp-conventions.md §5.1；设计见
-# .trellis/tasks/10-21-quality-gates-modernization/design.md §4.5。
+# 依据：.trellis/spec/backend/kernel/cpp-conventions.md §5.1。
 # 新增规则时同步更新 cpp-conventions.md §8.3 的表格与 §8.4 的对应关系。
 
 stl	src/driver/**,src/common/**	\bstd::(array|basic_string|basic_string_view|deque|flat_map|flat_multimap|flat_multiset|flat_set|forward_list|function|function_ref|list|map|mdspan|multimap|multiset|priority_queue|queue|set|shared_ptr|span|stack|u16string|u16string_view|u32string|u32string_view|u8string|u8string_view|unique_ptr|unordered_map|unordered_multimap|unordered_multiset|unordered_set|vector|weak_ptr|wstring|wstring_view|string|string_view)\b	内核方言不使用标准库容器与字符串（§5.1）

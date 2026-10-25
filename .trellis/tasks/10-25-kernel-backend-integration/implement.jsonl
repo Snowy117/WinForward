@@ -1,0 +1,20 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec hub; choose the packet/TCP/UDP/interop family and the quality gates this task must preserve."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Project graph, layout and file-length rules for adding the Kernel contracts/tests and the backend seam."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build/analyzer policy, suppression rules and the pre-commit gates the imported Kernel C# code must meet."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics, bounded exemptions and configuration diagnostics for the provider capability gate."}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "The host/forwarded policy domains, process attribution and self-traffic rules that must stay edition-parity."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "The TCP redirect pipeline and its invariants; the Kernel backend replaces the packet mechanics but keeps the relay/close contracts."}
+{"file": ".trellis/spec/backend/tcp-relay-lifecycle.md", "reason": "Relay pump lifetime, stall/teardown and close behaviour for the raw-socket relay reuse."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "QuiescenceScope/admission/seal/join rules for Kernel backend startup, shutdown and relay ownership."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "LoggerMessage event identity, levels and privacy rules for the new backend/provider logs and counters."}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "WinpkFilter/NDISAPI interop hub; the existing backend must remain behaviour-identical after the extraction."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Hot-path conventions that the WinpkFilter extraction must not disturb; the Kernel backend must not add packet-path work."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/gap-analysis.md", "reason": "Evidence-backed capability/parity gaps, repository merge inventory and the decisions behind this plan."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "Kernel WFP architecture, host/forwarded facts, ABI v8 and D7 status"}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Host rule blob v2, process-path contract and the rule-index bridge"}
+{"file": ".trellis/spec/backend/kernel/forwarded-rule-blob.md", "reason": "Forwarded blob v1 and the later forwarded parity work"}
+{"file": ".trellis/spec/backend/kernel/wfp-connected-udp-record-refcount-leak.md", "reason": "Known connected-UDP leak for the host UDP milestone"}
+{"file": ".trellis/spec/backend/kernel/cpp-conventions.md", "reason": "Native C++ conventions behind the imported clang/cppcheck gates"}
+{"file": ".trellis/spec/backend/kernel/csharp-conventions.md", "reason": "Imported Kernel C# conventions and the ABI test expectations"}
+{"file": ".trellis/spec/backend/kernel/quality-guidelines.md", "reason": "Native gate contract and the forbidden-pattern/staged semantics"}
+{"file": ".trellis/spec/backend/kernel/research/README.md", "reason": "Index of the imported Kernel research, verification and decision evidence"}

@@ -1,9 +1,0 @@
-Traceback (most recent call last):
-  File "/tmp/b5-udp-client.py", line 59, in <module>
-    v = socket.create_connection(VERIFY, timeout=5)
-  File "/nix/store/xahxrjs30p3mw0a42bqg9ikgkikskw8m-python3-3.14.8/lib/python3.14/socket.py", line 874, in create_connection
-    raise exceptions[0]
-  File "/nix/store/xahxrjs30p3mw0a42bqg9ikgkikskw8m-python3-3.14.8/lib/python3.14/socket.py", line 859, in create_connection
-    sock.connect(sa)
-    ~~~~~~~~~~~~^^^^
-TimeoutError: timed out

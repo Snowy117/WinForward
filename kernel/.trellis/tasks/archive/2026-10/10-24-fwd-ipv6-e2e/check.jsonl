@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门禁入口与反向断言要求"}
-{"file": ".trellis/spec/backend/wfp-architecture.md", "reason": "核对数据流、边界与文档口径"}
-{"file": ".trellis/spec/backend/forwarded-rule-blob.md", "reason": "核对规则族/地址/端口语义"}
-{"file": ".trellis/spec/backend/csharp-conventions.md", "reason": "核对 wfprobe C# 改动"}
-{"file": ".trellis/tasks/10-24-fwd-ipv6-e2e/research/environment.md", "reason": "核对环境事实与测试语义"}
