@@ -578,8 +578,14 @@ UDP 没有 RST；失败一律静默丢包。`udp_no_state` 为保留字段（非
 - 两个入口（Internal ifIndex=5、External ifIndex=14）与同一入口两个 L（192.168.100.2 / .98）已 E2E；
   同一客户端端口可跨入口或经不同 L 并发访问多个目的。L 用尽后同一 `(L, listener_port, client)`
   的新表项会替换旧表项：单 L 时退化为“一个客户端端口一个目的”，这是可复现的边界。
-- IPv6 的分片路径 fail closed，native IPv6 的 UDP 数据面代码已实现但本环境没有在入口网卡上完成
-  E2E（Linux 侧的 fd00 地址在另一张网卡）；多入口/多 L 的 IPv6 未验证。
+- IPv6 的分片路径 fail closed；native IPv6 的 TCP/UDP happy path 已在入口网卡 E2E（2026-10-25，
+  ABI v8）：外部 v6 客户端命中 redirect 后 DNAT 到链路本地 L，回程 SNAT 恢复原始目的
+  （target 与 L 不同）。`forwarded-tcp` core（64 KiB 双向）、upstreams（两个 `atyp=4` CONNECT）、
+  multi（同入口两 L + Internal/External 两入口共 4 条连接，`redirect_multi_l=1`、
+  `return_ambiguous=0`、`no_ingress=0`）与 `forwarded-udp` core/socks5（`atyp=4` ASSOCIATE、
+  源地址恢复、decoy 无数据）均由 Linux 门禁 `--include-v6` 覆盖。
+- IPv6 的剩余边界：UDP 多 L / 多入口、IPv6 热替换、atomic fragment 与逐片 raw 构造未 E2E；
+  `WfpController` 仍只自动解析 IPv4 L，v6 L 由 wfprobe 直接下发 ingress 配置验证。
 
 - 分片闸只覆盖 forwarded redirect 规则地址空间；非首片先于首片到达时按普通流量放行，TCP 分片与
   出向分片不在闸内。一个 NBL 里的多个 NET_BUFFER 按同一入口流处理，混合流不在本版支持范围。

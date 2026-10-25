@@ -406,7 +406,8 @@ sink 端口与 redirect 标记，不再关心进程选择器。
   未单独 E2E（复用同一表与回程逻辑；UDP 热替换也未单独 E2E）。分片闸只覆盖 forwarded redirect 规则地址空间：
   首片按完整规则（含端口）匹配并写 (入口, 族, 协议, 源/目的地址, IP ID) 跟随表，非首片查表 block；
   host/其他端口分片按原路径。非首片先于首片到达时无法跟随（放行），TCP 分片与出向分片不在闸内。
-  native IPv6 UDP 代码路径已实现并在 1280 MTU 9 片下 E2E；host UDP 的 listener/中继不在本仓库。
+  native IPv6 UDP 代码路径已实现；native IPv6 的 UDP/TCP happy path 在 §7.17 完成入口网卡 E2E
+  （本节的 1280 MTU 9 片仍是分片闸证据）；host UDP 的 listener/中继不在本仓库。
 
 ### 7.15 B6b 多入口、多 L、回程 key 与热替换（2026-10-23 实测）
 
@@ -437,8 +438,9 @@ sink 端口与 redirect 标记，不再关心进程选择器。
 
 - **独立 Linux 门禁。** `tools/linux/forwarded_gate.py` 在 Linux 客户端侧自动 prepare/cleanup
   （`.99` 别名、40400/40600/41400 等端口放行），跑 TCP/UDP core、IPv4 9 片、permit-first、
-  host 同 remote 和产品 reject；CI 禁止 `--no-verify`。原始日志在 `verification/forwarded-gate/`。
-  multi/hotswap/noingress/StateCommand、IPv6 9 片、A5 不在该门禁内，原因见 `tools/linux/forwarded_gate.md`。
+  host 同 remote 和产品 reject；`--include-v6` 追加五个 native IPv6 阶段（见 §7.17）；CI 禁止
+  `--no-verify`。默认日志在 `verification/forwarded-gate/`，IPv6 证据见 §7.17 的任务目录。
+  IPv4 的 hotswap/noingress/StateCommand、IPv6 9 片、A5 不在该门禁内，原因见 `tools/linux/forwarded_gate.md`。
 - **fail 阶段边界。** B6c 验收时 ABI v7 下 config disabled 时 WFP filter 不再进入 classify，
   B6a 的 `udp_no_config`/`blocked` 断言不成立；当前控制面已升到 v8，该 fail 阶段未在 v8 复验；
   `--include-fail` 保留诊断，不作为门禁通过条件。这是 B6c 发现，未改数据面语义。
@@ -448,7 +450,38 @@ sink 端口与 redirect 标记，不再关心进程选择器。
   209pps；host 对照 12.9 MB/s、1590pps。数字包含 C# suite 中继、VM vSwitch、单次采样噪声，
   只作量级参考，不设 kill criteria；未用 iperf3/内核 sink。
 - **D7。** 见 `.trellis/tasks/archive/2026-10/10-23-fwd-b6-hardening/d7-decision.md`：WFP L2 保留为 kernel
-  edition 候选，不正式替代 NDISAPI/WinpkFilter；采用条件（独立性能、LWF、IPv6 多入口、
-  UDP 多 L/热替换、产品多 L、Runtime 集成、稳定性）全部满足后再评估。
+  edition 候选，不正式替代 NDISAPI/WinpkFilter；采用条件（独立性能、LWF、IPv6 多入口
+  （数据面见 §7.17，产品控制器 v6 L 自动解析仍缺）、UDP 多 L/热替换、产品多 L、Runtime
+  集成、稳定性）全部满足后再评估。
 - **交付边界。** B6b 收口时驱动 ABI v7，SHA-256 `EA271858D8A3AD12D7263B09A558C32F2035CAE27611A4A852820075D59C0A95`；
   当前控制面已升到 v8（block sink 批次），forwarded 数据面未改。已知边界统一见任务 `verification.md` §15。
+
+### 7.17 Forwarded native IPv6 数据面 E2E（2026-10-25，ABI v8）
+
+- **环境与地址。** WinLTSC Internal（ifIndex=5）主链路本地 L1 只读发现；prepare
+  `-WithIpv6` 添加 Internal 第二 L `fe80::98`、Internal target `fe80::99`、External target
+  `fe80::199`，并加 `B6C-ENV-V6-*` 端口放行；`-Remove` 不论开关都删除这些地址与规则。
+  Linux 只用 eth0/eth1 现有链路本地地址，客户端 target 带 `%eth0`/`%eth1` scope。
+  target 与 L 必须是不同地址，回程 SNAT 写错才会在客户端暴露。
+- **夹具。** `SocketHelpers.WithScope` / `SameAddress` 统一链路本地 scope 与无 scope 比较；
+  TCP 的 core/upstreams/fail 按地址族绑定 `IPv6Any`（DualMode=false），multi 的每个 L 补
+  scope；UDP 的 listener/any/decoy/backend 全部按各自地址族分离（v6 listener + v4 backend
+  不能共用 `Any`）。假 SOCKS5 上游记录 `V6Connections` / `V6Datagrams`，显式断言 TCP
+  `atyp=4` CONNECT 与 UDP `atyp=4` datagram。
+- **实测。** `tools/linux/forwarded_gate.py --include-v6` ALL PASS（1m20s），v4 默认门禁
+  ALL PASS（50s）：
+  - `tcp-core6`：64 KiB 双向一致（客户端 acked=65537），redirect 表 server=`fe80::99`、L=L1，
+    ingress/return 恒等式通过；
+  - `tcp-upstreams6`：40250/40251 分别命中 upstream 0/1，两个假上游各 1 次 `atyp=4`
+    CONNECT，两会话各 2048B 双向；
+  - `udp-core6`：10/10、源地址 `fe80::99:40250`、decoy 无数据、SHA 一致；
+  - `udp-socks5-6`：两个目的各 1 次 UDP ASSOCIATE、各 10 个 `atyp=4` datagram、回程源地址正确；
+  - `tcp-multi6`：4 条连接（Internal+External 跨入口、同入口两 L），`redirect_multi_l=1`、
+    `return_ambiguous=0`、`no_ingress=0`。
+- **负向与恢复。** target 改成不存在的 `fe80::dead` 时门禁在 tcp-core6 客户端超时退出 1；
+  `--no-verify` 被 argparse 拒绝（exit 2）。`finally` 的 `prepare -Remove` 后
+  `residual_v6=none b6c_rules=none`。
+- **剩余边界。** UDP 多 L / 多入口、IPv6 热替换、atomic fragment、逐片 raw 构造未 E2E；
+  `WfpController.ResolveForwardedListenerPlan` 仍只解析 IPv4 L，v6 L 由 wfprobe 直接下发
+  ingress。证据：`.trellis/tasks/10-24-fwd-ipv6-e2e/verification/check-final/`（最终脚本
+  复跑；实现阶段的日志保留在 `verification/full-v6/`）、`verification.md`。

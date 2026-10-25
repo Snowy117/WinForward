@@ -290,7 +290,11 @@ v1 不再读取，控制器 / 驱动 / `wfprobe` 必须同批升级；控制面 
 
 - 独立 Linux 门禁 `tools/linux/forwarded_gate.py` 走产品 listener/reject harness；Windows-only
   `gate.ps1` 不含需要外部 Linux 客户端的 forwarded 数据面。
-- 产品控制器每个 ifindex 只解析一个 L；UDP 多 L 并发多目的、UDP 热替换、IPv6 多入口未 E2E；
+- 产品控制器每个 ifindex 只解析一个 L，且 `ResolveForwardedListenerPlan` 仍只自动解析 IPv4 L
+  （`ForwardedListenerAddress` 没有 JSON 入口）。IPv6 数据面由 wfprobe 直接下发 ingress 验证：
+  TCP core/upstreams/同入口两 L/Internal+External 两入口 multi、UDP core/socks5（`atyp=4`
+  ASSOCIATE 与回程源地址）已 E2E；UDP 多 L 并发多目的、UDP 热替换、IPv6 热替换与 IPv6
+  UDP 多入口未 E2E；IPv6 分片只沿用 B6 的 9 片闸证据，atomic fragment 与逐片 raw 构造未 E2E；
   LWF 注入可见性未验证。统一边界见任务 `verification.md` §15。
 - `StateCommand` 输出 `forwarded` / `forwarded-ingress` / `forwarded-stat`（控制面 ABI v8；
   forwarded 输出沿用 v7 布局前缀）。
