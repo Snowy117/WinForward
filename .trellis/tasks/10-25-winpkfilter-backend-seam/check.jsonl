@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the seam stays narrow and only WinpkFilter moved."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Verify teardown order, no double dispose and no leaked capture resources."}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Verify driver open/preflight/teardown equivalence."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify no-adapter/scope/runtime exit codes and exception mapping are unchanged."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify build/test/format gates and the environment-gap reporting."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify file/project placement and the 400-line ceiling."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify no packet-path work or allocation was introduced."}

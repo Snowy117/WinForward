@@ -2,11 +2,10 @@ using System.Globalization;
 using System.Runtime.Versioning;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using WinForward.Cli.Backends;
 using WinForward.Cli.Logging;
 using WinForward.Configuration;
 using WinForward.NdisApi;
-using WinForward.Runtime;
-using WinForward.Runtime.Capture;
 using WinForward.Runtime.Logging;
 using WinForward.Windows;
 
@@ -152,12 +151,13 @@ internal static class Program
             foreach (var warning in loaded.Validated.Warnings) StartupLog.ConfigurationWarning(logger, warning.ToString());
             if (loaded.Validated.BackendDriver.Provider != BackendProvider.WinpkFilter)
             {
-                // Refused before RunInterceptionAsync opens NDISAPI: a Kernel-provider run must never
-                // fall back to WinpkFilter's capture path and pretend the selection was honoured.
+                // Refused before a backend opens NDISAPI: a Kernel-provider run must never fall
+                // back to WinpkFilter's capture path and pretend the selection was honoured.
                 StartupLog.KernelBackendUnavailable(logger);
                 return 1;
             }
-            return await RunInterceptionAsync(loaded.Validated, loggerFactory, logger).ConfigureAwait(false);
+            await using var backend = new WinpkFilterBackend(loaded.Validated, loggerFactory, logger);
+            return await RunBackendUntilCancelledAsync(backend).ConfigureAwait(false);
         }
         catch (DllNotFoundException)
         {
@@ -229,173 +229,16 @@ internal static class Program
         }
     }
 
-    [SupportedOSPlatform("windows")]
-    private static async Task<int> RunInterceptionAsync(ValidatedConfiguration configuration, ILoggerFactory loggerFactory, ILogger logger)
-    {
-        using var driver = NdisApiDriver.Open();
-        // Startup pre-flight for the exit-code surface (exit 1 selector errors, exit 3 empty
-        // enumeration): the layered capture runner re-enumerates and owns the live scope,
-        // repeating this resolution fail-closed for generation 0.
-        var adapters = EnumerateAdapters(driver);
-        if (adapters.Count == 0)
-        {
-            StartupLog.NoCaptureAdapters(logger);
-            return 3;
-        }
-        if (!CaptureAdapterScopeResolver.TryResolve(adapters, configuration.Policy, out var scope, out var scopeErrors))
-        {
-            foreach (var error in scopeErrors) StartupLog.CaptureScopeResolutionFailed(logger, error);
-            return 1;
-        }
-        StartupLog.CaptureScopePreflightResolved(logger, scope.Count);
-
-        // Shared by the durable bundle (its failure-reporting sites) and the capture runner
-        // (its forced-refresh trigger).
-        var healthMonitor = new InterceptionHealthMonitor(loggerFactory.CreateLogger<InterceptionHealthMonitor>());
-        return await RunCaptureLoopAsync(configuration, driver, loggerFactory, logger, healthMonitor).ConfigureAwait(false);
-    }
-
-    [SupportedOSPlatform("windows")]
-    private static async Task<int> RunCaptureLoopAsync(ValidatedConfiguration configuration, NdisApiDriver driver, ILoggerFactory loggerFactory, ILogger logger, InterceptionHealthMonitor healthMonitor)
-    {
-        var selfTraffic = new SelfTrafficRegistry();
-        var reinjector = new NdisPacketReinjector(driver);
-        try
-        {
-            // Scoped 1 ms timer resolution for the whole run: the pump's empty-queue poll delay
-            // rounds up to ~15.6 ms at the default resolution. Declared first so the scope
-            // outlives the capture runtime and its teardown-time reinjections.
-            using var timerScope = new HighResolutionTimerScope();
-            if (!timerScope.IsEnabled)
-            {
-                StartupLog.HighResolutionTimerUnavailable(logger);
-            }
-
-            WireFramePoolDiagnostics();
-
-            // The durable layer survives every adapter-list refresh; the runner disposes it exactly
-            // once after the final generation. The local finally only covers failures around the
-            // runner itself — bundle disposal is single-flight, so it never runs twice.
-            // The driver's static-filter table is passed in even when the feature is off: the bundle
-            // only reaches it when KernelPassCache is enabled, and the feature-off path touches no table.
-            var bundle = await DurableCaptureBundle.CreateAsync(configuration, reinjector, selfTraffic, loggerFactory, healthSignal: healthMonitor, kernelFilterTable: driver).ConfigureAwait(false);
-            try
-            {
-                // The degraded forwarder feeds error 87 into the runner's refresh channel; the
-                // callback closure dereferences the runner only while a generation runs, after the
-                // reference below is assigned.
-                LayeredCaptureRunner? runnerRef = null;
-                using var watcher = new NdisAdapterListWatcher(driver);
-                var runner = CreateCaptureRunner(
-                    configuration, driver, bundle, loggerFactory.CreateLogger<LayeredCaptureRunner>(), healthMonitor, watcher,
-                    (adapter, nativeError) =>
-                    {
-                        // ReSharper disable once AccessToModifiedClosure // One-shot wiring: runnerRef is assigned before RunAsync starts, and the callback can fire only from a generation created inside RunAsync, so every read already sees the assigned runner.
-                        runnerRef!.SignalDegraded(adapter, nativeError);
-                        return ValueTask.CompletedTask;
-                    });
-                runnerRef = runner;
-
-                // Observational periodic summary; the using disposes it before the bundle's
-                // finally, so its last ticks never observe coordinator teardown.
-                await using var heartbeat = StartHeartbeat(bundle, runner, healthMonitor, loggerFactory.CreateLogger<RuntimeHeartbeat>());
-
-                return await RunUntilCancelledAsync(runner, logger).ConfigureAwait(false);
-            }
-            finally
-            {
-                await bundle.DisposeAsync().ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            // The shared injection buffer pool is drained after the capture runtime (and the
-            // coordinator teardown injections it performs) has completed, releasing every idle
-            // native buffer back to the heap before the driver handle closes.
-            NdisPacketBufferPool.Shared.Dispose();
-        }
-    }
-
     /// <summary>
-    /// Registers the shared native frame pool with the diagnostics counter registry: the heartbeat
-    /// then reports the pool's rent and return deltas and its occupancy. The sink is set once,
-    /// before any capture pump can rent, and only ever increments counters — it cannot throw and
-    /// never touches packet disposition. It fires per injected packet on the hot path, so it must
-    /// stay allocation-free: the counter key strings are built once here (the <c>RecordPoolRent</c>
-    /// helpers rebuild their keys per call, which would allocate on every rent/return) and the sink
-    /// increments the pre-created counter boxes through the cached references.
+    /// Hosts one backend run under the console-cancel lifetime: the handler is subscribed for the
+    /// whole call and removed before the source is disposed, so the backend's token readers can
+    /// never observe a disposed source. The backend concludes the exit code and emits the
+    /// interception-lifecycle events from inside its own run; this method only returns what it
+    /// concluded.
     /// </summary>
-    private static void WireFramePoolDiagnostics()
-    {
-        const string framePoolName = "ndis.frame";
-        var counters = RuntimeCounters.Shared;
-        counters.RegisterPool(framePoolName);
-        var rentKey = RuntimeCounters.PoolRentedKey(framePoolName);
-        var returnKey = RuntimeCounters.PoolReturnedKey(framePoolName);
-        NdisPacketBufferPool.Shared.AccountingSink = rented => counters.Increment(rented ? rentKey : returnKey);
-    }
-
-    /// <summary>
-    /// Composes the layered capture runner over the durable bundle's shared packet processor: the
-    /// generation factory logs <c>adapter.degraded</c>, restores the degraded adapter's mode through
-    /// its own runtime, and forwards to <paramref name="onAdapterDegraded"/> so the runner can feed
-    /// error 87 into its refresh channel; transient-read retries ride the shared log gate.
-    /// </summary>
-    [SupportedOSPlatform("windows")]
-    private static LayeredCaptureRunner CreateCaptureRunner(
-        ValidatedConfiguration configuration,
-        NdisApiDriver driver,
-        DurableCaptureBundle bundle,
-        ILogger logger,
-        InterceptionHealthMonitor healthMonitor,
-        NdisAdapterListWatcher watcher,
-        Func<WindowsAdapter, int, ValueTask> onAdapterDegraded)
-    {
-        var retryLogGate = new AdapterTransientRetryLogGate(logger);
-        var generations = new NdisCaptureGenerationFactory(
-            driver,
-            new CapturePacketProcessor(bundle.Dispatcher, bundle.AdapterSlots, logger, bundle.FlushPendingInjections),
-            bundle.AdapterSlots,
-            logger,
-            onAdapterDegraded: onAdapterDegraded,
-            onAdapterTransientRetry: (adapter, nativeError, attempt) => retryLogGate.Log(adapter.StableId, adapter.FriendlyName, nativeError, attempt))
-        {
-            WakeRegistry = bundle.WakeRegistry,
-        };
-        return new LayeredCaptureRunner(
-            new NdisAdapterEnumerationProvider(driver, logger),
-            generations,
-            watcher,
-            configuration.Policy,
-            logger,
-            disposeDurableAsync: _ => bundle.DisposeAsync(),
-            onScopeInstalled: bundle.OnScopeInstalled, interceptionHealthMonitor: healthMonitor);
-    }
-
-    /// <summary>
-    /// Starts the periodic <c>runner.heartbeat</c> info summary: flow/TCP/UDP usage against
-    /// capacities, the current generation's pump counts, interception-health state, and
-    /// per-counter deltas since the previous heartbeat. Purely observational — a fault while
-    /// gathering usage is logged and retried on the next tick.
-    /// </summary>
-    [SupportedOSPlatform("windows")]
-    private static RuntimeHeartbeat StartHeartbeat(DurableCaptureBundle bundle, LayeredCaptureRunner runner, InterceptionHealthMonitor healthMonitor, ILogger logger)
-    {
-        var heartbeat = new RuntimeHeartbeat(
-            logger,
-            usage: () => new RuntimeHeartbeatUsage(
-                bundle.Dispatcher.FlowCount, bundle.Dispatcher.FlowCapacity,
-                bundle.Tcp.SessionCount, bundle.Tcp.Capacity,
-                bundle.Udp.SessionCount, bundle.Udp.Capacity,
-                runner.PumpState.Running, runner.PumpState.Degraded,
-                (long)bundle.Udp.SessionCount * bundle.Udp.RelayReceiveBufferBytes),
-            health: healthMonitor);
-        heartbeat.Start();
-        return heartbeat;
-    }
-
-    [SupportedOSPlatform("windows")]
-    private static async Task<int> RunUntilCancelledAsync(LayeredCaptureRunner runner, ILogger logger)
+#pragma warning disable CA1859 // The parameter stays IInterceptionBackend: it is the composition seam the provider selection dispatches through, and narrowing it to today's only implementation would make every future backend call site a rewrite.
+    private static async Task<int> RunBackendUntilCancelledAsync(IInterceptionBackend backend)
+#pragma warning restore CA1859
     {
         using var shutdown = new CancellationTokenSource();
         void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
@@ -408,20 +251,7 @@ internal static class Program
         Console.CancelKeyPress += OnCancel;
         try
         {
-            StartupLog.InterceptionStarted(logger);
-            await runner.RunAsync(shutdown.Token).ConfigureAwait(false);
-            StartupLog.StoppedCleanly(logger);
-            return 0;
-        }
-        catch (OperationCanceledException)
-        {
-            StartupLog.ShutdownRequested(logger);
-            return 0;
-        }
-        catch (Exception exception)
-        {
-            StartupLog.RuntimeFailed(logger, exception);
-            return 3;
+            return await backend.RunAsync(shutdown.Token).ConfigureAwait(false);
         }
         finally
         {

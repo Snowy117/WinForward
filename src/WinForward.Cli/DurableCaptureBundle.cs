@@ -104,8 +104,9 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
 
     /// <summary>
     /// The process-lived adapter interning table every key's slot and every reinjection target
-    /// comes from. <c>Program.cs</c> hands it to the durable packet processor and the capture
-    /// generation factory so slots are resolved once per adapter per generation.
+    /// comes from. <see cref="Backends.WinpkFilterBackend"/> hands it to the durable packet
+    /// processor and the capture generation factory so slots are resolved once per adapter per
+    /// generation.
     /// </summary>
     internal AdapterSlotTable AdapterSlots { get; }
 
@@ -219,8 +220,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
 
     /// <summary>
     /// Registers a bundle-owned native pool with the runtime counters and points its accounting
-    /// sink at pre-computed key strings, mirroring <c>Program.WireFramePoolDiagnostics</c>; the
-    /// sink allocates nothing per rent/return and never throws.
+    /// sink at pre-computed key strings, mirroring <see cref="Backends.WinpkFilterBackend"/>'s
+    /// frame-pool wiring; the sink allocates nothing per rent/return and never throws.
     /// </summary>
     private static void RegisterPool(RuntimeCounters counters, string poolName, NativeBufferPool pool)
     {

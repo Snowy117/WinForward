@@ -78,7 +78,8 @@ public sealed class DurableCaptureBundleTests
 
     /// <summary>
     /// The frozen-bucket guard: the composition's one clock is ticked by the pump's per-iteration
-    /// callback (<c>Program.cs</c> wires <see cref="CapturePacketProcessor.OnBatchCompleted"/> to
+    /// callback (<see cref="WinForward.Cli.Backends.WinpkFilterBackend"/> wires
+    /// <see cref="CapturePacketProcessor.OnBatchCompleted"/> to
     /// <see cref="DurableCaptureBundle.FlushPendingInjections"/>), so every iteration — empty poll
     /// included — advances it exactly once and no packet does.
     /// </summary>

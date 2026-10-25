@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Parent design: the narrow backend seam, WinpkFilter backend ownership and the single-active-backend rule."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "QuiescenceScope/admission/seal/join and disposal ordering for the moved capture runtime."}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "The NDISAPI driver/adapter preflight and capture composition the backend now owns."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "CLI composition-root layout, file-length ceiling and the no-new-project rule for this extraction."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Analyzer/format/test gates and the no-behaviour-change evidence requirement."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Exit-code/exception mapping and fail-closed startup preflight."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "The packet path must not be touched by the seam; no new per-packet work."}

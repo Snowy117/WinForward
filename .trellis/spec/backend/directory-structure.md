@@ -121,7 +121,8 @@ namespace suffix.
   type ready to be promoted, a `// ----` partition, a second top-level type — and only then invent a
   module.
 - **Do not split for splitting's sake.** A split must not damage readability or performance.
-  `Cli/Program.cs` stays whole at 377 effective lines because it is one cohesive entry point; a tiny
+  `Cli/Program.cs` stays whole because it is one cohesive entry point — the configuration/CLI
+  composition root, with the backend lifecycle living beside it in `Cli/Backends/`; a tiny
   type keeps its own file when it is widely shared — `WindowsAdapter.cs` is 7 effective lines and is
   referenced from ~34 files.
 - **Meeting the ceiling is not a licence to stop.** A file near 400 lines splits along its existing
