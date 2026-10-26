@@ -1,0 +1,6 @@
+PORT=40012 RESULT=FAIL MethodInvocationException: Exception calling "Read" with "3" argument(s): "Unable to read data from the transport connection: An existing connection was forcibly closed by the remote host.."
+[stats] classify=3712 permitted=82 blocked=4 redirected=4 rules_replaced=25 rejected_blobs=0
+[stats] contexts_allocated=4 alloc_failures=0 apply_failures=0 redirect_failures=0 deferred_blocks=4 process_path_metadata=0 last_status=0x00000000
+[stats] permitted: disabled=3618 no_rules=0 no_write_right=0 unsupported=0 non_tcp=4 listener_port=0 redirect_state=0 condition_flags=0 already_redirected=0 self_process=41
+[stats] matched: permit=7 block=4 redirect=4 fallback: permit=34 block=0 redirect=0
+[stats] udp_calls=1626 udp_permitted=1626 udp_blocked=0 udp_redirected=0

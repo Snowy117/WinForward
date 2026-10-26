@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the E2E/parity results against the M1 acceptance."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "Verify ABI/listener/block/counter evidence."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Verify rule/action/target mapping evidence."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify the accepted WinpkFilter/Kernel differences."}
+{"file": ".trellis/spec/backend/tcp-relay-lifecycle.md", "reason": "Verify failure/close/cleanup evidence."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify evidence completeness and no uncommitted code changes."}

@@ -1,0 +1,21 @@
+SUCCESS: The scheduled task "wf-kernel-e2e" has been terminated successfully.
+SUCCESS: Attempted to run the scheduled task "wf-kernel-e2e".
+
+   Id ProcessName
+   -- -----------
+10844 WinForward
+
+---wf log---
+{"Timestamp":"-07:00 2026-10-25 19:10:24.327","EventId":880734152,"LogLevel":"Information","Category":"WinForward.Cli.Backends.Kernel.KernelHostTcpService","Message":"Kernel redirect listener bound on port 58604 (2 TCP listener(s)); block sink port 52071, block reachable True.","State":{"ListenerPort":58604,"TcpListeners":2,"BlockSinkPort":52071,"ContainsBlock":true,"{OriginalFormat}":"Kernel redirect listener bound on port {ListenerPort} ({TcpListeners} TCP listener(s)); block sink port {BlockSinkPort}, block reachable {ContainsBlock}."}}
+{"Timestamp":"-07:00 2026-10-25 19:10:24.331","EventId":1200050789,"LogLevel":"Information","Category":"WinForward.Cli.Backends.Kernel.KernelHostTcpService","Message":"Kernel host rule blob installed and verified: generation 26, 4 rule(s), fallback Permit, 220 byte(s), block reachable True.","State":{"Generation":26,"RuleCount":4,"Fallback":"Permit","BlobBytes":220,"ContainsBlock":true,"{OriginalFormat}":"Kernel host rule blob installed and verified: generation {Generation}, {RuleCount} rule(s), fallback {Fallback}, {BlobBytes} byte(s), block reachable {ContainsBlock}."}}
+{"Timestamp":"-07:00 2026-10-25 19:10:24.345","EventId":1842100503,"LogLevel":"Information","Category":"WinForward.Cli.Backends.Kernel.KernelHostTcpService","Message":"Kernel host TCP interception is ready: control ABI 8, listener port 58604, block sink port 52071, 4 host rule(s), TCP flow capacity 1, relay setup bound 32.","State":{"AbiVersion":8,"ListenerPort":58604,"BlockSinkPort":52071,"RuleCount":4,"FlowCapacity":1,"SetupWorkers":32,"{OriginalFormat}":"Kernel host TCP interception is ready: control ABI {AbiVersion}, listener port {ListenerPort}, block sink port {BlockSinkPort}, {RuleCount} host rule(s), TCP flow capacity {FlowCapacity}, relay setup bound {SetupWorkers}."}}
+{"Timestamp":"-07:00 2026-10-25 19:10:24.346","EventId":1466441621,"LogLevel":"Information","Category":"WinForward.Cli.Program","Message":"Kernel host TCP interception started. Press Ctrl+C to stop.","State":{"{OriginalFormat}":"Kernel host TCP interception started. Press Ctrl+C to stop."}}
+---capacity---
+FIRST=OK DATA=hold-40012
+SECOND=FAIL MethodInvocationException: Exception calling "Read" with "3" argument(s): "Unable to read data from the transport connection: An existing connection was forcibly closed by the remote host.."
+---stats---
+[stats] classify=3719 permitted=86 blocked=4 redirected=7 rules_replaced=26 rejected_blobs=0
+[stats] contexts_allocated=7 alloc_failures=0 apply_failures=0 redirect_failures=0 deferred_blocks=4 process_path_metadata=0 last_status=0x00000000
+[stats] permitted: disabled=3618 no_rules=0 no_write_right=0 unsupported=0 non_tcp=4 listener_port=0 redirect_state=0 condition_flags=0 already_redirected=0 self_process=43
+[stats] matched: permit=9 block=4 redirect=7 fallback: permit=34 block=0 redirect=0
+[stats] udp_calls=1626 udp_permitted=1626 udp_blocked=0 udp_redirected=0

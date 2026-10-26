@@ -1,0 +1,15 @@
+SUCCESS: The scheduled task "wf-kernel-e2e" has been terminated successfully.
+SUCCESS: The scheduled task "wf-singbox-e2e" has been terminated successfully.
+disabled enabled=0 listener_port=0
+SUCCESS: The scheduled task "wf-kernel-e2e" was successfully deleted.
+SUCCESS: The scheduled task "wf-singbox-e2e" was successfully deleted.
+---processes---
+---driver---
+
+Name     Status
+----     ------
+ndisrd  Running
+wfprobe Running
+
+---network---
+True
