@@ -17,7 +17,7 @@ internal static class Program
 {
     // Exit-code contract:
     //   0  clean shutdown / success
-    //   1  configuration or validation error, adapter-selector resolution error, or NDISAPI/driver access failure
+    //   1  configuration or validation error, adapter-selector resolution error, or driver access failure: NDISAPI or the WinForward.Kernel WFP device.
     //   2  usage error, unknown command, or unsupported platform
     //   3  fatal runtime failure during capture (adapter modes are restored before exit)
 
@@ -151,15 +151,13 @@ internal static class Program
         {
             ReportResolvedRun(loaded, logger);
             foreach (var warning in loaded.Validated.Warnings) StartupLog.ConfigurationWarning(logger, warning.ToString());
-            if (loaded.Validated.BackendDriver.Provider != BackendProvider.WinpkFilter)
-            {
-                // Refused before a backend opens NDISAPI: a Kernel-provider run must never fall
-                // back to WinpkFilter's capture path and pretend the selection was honoured.
-                StartupLog.KernelBackendUnavailable(logger);
-                return 1;
-            }
 #pragma warning disable CA1859 // The local stays IInterceptionBackend: the guard below reads the contract member the configuration is compared against, and narrowing it to today's only implementation would make the provider the run honours an implementation detail again.
-            await using IInterceptionBackend backend = new WinpkFilterBackend(loaded.Validated, loggerFactory, logger);
+            await using IInterceptionBackend backend = loaded.Validated.BackendDriver.Provider switch
+            {
+                BackendProvider.WinForwardKernel => new KernelBackend(loaded.Validated, loggerFactory, logger),
+                BackendProvider.WinpkFilter => new WinpkFilterBackend(loaded.Validated, loggerFactory, logger),
+                _ => throw new InvalidOperationException($"The backend provider '{loaded.Validated.BackendDriver.Provider}' has no interception backend."),
+            };
 #pragma warning restore CA1859
             // A provider mismatch is a composition bug: fail closed before any driver work rather
             // than run a driver the operator did not select. The throw reaches the fatal-fault

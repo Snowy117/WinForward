@@ -56,6 +56,7 @@ public sealed class TcpProxyRelayFactoryTests
             var response = new byte[s_responsePayload.Length];
             Assert.Equal(s_responsePayload.Length, await client.ReceiveAsync(response, SocketFlags.None));
             Assert.Equal(s_responsePayload, response);
+            // A clean end closes the client leg plainly: the peer reads the FIN (0), not a reset.
             Assert.Equal(0, await ReceiveWithTimeoutAsync(client));
 
             Assert.Equal(s_requestPayload, await upstream.Forwarded.WaitAsync(TimeSpan.FromSeconds(5)));
@@ -76,7 +77,7 @@ public sealed class TcpProxyRelayFactoryTests
     }
 
     [Fact]
-    public async Task RawSocketRelayReportsAFaultedEndWhenTheUpstreamResets()
+    public async Task RawSocketRelayReportsAFaultedEndAndResetsTheClientWhenTheUpstreamResets()
     {
         await using var upstream = FakeSocks5Upstream.StartFaulting();
         var (peer, accepted) = await CreateSocketPairAsync();
@@ -98,6 +99,45 @@ public sealed class TcpProxyRelayFactoryTests
 
             var endInfo = Assert.IsType<ITcpRelayEndInfo>(relay, exactMatch: false);
             Assert.Equal(RelayEndKind.Faulted, endInfo.EndKind);
+
+            // The raw entry arms the abortive close, and the relay closes the socket before Completion
+            // faults: the client leg must observe the reset, not the FIN a plain close would send. A
+            // linger write after Completion cannot produce this, because the socket is gone by then.
+            var reset = await Assert.ThrowsAsync<SocketException>(async () => await ReceiveWithTimeoutAsync(client));
+            Assert.Equal(SocketError.ConnectionReset, reset.SocketErrorCode);
+        }
+        finally
+        {
+            await relay.DisposeAsync();
+        }
+
+        Assert.True(accepted.IsDisposedValue);
+    }
+
+    [Fact]
+    public async Task AcceptedConnectionEntryKeepsThePlainCloseWhenTheUpstreamResets()
+    {
+        // The packet path's relay must not arm the abortive close: there the client-visible abort is
+        // the acceptor's crafted RST|ACK, so the relay's own local close stays a plain FIN.
+        await using var upstream = FakeSocks5Upstream.StartFaulting();
+        var (peer, accepted) = await CreateSocketPairAsync();
+        using var client = peer;
+        var factory = new TcpProxyRelayFactory(new SelfTrafficRegistry());
+        var acceptedConnection = new TcpAcceptedConnection(accepted, Endpoint.From(IPAddress.Loopback, 40000));
+
+        var relay = await factory.EstablishAsync(
+            Endpoint.From(s_originalDestination, 443), acceptedConnection, upstream.Server, CancellationToken.None);
+        try
+        {
+            upstream.Abort();
+
+            await Assert.ThrowsAnyAsync<Exception>(
+                async () => await relay.Completion.WaitAsync(TimeSpan.FromSeconds(5)));
+            var endInfo = Assert.IsType<ITcpRelayEndInfo>(relay, exactMatch: false);
+            Assert.Equal(RelayEndKind.Faulted, endInfo.EndKind);
+
+            // No reset: the client leg reads the FIN (0 bytes) the plain close sent.
+            Assert.Equal(0, await ReceiveWithTimeoutAsync(client));
         }
         finally
         {

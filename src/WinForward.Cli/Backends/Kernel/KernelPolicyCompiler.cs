@@ -13,7 +13,16 @@ namespace WinForward.Cli.Backends.Kernel;
 /// The Kernel host policy as the backend consumes it: the v2 host rule blob plus the target table a
 /// redirect context's <c>rule_index</c> resolves through.
 /// </summary>
-internal sealed record KernelPolicyCompilation(byte[] HostBlob, ProxyTarget?[] TargetsByRuleIndex, int RuleCount);
+/// <param name="ContainsBlock">
+/// The driver refuses to enable a table that can block — by fallback or by a rule — without a
+/// non-zero block sink port.
+/// </param>
+internal sealed record KernelPolicyCompilation(
+    byte[] HostBlob,
+    ProxyTarget?[] TargetsByRuleIndex,
+    int RuleCount,
+    RuleAction FallbackAction,
+    bool ContainsBlock);
 
 /// <summary>
 /// Compiles a validated WinForward host policy into the Kernel host rule blob and builds the
@@ -66,16 +75,21 @@ internal static class KernelPolicyCompiler
         var hostRules = configuration.Policy.HostRules;
         var rules = new List<KernelPolicyRule>(hostRules.Count);
         var targetsByRuleIndex = new ProxyTarget?[hostRules.Count];
+        var containsBlock = false;
         List<ConfigDiagnostic> diagnostics = [];
         for (var index = 0; index < hostRules.Count; index++)
         {
             var mapped = MapRule(
                 hostRules[index], RulePath(index), configuration.Targets, targetsByRuleIndex, index, diagnostics);
-            if (mapped is not null) rules.Add(mapped);
+            if (mapped is null) continue;
+
+            if (mapped.Action == RuleAction.Block) containsBlock = true;
+            rules.Add(mapped);
         }
 
         var fallback = MapFallback(configuration.Policy.HostFallbackAction, diagnostics);
         if (diagnostics.Count > 0) return Fail(diagnostics, out compilation, out errors);
+        containsBlock |= fallback == RuleAction.Block;
 
         // The recorder tells a normalizer failure apart from any other compiler rejection, so the
         // diagnostic can name the process selector instead of only the rule.
@@ -105,7 +119,7 @@ internal static class KernelPolicyCompiler
             return Fail(diagnostics, out compilation, out errors);
         }
 
-        compilation = new KernelPolicyCompilation(blob, targetsByRuleIndex, ruleCount);
+        compilation = new KernelPolicyCompilation(blob, targetsByRuleIndex, ruleCount, fallback, containsBlock);
         errors = [];
         return true;
     }

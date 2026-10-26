@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the backend matches the parent seam/startup/shutdown contract."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "Verify the device call order, ABI check, config/read-back and no-default-target fail-closed."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Verify blob/rule-index handling and no silent widening."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify fail-closed refusal paths and exit codes."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Verify listener/session/relay ownership and the shutdown drain."}
+{"file": ".trellis/spec/backend/tcp-relay-lifecycle.md", "reason": "Verify relay ownership/end-kind/linger-0."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify build/test/format/jb evidence and the deferred E2E statement."}

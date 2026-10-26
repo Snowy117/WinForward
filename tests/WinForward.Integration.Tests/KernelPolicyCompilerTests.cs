@@ -212,6 +212,26 @@ public sealed class KernelPolicyCompilerTests
     }
 
     [Fact]
+    public void CarriesTheCompiledFallbackActionForTheDriverReadback()
+    {
+        Assert.Equal(RuleAction.Block, Compile(Load(KernelProxyConfig), new FakeProcessPathNormalizer()).FallbackAction);
+        Assert.Equal(RuleAction.Permit, Compile(Load(FileNameOnlyConfig)).FallbackAction);
+    }
+
+    [Fact]
+    public void ContainsBlockFollowsTheFallbackActionAndEveryMappedRuleAction()
+    {
+        var main = ProxyTarget.FromServer(Server("Main"));
+
+        // The fallback alone can reach a block decision...
+        Assert.True(Compile(Manual([ProxyRule("Main")], FlowAction.Block, ("Main", main))).ContainsBlock);
+        // ...a mapped block rule can under a permit fallback...
+        Assert.True(Compile(Load(FileNameOnlyConfig)).ContainsBlock);
+        // ...and a policy whose fallback and rules only pass or redirect cannot.
+        Assert.False(Compile(Manual([ProxyRule("Main")], FlowAction.Pass, ("Main", main))).ContainsBlock);
+    }
+
+    [Fact]
     public void RejectsAPathSelectorWhenTheHostCannotResolveDevicePaths()
     {
         var diagnostics = Reject(Load(KernelProxyConfig), new UnsupportedProcessPathNormalizer());

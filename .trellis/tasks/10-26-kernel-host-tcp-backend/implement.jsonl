@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Parent design: the Kernel host TCP startup/shutdown/accept/relay contract and target mapping."}
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/research/gap-analysis.md", "reason": "The capability/parity boundaries the backend must not silently widen."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "Kernel device/control facts: ABI v8, listener/self-PID/block-sink config, redirect context."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Host blob semantics and the rule-index contract the target table relies on."}
+{"file": ".trellis/spec/backend/kernel/csharp-conventions.md", "reason": "Kernel C#/Contracts conventions and analyzer expectations."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where the backend files belong and the 400-effective-line ceiling."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed startup/accept paths and the exit-code surface."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Session/listener/relay ownership and shutdown drain."}
+{"file": ".trellis/spec/backend/tcp-relay-lifecycle.md", "reason": "Raw-socket relay establishment, end kind and linger-0 contract."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Analyzer/format/test gates and the environment-gap reporting."}

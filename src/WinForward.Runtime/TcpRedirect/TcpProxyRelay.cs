@@ -35,6 +35,14 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, ILogge
     /// must not dispose it afterwards. A failed call leaves the socket with the caller, which still
     /// owns it and is expected to close it abortively rather than reuse it.
     /// </para>
+    /// <para>
+    /// The relay from this entry closes the client leg abortively for a non-clean end: a
+    /// <see cref="RelayEndKind.Stalled"/> or <see cref="RelayEndKind.Faulted"/> end arms linger 0 and
+    /// closes the socket from inside the pumps (the peer sees a reset where the plain close would send
+    /// a FIN), while a clean end keeps the normal FIN. The close cannot be left to the consumer: once
+    /// <see cref="ITcpRelay.Completion"/> completes the socket is already gone. This local abort carries
+    /// the reset the packet path gets from the acceptor's crafted RST|ACK.
+    /// </para>
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="acceptedSocket"/> is not connected to an
     /// IP peer; an unconnected socket cannot identify the accepted connection.</exception>
@@ -54,10 +62,10 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, ILogge
         var acceptedConnection = new TcpAcceptedConnection(
             acceptedSocket,
             Endpoint.From(remote.Address, checked((ushort)remote.Port)));
-        return EstablishAsync(originalDestination, acceptedConnection, server, cancellationToken);
+        return EstablishCoreAsync(originalDestination, acceptedConnection, server, abortiveCloseOnFault: true, cancellationToken);
     }
 
-    public async ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken)
+    public ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(acceptedConnection);
         ArgumentNullException.ThrowIfNull(server);
@@ -67,6 +75,14 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, ILogge
             throw new ArgumentException("The accepted connection must be a TcpAcceptedConnection.", nameof(acceptedConnection));
         }
 
+        // The packet path keeps the plain local close: the acceptor's crafted RST|ACK is the
+        // client-visible abort for a non-clean end, and a relay-side abortive close would add a
+        // second, uncontrolled reset behind it.
+        return EstablishCoreAsync(originalDestination, concrete, server, abortiveCloseOnFault: false, cancellationToken);
+    }
+
+    private async ValueTask<ITcpRelay> EstablishCoreAsync(Endpoint originalDestination, TcpAcceptedConnection acceptedConnection, Socks5Server server, bool abortiveCloseOnFault, CancellationToken cancellationToken)
+    {
         // Register the upstream control connection's exact tuple before its SYN leaves the host.
         // The socket is bound to a wildcard local endpoint, so the registration uses Any:port and
         // the wildcard matcher in SelfTrafficRegistry covers the routing-chosen source IP. This
@@ -86,7 +102,7 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, ILogge
             await control.ConnectDestinationAsync(new IPEndPoint(destinationAddress.ToIPAddress(), originalDestination.Port), cancellationToken).ConfigureAwait(false);
 
             var upstream = control.GetUpstreamStream();
-            return new TcpProxyRelay(concrete.Socket, upstream, control, logger, pumpBufferPool);
+            return new TcpProxyRelay(acceptedConnection.Socket, upstream, control, logger, pumpBufferPool, abortiveCloseOnFault);
         }
         catch
         {
@@ -113,10 +129,13 @@ public enum RelayEndKind
 /// <see cref="ITcpRelay"/>, because not every relay can classify its end; a relay that does not
 /// implement it is treated as a clean end (no client reset).
 /// <para>
-/// A consumer outside this assembly that owns the client socket reads the kind after
-/// <see cref="ITcpRelay.Completion"/> and closes its own socket abortively (linger 0) for a
-/// <see cref="RelayEndKind.Stalled"/> or <see cref="RelayEndKind.Faulted"/> end, leaving the normal
-/// FIN path for <see cref="RelayEndKind.CleanEnded"/>.
+/// The client-visible close mode is pinned by the establishment entry, not by the consumer: the
+/// raw-socket entry arms the relay's abortive close for a <see cref="RelayEndKind.Stalled"/> or
+/// <see cref="RelayEndKind.Faulted"/> end, and the packet path leaves the close to the acceptor's
+/// crafted RST|ACK. A consumer outside this assembly — one that owns the accepted socket instead of
+/// borrowing the redirect listener — reads the kind after <see cref="ITcpRelay.Completion"/> to count
+/// and log the outcome; it cannot set the linger then, because the relay's pumps have already closed
+/// the socket.
 /// </para>
 /// </summary>
 public interface ITcpRelayEndInfo
@@ -156,6 +175,12 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     private readonly IAsyncDisposable _control;
     private readonly ILogger _logger;
     private readonly NativeBufferPool _pumpBufferPool;
+    // Whether a non-clean end closes the client-facing socket abortively (linger 0). Opt-in for the
+    // socket-owning entry, which has no acceptor to inject the packet path's crafted RST|ACK; the
+    // packet path leaves the close plain so its acceptor's abort stays the single client-visible
+    // reset. The abort runs inside the pumps, the only place that executes while the socket is still
+    // open — a consumer setting the linger after Completion would write to a closed socket.
+    private readonly bool _abortiveCloseOnFault;
     // Owns the pumps' lifetime token and joins the pumps when the relay is disposed. It is sealed
     // and drained only after the local socket is closed, which is what forces a pump the stall
     // fast-exit abandoned to return.
@@ -163,7 +188,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     private int _teardownStarted;
     private long _serverStreamBytes;
 
-    public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, ILogger? logger = null, NativeBufferPool? pumpBufferPool = null)
+    public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, ILogger? logger = null, NativeBufferPool? pumpBufferPool = null, bool abortiveCloseOnFault = false)
     {
         ArgumentNullException.ThrowIfNull(localSocket);
         ArgumentNullException.ThrowIfNull(upstream);
@@ -172,6 +197,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         _control = control;
         _logger = logger ?? NullLogger.Instance;
         _pumpBufferPool = pumpBufferPool ?? s_sharedPumpBufferPool;
+        _abortiveCloseOnFault = abortiveCloseOnFault;
         Completion = RunPumpAsync(upstream);
     }
 
@@ -201,12 +227,15 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         if (firstResult != PumpResult.Ended)
         {
             _scope.Cancel();
+            // Both remaining first results are non-clean ends, so the client leg is closed abortively
+            // before this method's stream scope would close it gracefully.
+            AbortLocalSocket();
             if (firstResult == PumpResult.Stalled)
             {
                 // Stall fast-exit: the relay is reclaimed without awaiting the sibling, so Completion
                 // still completes on a stall instead of waiting for both pumps. The sibling is a
-                // tracked child — the scope's drain joins it inside DisposeAsync, and the socket close
-                // there makes it return.
+                // tracked child — the scope's drain joins it inside DisposeAsync, and the socket
+                // close forces it to return.
                 EndKind = RelayEndKind.Stalled;
                 return;
             }
@@ -225,6 +254,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         if (results[0] == PumpResult.Faulted || results[1] == PumpResult.Faulted)
         {
             _scope.Cancel();
+            AbortLocalSocket();
             EndKind = RelayEndKind.Faulted;
             throw _scope.Fault ?? new IOException(PumpFaultMessage);
         }
@@ -232,6 +262,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         if (results[0] == PumpResult.Stalled || results[1] == PumpResult.Stalled)
         {
             _scope.Cancel();
+            AbortLocalSocket();
             EndKind = RelayEndKind.Stalled;
             return;
         }
@@ -366,6 +397,26 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         ShutdownSend(networkStream.Socket);
     }
 
+    /// <summary>
+    /// Abortively closes the client-facing socket for a non-clean end: it arms linger 0 and closes the
+    /// socket here, because the pump scope's stream disposal shuts the socket down gracefully first and
+    /// a graceful shutdown turns the close into a FIN, defeating the linger. A no-op when the relay was
+    /// not built for it, and when the socket is already gone.
+    /// </summary>
+    private void AbortLocalSocket()
+    {
+        if (!_abortiveCloseOnFault) return;
+        try
+        {
+            _localSocket.LingerState = new LingerOption(enable: true, seconds: 0);
+            _localSocket.Dispose();
+        }
+        catch (Exception exception) when (exception is ObjectDisposedException or SocketException)
+        {
+            // The socket is already closed; the abortive intent needs no retry.
+        }
+    }
+
     private enum PumpResult
     {
         Ended,
@@ -388,6 +439,11 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
 
         var drained = _scope.DrainAsync();
         _scope.Cancel();
+        // A relay that faulted before its pumps could classify (for example a stream-construction
+        // throw, where EndKind keeps its fail-visible default) never reached the pump path's abortive
+        // close, so this disposal is the close for it. A relay whose pumps are still running, or that
+        // ended cleanly, is closed plainly below: this disposal owns that close.
+        if (Completion.IsCompleted && EndKind != RelayEndKind.CleanEnded) AbortLocalSocket();
         _localSocket.Dispose();
         try
         {

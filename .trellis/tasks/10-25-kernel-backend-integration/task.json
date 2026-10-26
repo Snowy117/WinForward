@@ -25,7 +25,8 @@
     "10-25-winpkfilter-backend-seam",
     "10-25-kernel-runtime-seam",
     "10-25-kernel-policy-compiler",
-    "10-26-kernel-raw-socket-relay"
+    "10-26-kernel-raw-socket-relay",
+    "10-26-kernel-host-tcp-backend"
   ],
   "parent": null,
   "relatedFiles": [],

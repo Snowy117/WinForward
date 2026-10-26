@@ -18,16 +18,26 @@ ServerStreamBytes }`. `RelayEndKind` is `CleanEnded` / `Stalled` / `Faulted` and
 `Completion` completes; a relay that does not implement the capability is treated as `CleanEnded`. The
 kind lives on a capability interface rather than on `ITcpRelay` because not every relay classifies its
 end, and the interface is public so a backend outside this assembly — one that owns the accepted socket
-instead of borrowing the redirect listener — can read the kind after `Completion` and close its own
-socket abortively (linger 0) for `Stalled`/`Faulted`, where the acceptor injects its crafted RST|ACK.
+instead of borrowing the redirect listener — can read the kind after `Completion` to count and log the
+outcome.
+The client-visible close mode is fixed at establishment rather than at completion, because the relay
+closes its socket during `RunPumpAsync`, before `Completion` completes. The **raw-socket entry therefore
+performs the relay's abortive close**: a `Stalled`/`Faulted` end arms linger 0 and closes the client
+socket with an explicit close from inside the pump body — explicit because the pump scope's
+`NetworkStream` (ownsSocket) disposal shuts the socket down gracefully before closing it, which defeats
+the linger and sends the FIN the contract forbids. A consumer could not do it either: after `Completion`
+the socket is already closed, so an after-the-fact linger write throws `ObjectDisposedException` and the
+promised reset silently degrades to a FIN. A clean end keeps the normal FIN; the packet path keeps the
+plain local close, and its acceptor turns the kind into the client-visible close: a crafted RST|ACK for a
+non-clean end, and for a clean one the bounded drain — the relay is released, the stack's own FIN is
+carried by the live alias, and the retire waits for the client's acknowledgement — described in
+[tcp-client-close-injection.md](./tcp-client-close-injection.md).
 `EndKind` **defaults to `Faulted`** — the fail-visible kind: a relay whose `RunPumpAsync` throws before its
 first classification write (for example during `NetworkStream`/CTS construction) must still surface as a
-client reset, so `CleanEnded` is assigned only explicitly, after both pumps verifiably completed (caught in
-review 2026-08-30). `ServerStreamBytes` is the server→client delivered byte count, read with `Volatile.Read`.
-The acceptor turns the kind into the client-visible close: a crafted RST|ACK for a non-clean end, and for a
-clean one the bounded drain — the relay is released, the stack's own FIN is carried by the live alias, and
-the retire waits for the client's acknowledgement — described in
-[tcp-client-close-injection.md](./tcp-client-close-injection.md).
+client reset, so the relay performs the abortive close at its own disposal for that shape as well (the
+pump body never ran to carry it), and `CleanEnded` is assigned only explicitly, after both pumps
+verifiably completed (caught in review 2026-08-30). `ServerStreamBytes` is the server→client delivered
+byte count, read with `Volatile.Read`.
 
 ## Establishment entries
 
@@ -37,11 +47,13 @@ the retire waits for the client's acknowledgement — described in
   `TcpAcceptedConnection` the redirect listener builds, so the relayed connection is always one the
   listener accepted and the acceptor's peer check validated.
 - **Socket-owning backend.** The raw `Socket` overload requires a connected IP socket, records the
-  socket's remote endpoint as the accepted connection's identity, and delegates to the packet-path
-  method. It exists for a backend that owns its listener and receives the connected socket from
-  somewhere other than `TcpRedirectListener`; the original destination still arrives as the separate
-  argument. It also reproduces the listener's client-leg `NoDelay = true` before establishment —
-  both relay legs are byte pipes (see [relay-pump-and-checksums.md](./relay-pump-and-checksums.md)),
+  socket's remote endpoint as the accepted connection's identity, and runs the same SOCKS5
+  control/connect core as the packet path with the relay's abortive close armed: this entry replaces
+  the acceptor, so the RST for a `Stalled`/`Faulted` end has to come from the relay's own close (see
+  "What a relay end is"). It exists for a backend that owns its listener and receives the connected
+  socket from somewhere other than `TcpRedirectListener`; the original destination still arrives as the
+  separate argument. It also reproduces the listener's client-leg `NoDelay = true` before establishment
+  — both relay legs are byte pipes (see [relay-pump-and-checksums.md](./relay-pump-and-checksums.md)),
   so a raw entry that skipped it would leave Nagle x delayed-ACK stalls of 40-200 ms on small
   proxied writes.
 
@@ -95,8 +107,9 @@ without a per-flow wall-clock timeout.
 
 `TcpProxyRelay.DisposeAsync` takes an explicit one-shot claim (`Interlocked.Exchange`); a second caller
 joins the drain and observes `Completion` instead of re-running the socket/control teardown. The claimant
-runs: `DrainAsync()` → `Cancel()` → `_localSocket.Dispose()` → `await _control.DisposeAsync()` → await the
-drain → `ObserveCompletionAsync()`.
+runs: `DrainAsync()` → `Cancel()` → perform the abortive close when the relay already completed
+non-clean (see "What a relay end is") → `_localSocket.Dispose()` → `await _control.DisposeAsync()` →
+await the drain → `ObserveCompletionAsync()`.
 
 - **The drain is bounded by the socket close.** Closing the client-facing socket is what forces a pump
   abandoned by the stall fast-exit to return, so the drain cannot hang.
@@ -178,10 +191,15 @@ disposal is a no-op through the `IsSealed` gate.
   `PumpFaultFaultsCompletionAndEmitsExactlyOneFaultEvent` (plus the debug-gate suppression case),
   `DisposingARelayObservesItsFaultedCompletionSoItNeverEscapes` (uses `UnobservedExceptionProbe`), and
   `RelayReportsTheServerStreamBytesItWroteToTheClient`.
-- `TcpRelayEndCloseTests.RelayEndKindIsStalledWhenPumpStalls` pins `Completion`'s stall fast-exit.
 - `TcpProxyRelayFactoryTests` pins the raw-socket entry end to end against a loopback SOCKS5 upstream:
-  both directions relay, a clean half-close ends `CleanEnded`, an upstream reset ends `Faulted`, the
-  relay disposes the socket it was handed, and the overload plus the end-kind surface are public.
+  both directions relay, a clean half-close ends `CleanEnded` and leaves the client leg a FIN, an
+  upstream reset ends `Faulted` and resets the client leg (`SocketError.ConnectionReset`), the
+  accepted-connection entry leaves the client leg a FIN on the same fault (the packet path keeps the
+  plain close for the acceptor's crafted RST), the relay disposes the socket it was handed, and the
+  overload plus the end-kind surface are public.
+- `TcpRelayEndCloseTests` — `RelayEndKindIsStalledWhenPumpStalls` pins `Completion`'s stall fast-exit,
+  and `AnAbortiveRelayEndResetsTheClientLegOnAStall` pins the stall branch of the raw entry's abortive
+  close.
 - `TcpRelayObservationTests` covers the **two discard paths**: the acceptor's attach-failure branch
   (`AttachFailureDisposesTheDiscardedRelay` asserts `relay.IsDisposed` — observation now *is* the relay's
   own dispose) and the intrinsic pump fault (exactly one `tcp.relay.faulted`).
@@ -214,4 +232,25 @@ catch (Exception exception) { _scope.RecordFault(exception); throw; }
 if (!_scope.TryEnter(out var lease)) return PumpResult.Ended;
 catch (OperationCanceledException) { return PumpResult.Stalled; }
 catch (Exception exception) { RecordPumpFault(exception); return PumpResult.Faulted; }
+```
+
+#### Wrong
+
+```csharp
+// The pumps closed the client socket before Completion completed, so this write throws
+// ObjectDisposedException, the catch swallows it, and the client sees a FIN where the contract
+// promises a reset. The close mode has to be armed at establishment, before the socket is closed.
+await relay.Completion;
+if (relay is ITcpRelayEndInfo { EndKind: RelayEndKind.Stalled or RelayEndKind.Faulted })
+    clientSocket.LingerState = new LingerOption(true, 0);
+```
+
+#### Correct
+
+```csharp
+// The raw-socket entry closes the client socket abortively from inside the relay's pumps, before the
+// socket-owning stream scope can shut it down gracefully; the consumer only reads the end kind for
+// counting and logging.
+var relay = await factory.EstablishAsync(destination, socket, server, token);
+await relay.Completion;
 ```

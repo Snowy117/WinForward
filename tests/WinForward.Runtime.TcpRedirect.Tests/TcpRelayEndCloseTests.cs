@@ -136,6 +136,25 @@ public sealed class TcpRelayEndCloseTests
         Assert.Equal(RelayEndKind.Stalled, relay.EndKind);
     }
 
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task AnAbortiveRelayEndResetsTheClientLegOnAStall()
+    {
+        var (localPeer, relayLocal) = await CreateSocketPairAsync();
+        using var local = localPeer;
+        await using var relay = new TcpProxyRelay(relayLocal, new StallingUpstreamStream(), new NoopDisposable(), abortiveCloseOnFault: true);
+
+        await relay.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // A stalled end is non-clean, so the relay's abortive close resets the client leg; the
+        // classification itself is the test above.
+        Assert.Equal(RelayEndKind.Stalled, relay.EndKind);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var reset = await Assert.ThrowsAsync<SocketException>(
+            async () => await local.ReceiveAsync(new byte[1], SocketFlags.None, cancellation.Token));
+        Assert.Equal(SocketError.ConnectionReset, reset.SocketErrorCode);
+    }
+
     /// <summary>
     /// Asserts the crafted RST|ACK: original server -> client, seq from the server tracker,
     /// ack from the client tracker, host shape (toward MSTCP).
