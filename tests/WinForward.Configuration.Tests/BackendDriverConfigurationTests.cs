@@ -218,7 +218,9 @@ public sealed class BackendDriverConfigurationTests
     [Fact]
     public void ACatchAllProxyRuleIsRejectedUnderTheKernelProvider()
     {
-        SingleError(Configuration(Host(CatchAllProxy), backendDriver: Kernel), "WinForward.Host.Rules[0].Protocol");
+        var diagnostic = SingleError(Configuration(Host(CatchAllProxy), backendDriver: Kernel), "WinForward.Host.Rules[0].Protocol");
+
+        Assert.Contains("host UDP proxy is not available yet", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -228,7 +230,12 @@ public sealed class BackendDriverConfigurationTests
     {
         var rule = $$"""{ "Protocol": [{{protocols}}], "Action": "proxy", "Target": "main" }""";
 
-        SingleError(Configuration(Host(rule), backendDriver: Kernel), "WinForward.Host.Rules[0].Protocol");
+        var diagnostic = SingleError(Configuration(Host(rule), backendDriver: Kernel), "WinForward.Host.Rules[0].Protocol");
+
+        Assert.Contains("cannot preserve the original destination as its source", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("unconnected client would see the proxy listener", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("the driver-side reply injection is pending", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("Provider = WinpkFilter for UDP", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -312,6 +319,11 @@ public sealed class BackendDriverConfigurationTests
         SingleError(Configuration(Host(ProcessPass(selector)), backendDriver: Kernel), "WinForward.Host.Rules[0].Process");
     }
 
+    /// <summary>
+    /// The host UDP coordinator is not started while the host UDP proxy is disabled, so a non-default
+    /// UDP budget is still inert under the Kernel provider and must be reported as such rather than
+    /// silently ignored; all three settings keep their meaning under WinpkFilter.
+    /// </summary>
     [Fact]
     public void NonDefaultUdpSettingsWarnAsInertUnderTheKernelProvider()
     {
@@ -343,7 +355,7 @@ public sealed class BackendDriverConfigurationTests
     /// explicitly keeps that pre-existing warning; the point here is that it is not also called inert.
     /// </summary>
     [Fact]
-    public void AnExplicitlyDefaultUdpSessionCapacityIsNotReportedAsInert()
+    public void AnExplicitlyDefaultUdpSessionCapacityKeepsOnlyTheCapacityHeadroomWarning()
     {
         var overrides = string.Create(
             CultureInfo.InvariantCulture,

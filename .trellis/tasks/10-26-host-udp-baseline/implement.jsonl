@@ -1,0 +1,15 @@
+{"file": ".trellis/tasks/10-26-kernel-host-udp/prd.md", "reason": "Umbrella requirements and decisions inherited by the baseline batch."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/design.md", "reason": "Cross-batch architecture; the baseline implements §1-§9."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/research/host-udp-driver.md", "reason": "Per-association classify, cmsg context, same-socket reply, dual-mode listener risk."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/research/host-udp-userland.md", "reason": "Coordinator/session reuse surface, FlowKey/target model and the three rejection points."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/research/host-udp-seams.md", "reason": "S1-S8 seams, option A, baseline A1-A5/A8/A10 matrix."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Datagram-path invariants and skip semantics."}
+{"file": ".trellis/spec/backend/udp-flow-setup.md", "reason": "Setup queue, budget and cooldown behavior."}
+{"file": ".trellis/spec/backend/udp-session-lifecycle.md", "reason": "Capacity, idle and teardown semantics."}
+{"file": ".trellis/spec/backend/udp-relay-transport.md", "reason": "Transport seam and buffer sizing."}
+{"file": ".trellis/spec/backend/idle-expiry-sweep.md", "reason": "Host-side tick/sweep cadence."}
+{"file": ".trellis/spec/backend/packet-shape-and-flow-identity.md", "reason": "FlowKey identity/family invariants."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "WFP UDP facts, cmsg levels, block sink and ABI."}
+{"file": ".trellis/spec/backend/kernel/wfp-connected-udp-record-refcount-leak.md", "reason": "Connected leak acceptance and sampling."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Lifecycle/scope/dispose rules for the host service refactor."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Gates, evidence, suppression policy."}

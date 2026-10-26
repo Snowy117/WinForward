@@ -15,3 +15,20 @@
 # =====================================================================
 [**/DurableCaptureBundle.cs]
 resharper_member_can_be_private_global_highlighting = none
+
+# =====================================================================
+# Host UDP 脚手架：jb 的 MemberCanBePrivate 无法看到友元程序集的消费者
+#
+# `HostUdpResponseSink.ToListenerEndpoint` 与 `KernelHostUdpDatagram.Normalize` 声明为 internal，
+# 消费者只有 `tests/WinForward.Integration.Tests`：`HostUdpResponseSinkTests` 的两条用例断言
+# IPv4→`::ffff:` 映射与原生 IPv6 端点原样返回，`KernelHostUdpDatagramTests` 的
+# `ANativeIpv4ClientAgainstAFamily4ContextIsUnchanged` 断言原生端点不被改写。这条可见性由本工程
+# csproj 的 `InternalsVisibleTo WinForward.Integration.Tests` 授权，而 jb 的跨程序集使用分析不建模
+# 该授权——quality-guidelines.md 已把友元消费者列为不可「修复」的 jb 误报类。按「可以私有化」动手
+# 会让测试报 CS0122，而 jb 看不到那个构建错误。只降级这两个文件；工程内其它代码仍受同一条规则管辖。
+# =====================================================================
+[**/HostUdpResponseSink.cs]
+resharper_member_can_be_private_global_highlighting = none
+
+[**/KernelHostUdpDatagram.cs]
+resharper_member_can_be_private_global_highlighting = none

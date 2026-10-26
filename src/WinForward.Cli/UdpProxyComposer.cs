@@ -68,20 +68,56 @@ internal static class UdpProxyComposer
         ILogger logger,
         IInterceptionHealthSignal? healthSignal,
         UdpProxyComposition composition)
-        => new(
-            new UdpTransportFactory(
-                new Socks5UdpTransportFactory(selfTraffic, composition.MaximumFrameSize, composition.RelayReceiveBufferBytes, composition.AddressCache, logger),
-                new LocalUdpTransportFactory(selfTraffic, composition.MaximumFrameSize, composition.RelayReceiveBufferBytes)),
+    {
+        ArgumentNullException.ThrowIfNull(composition);
+        return Create(
             new UdpResponseReinjector(reinjector, composition.Targets, composition.Slots, maximumFrameSize: composition.MaximumFrameSize, logger: logger, healthSignal: healthSignal),
+            selfTraffic,
+            logger,
+            composition.MaximumFrameSize,
             composition.SetupQueuePool,
             composition.ReceiveWindowPool,
             composition.SetupExecutor,
+            composition.AddressCache,
+            composition.SessionCapacity,
+            composition.RelayReceiveBufferBytes,
+            composition.ActivityClock);
+    }
+
+    /// <summary>
+    /// The transport- and options-only core every composition shares: the same SOCKS5/local transport
+    /// factory and the same <see cref="UdpProxyOptions"/> as the packet path, differing only in the
+    /// response sink that carries a reply back toward the client. The packet path passes a
+    /// <see cref="UdpResponseReinjector"/>; the Kernel host path passes a sink that sends from the
+    /// listener socket that received the datagram. Both borrow the pools, the executor and the address
+    /// cache and never dispose them.
+    /// </summary>
+    internal static UdpProxyCoordinator Create(
+        IUdpResponseSink responseSink,
+        SelfTrafficRegistry selfTraffic,
+        ILogger logger,
+        int maximumFrameSize,
+        NativeBufferPool setupQueuePool,
+        NativeBufferPool receiveWindowPool,
+        SetupExecutor setupExecutor,
+        Socks5AddressCache addressCache,
+        int sessionCapacity,
+        int relayReceiveBufferBytes,
+        ActivityBucketClock? activityClock)
+        => new(
+            new UdpTransportFactory(
+                new Socks5UdpTransportFactory(selfTraffic, maximumFrameSize, relayReceiveBufferBytes, addressCache, logger),
+                new LocalUdpTransportFactory(selfTraffic, maximumFrameSize, relayReceiveBufferBytes)),
+            responseSink,
+            setupQueuePool,
+            receiveWindowPool,
+            setupExecutor,
             new UdpProxyOptions
             {
                 Logger = logger,
-                MaximumFrameSize = composition.MaximumFrameSize,
-                Capacity = composition.SessionCapacity,
-                RelayReceiveBufferBytes = composition.RelayReceiveBufferBytes,
-                ActivityClock = composition.ActivityClock,
+                MaximumFrameSize = maximumFrameSize,
+                Capacity = sessionCapacity,
+                RelayReceiveBufferBytes = relayReceiveBufferBytes,
+                ActivityClock = activityClock,
             });
 }

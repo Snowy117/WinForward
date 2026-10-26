@@ -360,14 +360,13 @@ internal static class KernelPolicyCompiler
             return null;
         }
 
-        // Defence in depth: the capability gate refuses a local target under this provider (a local
-        // target needs host UDP, which the Kernel backend does not serve), so reaching this is a
-        // converter bug rather than a supported configuration.
+        // Defence in depth: the capability gate refuses a local target under this provider, so
+        // reaching this is a converter bug rather than a supported configuration.
         if (target.IsLocal)
         {
             diagnostics.Add(new(
                 $"{path}.Target",
-                $"The {BackendDriverConfiguration.KernelProviderName} provider has no host UDP relay, so local target '{target.Name}' cannot serve this rule; use a SOCKS5 target."));
+                $"The {BackendDriverConfiguration.KernelProviderName} provider cannot serve local target '{target.Name}', which needs a direct host UDP relay this milestone does not enable; use a SOCKS5 target."));
             return null;
         }
 

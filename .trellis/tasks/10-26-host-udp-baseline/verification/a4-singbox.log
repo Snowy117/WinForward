@@ -1,0 +1,30 @@
+-0700 2026-10-25 19:08:46 INFO [3827004653 2ms] outbound/direct[direct]: outbound connection to 192.168.100.4:40012
+-0700 2026-10-25 19:08:57 INFO [3131939867 14ms] inbound/socks[socks-in]: inbound connection from 127.0.0.1:58595
+-0700 2026-10-25 19:08:57 INFO [3131939867 14ms] inbound/socks[socks-in]: inbound connection to 192.168.100.4:40012
+-0700 2026-10-25 19:08:57 INFO [3131939867 15ms] outbound/direct[direct]: outbound connection to 192.168.100.4:40012
+-0700 2026-10-25 19:09:52 INFO inbound/socks[socks-in]: tcp server started at 127.0.0.1:1080
+-0700 2026-10-25 19:09:52 INFO network: updated default interface External, index 14
+-0700 2026-10-25 19:09:52 INFO sing-box started (0.02s)
+-0700 2026-10-25 19:09:52 INFO network: updated network environment: gateway [192.168.77.1 fd00:1234:5678:1::1], gateway_mac [00:15:5d:03:72:69 00:15:5d:03:72:69]
+-0700 2026-10-25 19:09:55 INFO [1340284985 0ms] inbound/socks[socks-in]: inbound connection from 127.0.0.1:58602
+-0700 2026-10-25 19:09:55 INFO [1340284985 0ms] inbound/socks[socks-in]: inbound connection to 192.168.100.4:40012
+-0700 2026-10-25 19:09:55 INFO [1340284985 1ms] outbound/direct[direct]: outbound connection to 192.168.100.4:40012
+-0700 2026-10-25 19:10:28 INFO [2602264304 6ms] inbound/socks[socks-in]: inbound connection from 127.0.0.1:58606
+-0700 2026-10-25 19:10:28 INFO [2602264304 15ms] inbound/socks[socks-in]: inbound connection to 192.168.100.4:40012
+-0700 2026-10-25 19:10:28 INFO [2602264304 15ms] outbound/direct[direct]: outbound connection to 192.168.100.4:40012
+-0700 2026-10-25 20:03:42 INFO inbound/socks[socks-in]: tcp server started at 127.0.0.1:1080
+-0700 2026-10-25 20:03:42 INFO network: updated default interface External, index 14
+-0700 2026-10-25 20:03:42 INFO network: updated network environment: gateway [192.168.77.1 fd00:1234:5678:1::1], gateway_mac [00:15:5d:03:72:69 00:15:5d:03:72:69]
+-0700 2026-10-25 20:03:42 INFO sing-box started (0.06s)
+-0700 2026-10-25 20:03:43 INFO [1158156177 0ms] inbound/socks[socks-in]: inbound connection from 127.0.0.1:58857
+-0700 2026-10-25 20:05:49 INFO [804019807 11ms] inbound/socks[socks-in]: inbound connection from 127.0.0.1:58861
+-0700 2026-10-25 20:05:49 INFO [804019807 38ms] inbound/socks[socks-in]: inbound connection to 192.168.100.4:40012
+-0700 2026-10-25 20:05:49 INFO [804019807 82ms] outbound/direct[direct]: outbound connection to 192.168.100.4:40012
+-0700 2026-10-25 21:31:57 INFO inbound/socks[socks-in]: tcp server started at 127.0.0.1:1080
+-0700 2026-10-25 21:31:57 INFO network: updated default interface External, index 14
+-0700 2026-10-25 21:31:57 INFO sing-box started (0.09s)
+-0700 2026-10-25 21:31:57 INFO network: updated network environment: gateway [192.168.77.1 fd00:1234:5678:1::1], gateway_mac [00:15:5d:03:72:69 00:15:5d:03:72:69]
+-0700 2026-10-25 21:32:00 INFO [4258064498 1ms] inbound/socks[socks-in]: inbound connection from 127.0.0.1:59076
+-0700 2026-10-25 21:32:19 INFO [2510378316 0ms] inbound/socks[socks-in]: inbound connection from 127.0.0.1:59078
+-0700 2026-10-25 21:32:19 INFO [2510378316 118ms] inbound/socks[socks-in]: inbound packet connection to 192.168.100.4:40010
+-0700 2026-10-25 21:32:19 INFO [2510378316 127ms] outbound/direct[direct]: outbound packet connection

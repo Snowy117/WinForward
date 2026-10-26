@@ -1,0 +1,8 @@
+PORT=40010 TRY=0 RESULT=OK FROM=192.168.100.2:59077 DATA=hello-udp-40010-0
+PORT=40010 TRY=1 RESULT=OK FROM=192.168.100.2:59077 DATA=hello-udp-40010-1
+PORT=40010 TRY=2 RESULT=OK FROM=192.168.100.2:59077 DATA=hello-udp-40010-2
+PORT=40011 TRY=0 RESULT=OK FROM=192.168.100.4:40011 DATA=hello-udp-40011-0
+PORT=40013 TRY=0 RESULT=TIMEOUT MethodInvocationException: Exception calling "Receive" with "1" argument(s): "A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond."
+RAW-LOCAL RAW-OK CLIENTPORT=50898 FROM=192.168.100.2:40010 DATA=raw-test
+RAW-SPOOF-ON RAW-FAIL CLIENTPORT=50897 MethodInvocationException: Exception calling "Receive" with "1" argument(s): "A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond."
+RAW-SPOOF-OFF RAW-FAIL CLIENTPORT=50899 MethodInvocationException: Exception calling "Receive" with "1" argument(s): "A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond."

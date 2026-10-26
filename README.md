@@ -300,9 +300,12 @@ offending rule, the settings the Kernel driver cannot execute yet:
   `WinForward.Host.Rules[i].AdapterName`): the Kernel host layer classifies at ALE connect and has no
   interface index;
 - a host `proxy` rule whose `Protocol` selector is absent or contains `udp`
-  (`WinForward.Host.Rules[i].Protocol`): there is no host UDP relay yet, so a Kernel host proxy rule
-  must select exactly `tcp`; `pass` and `block` rules may match any protocol, because the driver
-  executes those in-kernel;
+  (`WinForward.Host.Rules[i].Protocol`): the host UDP proxy is not available yet — the listener reply
+  cannot preserve the original destination as its source, so an unconnected client would see the proxy
+  listener, and the driver-side reply injection is pending — so a Kernel host proxy rule must select
+  exactly `tcp`; `pass` and `block` rules may match any protocol, because the driver executes those
+  in-kernel. Proxying UDP needs `Provider = WinpkFilter`, and a local target rule, which must select
+  exactly `udp`, is refused with it;
 - the forwarded domain (`WinForward.Forwarded`): no forwarded rules and no non-default forwarded
   fallback in this milestone;
 - `KernelPassCache`: it is a WinpkFilter-only setting, so the legacy top-level key is an error and
@@ -312,13 +315,12 @@ A host process selector must also fit the Kernel host-rule blob's 511 UTF-8 byte
 (`WinForward.Host.Rules[i].Process`). The Kernel compiler additionally resolves a path selector to an
 existing `\device\...` path and re-checks the limit on that resolved string, which is longer in
 general; that existence, normalization and strict-UTF-8/control-character validation belongs to the
-compiler and is not performed by configuration validation. Non-default `UdpSessionCapacity`,
-`UdpRelayReceiveBufferKb` and `UdpSessionIdleSeconds` are accepted with a warning that they are inert
-until host UDP lands, rather than being silently ignored; `TcpFlowCapacity` and `SetupWorkerCount`
-keep their meanings (active relay sessions and setup concurrency). `validate` prints the selected
-provider, and `run` with `Provider = WinForward.Kernel` exits `1` with an actionable diagnostic in
-this build: the Kernel backend and its host TCP data path arrive in a later milestone, and the run
-never silently falls back to WinpkFilter.
+compiler and is not performed by configuration validation. `TcpFlowCapacity` and `SetupWorkerCount`
+keep their meanings (active TCP relay sessions and setup concurrency); non-default
+`UdpSessionCapacity`, `UdpRelayReceiveBufferKb` and `UdpSessionIdleSeconds` are accepted with a
+warning that they are inert while the host UDP proxy is disabled, rather than being silently ignored.
+`validate` prints the selected provider, and `run` with `Provider = WinForward.Kernel` never silently
+falls back to WinpkFilter.
 
 **UDP resource shape.** Every live UDP flow owns its own authenticated association: the SOCKS5
 control connection that carried its `UDP ASSOCIATE`, and the relay socket that association

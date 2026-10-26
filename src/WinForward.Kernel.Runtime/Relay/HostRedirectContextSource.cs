@@ -28,14 +28,14 @@ public sealed class HostRedirectContextSource : IRedirectContextSource
         return RedirectDestination.TryParse(rawContext, out destination, out error);
     }
 
-    /// <summary>host UDP 的回程由 listener 用同一个 socket 完成，不使用 forwarded redirect 表。</summary>
+    /// <summary>host UDP 的原始目的地随 datagram 从 <c>WSARecvMsg</c> 的 cmsg 到达，不能按 (client, listener) 四元组查询。</summary>
     public bool TryReadUdp(EndPoint client, IPEndPoint listener,
                            [NotNullWhen(true)] out RedirectDestination? destination, out string error)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(listener);
         destination = null;
-        error = "host UDP 中继不在本仓库";
+        error = "host UDP 的原始目的地在每条 datagram 的 cmsg 里，无法按四元组查询；listener 侧见 WfpUdpContext";
         return false;
     }
 

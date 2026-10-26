@@ -30,16 +30,19 @@ internal static class ConfigurationKernelCapabilities
     /// </summary>
     internal static void Validate(WinForwardConfigDto dto, IReadOnlyList<PolicyRule> hostRules, IReadOnlyList<PolicyRule> forwardedRules, FlowAction forwardedFallback, List<ConfigDiagnostic> errors, List<ConfigDiagnostic> warnings)
     {
+        ArgumentNullException.ThrowIfNull(warnings);
         ValidateHostRules(hostRules, errors);
         ValidateForwardedDomain(forwardedRules, forwardedFallback, errors);
         WarnOnInertUdpSettings(dto, warnings);
     }
 
     /// <summary>
-    /// Refuses the host selectors and actions the Kernel host layer cannot express. An adapter
+    /// Refuses the host selectors and actions the Kernel host layer cannot execute. An adapter
     /// selector is refused because ALE connect-redirect classifies without an interface index; a UDP
-    /// proxy rule is refused because there is no host UDP relay yet, while pass and block rules stay
-    /// valid for every protocol because the driver executes those in-kernel.
+    /// proxy rule is refused because the host UDP proxy is not available yet — the listener reply
+    /// cannot preserve the original destination as its reply source, so an unconnected client would
+    /// observe the proxy listener until the driver-side reply injection lands — while pass and block
+    /// rules stay valid for every protocol because the driver executes those in-kernel.
     /// </summary>
     private static void ValidateHostRules(IReadOnlyList<PolicyRule> hostRules, List<ConfigDiagnostic> errors)
     {
@@ -51,7 +54,7 @@ internal static class ConfigurationKernelCapabilities
             if (rule.Matcher.AdapterNames is not null) errors.Add(new($"{path}.AdapterName", $"The {BackendDriverConfiguration.KernelProviderName} provider cannot select host traffic by adapter: the ALE connect-redirect layer has no interface index. Remove the selector or use Provider = {BackendDriverConfiguration.WinpkFilterProviderName}."));
             if (rule.Decision.Action == FlowAction.Proxy && (rule.Matcher.Protocols is null || rule.Matcher.Protocols.Contains(TransportProtocol.Udp)))
             {
-                errors.Add(new($"{path}.Protocol", $"The {BackendDriverConfiguration.KernelProviderName} provider has no host UDP relay, so a proxy rule must select tcp only; add \"Protocol\": [\"tcp\"] or use Provider = {BackendDriverConfiguration.WinpkFilterProviderName}. Pass and block rules may match any protocol."));
+                errors.Add(new($"{path}.Protocol", $"The {BackendDriverConfiguration.KernelProviderName} host UDP proxy is not available yet: the listener reply cannot preserve the original destination as its source, so an unconnected client would see the proxy listener, and the driver-side reply injection is pending. Add \"Protocol\": [\"tcp\"] or use Provider = {BackendDriverConfiguration.WinpkFilterProviderName} for UDP. Pass and block rules may match any protocol."));
             }
 
             ValidateProcessSelectors(rule.Matcher.Processes, path, errors);
@@ -70,7 +73,7 @@ internal static class ConfigurationKernelCapabilities
     }
 
     /// <summary>
-    /// Refuses the forwarded domain wholesale. The Kernel provider serves host TCP only in this
+    /// Refuses the forwarded domain wholesale. The Kernel provider serves host traffic only in this
     /// milestone, and a forwarded rule or a non-default forwarded fallback would otherwise validate and
     /// then silently not apply.
     /// </summary>
@@ -89,24 +92,25 @@ internal static class ConfigurationKernelCapabilities
 
     /// <summary>
     /// The UDP budgets are accepted rather than refused, because a configuration written for
-    /// WinpkFilter must stay loadable while it is being migrated to host TCP; the warning is what
-    /// keeps an operator from believing they apply.
+    /// WinpkFilter must stay loadable while it is being migrated to the Kernel provider; the warning is
+    /// what keeps an operator from believing they apply. They cannot apply yet because the host UDP
+    /// coordinator is only constructed, not started, while the host UDP proxy is disabled.
     /// </summary>
     private static void WarnOnInertUdpSettings(WinForwardConfigDto dto, List<ConfigDiagnostic> warnings)
     {
         if (dto.UdpSessionCapacity is { } sessionCapacity && sessionCapacity != ConfigurationLoader.DefaultUdpSessionCapacity)
         {
-            warnings.Add(new("WinForward.UdpSessionCapacity", $"UdpSessionCapacity is inert under Provider = {BackendDriverConfiguration.KernelProviderName} until host UDP lands; it takes effect under Provider = {BackendDriverConfiguration.WinpkFilterProviderName}."));
+            warnings.Add(new("WinForward.UdpSessionCapacity", $"UdpSessionCapacity is inert under Provider = {BackendDriverConfiguration.KernelProviderName} because the host UDP coordinator is not started; it takes effect under Provider = {BackendDriverConfiguration.WinpkFilterProviderName}."));
         }
 
         if (dto.UdpRelayReceiveBufferKb is { } relayReceiveBufferKb && relayReceiveBufferKb != ConfigurationLoader.DefaultUdpRelayReceiveBufferKb)
         {
-            warnings.Add(new("WinForward.UdpRelayReceiveBufferKb", $"UdpRelayReceiveBufferKb is inert under Provider = {BackendDriverConfiguration.KernelProviderName} until host UDP lands; it takes effect under Provider = {BackendDriverConfiguration.WinpkFilterProviderName}."));
+            warnings.Add(new("WinForward.UdpRelayReceiveBufferKb", $"UdpRelayReceiveBufferKb is inert under Provider = {BackendDriverConfiguration.KernelProviderName} because the host UDP coordinator is not started; it takes effect under Provider = {BackendDriverConfiguration.WinpkFilterProviderName}."));
         }
 
         if (dto.UdpSessionIdleSeconds is { } idleSeconds && idleSeconds != (int)ConfigurationLoader.DefaultUdpSessionIdleTimeout.TotalSeconds)
         {
-            warnings.Add(new("WinForward.UdpSessionIdleSeconds", $"UdpSessionIdleSeconds is inert under Provider = {BackendDriverConfiguration.KernelProviderName} until host UDP lands; it takes effect under Provider = {BackendDriverConfiguration.WinpkFilterProviderName}."));
+            warnings.Add(new("WinForward.UdpSessionIdleSeconds", $"UdpSessionIdleSeconds is inert under Provider = {BackendDriverConfiguration.KernelProviderName} because the host UDP coordinator is not started; it takes effect under Provider = {BackendDriverConfiguration.WinpkFilterProviderName}."));
         }
     }
 }

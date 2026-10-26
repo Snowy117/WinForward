@@ -29,7 +29,8 @@
     "10-26-kernel-host-tcp-backend",
     "10-26-windows-kernel-e2e",
     "10-26-winpkfilter-parity",
-    "10-26-dual-mode-ipv4-cidr"
+    "10-26-dual-mode-ipv4-cidr",
+    "10-26-kernel-host-udp"
   ],
   "parent": null,
   "relatedFiles": [],

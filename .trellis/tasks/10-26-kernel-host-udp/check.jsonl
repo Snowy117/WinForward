@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-26-kernel-host-udp/prd.md", "reason": "Verify the host UDP requirements, decisions and acceptance criteria."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/design.md", "reason": "Verify the cross-batch architecture, lifecycle and seams."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/research/host-udp-driver.md", "reason": "Verify the driver facts and the reply-source/dual-mode risks."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/research/host-udp-seams.md", "reason": "Verify the chosen option, seams and E2E matrix."}
+{"file": ".trellis/spec/backend/udp-session-lifecycle.md", "reason": "Verify capacity/idle/teardown semantics remain shared."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "Verify no ABI/context drift and the correct WFP facts."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify gates and evidence."}

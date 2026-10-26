@@ -1,0 +1,7 @@
+disabled enabled=0 listener_port=0
+[control] config: abi=8 enabled=0 listener-pid=0 port=0 block-sink-port=0 self-pids=[]
+--- residual ---
+
+        STATE              : 4  RUNNING 
+True
+

@@ -1,0 +1,12 @@
+
+[stats] classify=20 permitted=15 blocked=1 redirected=2 rules_replaced=1 rejected_blobs=0
+[stats] contexts_allocated=2 alloc_failures=0 apply_failures=0 redirect_failures=0 deferred_blocks=1 process_path_metadata=0 last_status=0x00000000
+[stats] permitted: disabled=1 no_rules=0 no_write_right=0 unsupported=0 non_tcp=1 listener_port=0 redirect_state=0 condition_flags=0 already_redirected=0 self_process=2
+[stats] matched: permit=2 block=1 redirect=2 fallback: permit=11 block=0 redirect=0
+[stats] udp_calls=15 udp_permitted=12 udp_blocked=1 udp_redirected=2
+Name    Enabled
+----    -------
+Domain     True
+Private    True
+Public     True
+

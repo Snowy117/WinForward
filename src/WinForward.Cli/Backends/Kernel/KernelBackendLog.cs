@@ -24,23 +24,23 @@ internal static partial class KernelBackendLog
     [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.state.cleared", Message = "Disabled the Kernel host redirect and cleared the forwarded state, so a previous run's configuration cannot redirect connections to a listener that is not up yet.")]
     public static partial void StaleStateCleared(ILogger logger);
 
-    [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.listener.bound", Message = "Kernel redirect listener bound on port {ListenerPort} ({TcpListeners} TCP listener(s)); block sink port {BlockSinkPort}, block reachable {ContainsBlock}.")]
+    [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.listener.bound", Message = "Kernel redirect listener bound on port {ListenerPort} ({TcpListeners} TCP listener(s)); block sink port {BlockSinkPort}, block reachable {ContainsBlock}. The host UDP proxy is disabled, so proxying UDP needs Provider = WinpkFilter.")]
     public static partial void ListenerBound(ILogger logger, int listenerPort, int tcpListeners, int blockSinkPort, bool containsBlock);
 
     [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.rules.installed", Message = "Kernel host rule blob installed and verified: generation {Generation}, {RuleCount} rule(s), fallback {Fallback}, {BlobBytes} byte(s), block reachable {ContainsBlock}.")]
     public static partial void RulesInstalled(ILogger logger, uint generation, int ruleCount, RuleAction fallback, int blobBytes, bool containsBlock);
 
-    [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.ready", Message = "Kernel host TCP interception is ready: control ABI {AbiVersion}, listener port {ListenerPort}, block sink port {BlockSinkPort}, {RuleCount} host rule(s), TCP flow capacity {FlowCapacity}, relay setup bound {SetupWorkers}.")]
-    public static partial void Ready(ILogger logger, uint abiVersion, int listenerPort, int blockSinkPort, int ruleCount, int flowCapacity, int setupWorkers);
+    [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.ready", Message = "Kernel host TCP interception is ready: control ABI {AbiVersion}, listener port {ListenerPort}, block sink port {BlockSinkPort}, {RuleCount} host rule(s), TCP flow capacity {FlowCapacity}. The host UDP proxy is disabled: the listener reply cannot preserve the original destination as its source and the driver-side reply injection is pending, so the host UDP session capacity {UdpSessionCapacity} and the {UdpDatagramBytes}-byte datagram cap are inert.")]
+    public static partial void Ready(ILogger logger, uint abiVersion, int listenerPort, int blockSinkPort, int ruleCount, int flowCapacity, int udpSessionCapacity, int udpDatagramBytes);
 
-    [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.started", Message = "Kernel host TCP interception started. Press Ctrl+C to stop.")]
+    [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.started", Message = "Kernel host TCP interception started with the host UDP proxy disabled. Press Ctrl+C to stop.")]
     public static partial void Started(ILogger logger);
 
     [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.shutdown", Message = "Shutdown requested; disabling the Kernel host redirect before the listener and the block sink are released.")]
     public static partial void ShuttingDown(ILogger logger);
 
-    [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.stop", Message = "WinForward.Kernel stopped: {Accepted} connection(s) accepted, {Refused} refused, {CapacityBlocked} refused at capacity, {Established} relay(s) established, {Stalled} stalled, {Faulted} faulted, {Active} session(s) active.")]
-    public static partial void Stopped(ILogger logger, long accepted, long refused, long capacityBlocked, long established, long stalled, long faulted, long active);
+    [LoggerMessage(Level = LogLevel.Information, EventName = "kernel.stop", Message = "WinForward.Kernel stopped: {Accepted} TCP connection(s) accepted, {Refused} refused, {CapacityBlocked} refused at capacity, {Established} relay(s) established, {Stalled} stalled, {Faulted} faulted, {Active} session(s) active; {UdpAccepted} UDP datagram(s) admitted, {UdpDropped} dropped, {UdpSessions} UDP session(s) live; block sink received {BlockSinkReceived} datagram(s).")]
+    public static partial void Stopped(ILogger logger, long accepted, long refused, long capacityBlocked, long established, long stalled, long faulted, long active, long udpAccepted, long udpDropped, int udpSessions, long blockSinkReceived);
 
     [LoggerMessage(Level = LogLevel.Warning, EventName = "kernel.accept.failed", Message = "The Kernel redirect listener accept failed with {Error}; retrying after a bounded delay.")]
     public static partial void AcceptFailed(ILogger logger, string error);
@@ -77,4 +77,13 @@ internal static partial class KernelBackendLog
 
     [LoggerMessage(Level = LogLevel.Error, EventName = "kernel.runtime.failed", Message = "The WinForward.Kernel backend failed while intercepting.")]
     public static partial void RuntimeFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Debug, EventName = "kernel.udp.dropped", Message = "Dropped a Kernel host UDP datagram from {Client} ({Reason}): {Detail}")]
+    public static partial void UdpDropped(ILogger logger, string reason, string client, string detail);
+
+    [LoggerMessage(Level = LogLevel.Debug, EventName = "kernel.udp.send.failed", Message = "The Kernel host UDP send for {Local} -> {Remote} failed with {Error}; the flow's slot and the receive leg were left to their owners.")]
+    public static partial void UdpSendFailed(ILogger logger, string local, string remote, string error);
+
+    [LoggerMessage(Level = LogLevel.Warning, EventName = "kernel.udp.sweep.failed", Message = "The Kernel host UDP idle sweep failed with {Error}: {Detail}; the next tick retries.")]
+    public static partial void UdpSweepFailed(ILogger logger, string error, string detail);
 }

@@ -282,7 +282,8 @@ public sealed class KernelPolicyCompilerTests
 
         var diagnostic = Assert.Single(diagnostics);
         Assert.Equal("WinForward.Host.Rules[0].Target", diagnostic.Path);
-        Assert.Contains("no host UDP relay", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("local target 'Local'", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("this milestone does not enable", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Fact]

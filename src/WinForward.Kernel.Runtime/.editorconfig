@@ -34,3 +34,15 @@ dotnet_diagnostic.MA0051.severity = none
 # 报两条，而 format 才是本仓的强制门禁，所以这条抑制是必需的。
 [Relay/SocketIoctl.cs]
 dotnet_diagnostic.SYSLIB1054.severity = none
+
+# =====================================================================
+# WfpUdpReceiver：jb 的 ClassNeverInstantiated 只看到本工程内的构造点
+#
+# 类型唯一的构造点是 CLI 的 `KernelHostUdpService`：
+# `src/WinForward.Cli/Backends/Kernel/KernelHostUdpService.cs` 的
+# `_receiver = new WfpUdpReceiver(udpSocket)`。按工程单独运行 inspectcode 时，其它工程的引用不在
+# 分析范围内，于是这个 public 类型被报成"从未实例化"；删掉或私有化会直接打断 CLI 的编译。
+# quality-guidelines.md 把跨工程消费者列为不可「修复」的 jb 误报类。只降级这个文件。
+# =====================================================================
+[Relay/WfpUdpReceiver.cs]
+resharper_class_never_instantiated_global_highlighting = none

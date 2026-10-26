@@ -2,6 +2,7 @@ using System.Net;
 using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Cli;
+using WinForward.Cli.Backends.Kernel;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -84,6 +85,35 @@ public sealed class UdpProxyCompositionTests
         // association: two flows, two control connections, two UDP ASSOCIATE exchanges.
         await WaitForAsync(() => server.AssociateReplyCount == 2);
         Assert.Equal(2, server.ConnectionCount);
+    }
+
+    [Fact]
+    public async Task TheHostOverloadComposesTheSameEngineOverAHostSinkAndTheHostFrameCap()
+    {
+        // The host path composes the shared engine directly from a sink instead of the packet
+        // reinjector. It must carry the same capacity/relay-buffer budget and build the coordinator
+        // over the host datagram cap, not the packet path's Ethernet frame.
+        using var setupQueuePool = new NativeBufferPool(KernelHostUdpDatagram.MaximumDatagramBytes);
+        using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(KernelHostUdpDatagram.MaximumDatagramBytes));
+        using var setupExecutor = new SetupExecutor();
+        const int sessionCapacity = 11;
+        const int relayReceiveBufferBytes = 32 * 1024;
+
+        await using var coordinator = UdpProxyComposer.Create(
+            new FakeResponseSink(),
+            new SelfTrafficRegistry(),
+            NullLogger.Instance,
+            KernelHostUdpDatagram.MaximumDatagramBytes,
+            setupQueuePool,
+            receiveWindowPool,
+            setupExecutor,
+            new Socks5AddressCache(),
+            sessionCapacity,
+            relayReceiveBufferBytes,
+            activityClock: null);
+
+        Assert.Equal(sessionCapacity, coordinator.Capacity);
+        Assert.Equal(relayReceiveBufferBytes, coordinator.RelayReceiveBufferBytes);
     }
 
     private static FlowKey Flow(ushort localPort) => FlowKey.Create(

@@ -1,0 +1,13 @@
+{"file": ".trellis/tasks/10-26-kernel-host-udp/research/README.md", "reason": "Index of the host UDP research set."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/research/host-udp-driver.md", "reason": "Driver/WFP host UDP facts: per-association classify, cmsg context, same-socket reply, block sink, connected leak."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/research/host-udp-userland.md", "reason": "Existing UDP engine reuse surface, FlowKey/target model, Kernel backend composition points."}
+{"file": ".trellis/tasks/10-26-kernel-host-udp/research/host-udp-seams.md", "reason": "Options A/B, S1-S8 seams, first-batch scope, A1-A10 E2E matrix, ABI conclusion."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP relay family hub and datagram-path invariants."}
+{"file": ".trellis/spec/backend/udp-flow-setup.md", "reason": "Setup queue, global budget and cooldown semantics reused by the host path."}
+{"file": ".trellis/spec/backend/udp-session-lifecycle.md", "reason": "Session lifetime, teardown reasons and the two retention classes."}
+{"file": ".trellis/spec/backend/udp-relay-transport.md", "reason": "Transport seam, ASSOCIATE families, relay socket setup and buffer sizing."}
+{"file": ".trellis/spec/backend/udp-over-tcp.md", "reason": "UoT v2 transport contract for batch 2."}
+{"file": ".trellis/spec/backend/idle-expiry-sweep.md", "reason": "Idle sweep timing and host/udp two-tier expiry."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "Host UDP classification, cmsg levels, redirect target and block sink semantics."}
+{"file": ".trellis/spec/backend/kernel/wfp-connected-udp-record-refcount-leak.md", "reason": "Connected-UDP leak evidence and the accepted operational posture."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Windows/native/root gates, evidence and suppression policy."}

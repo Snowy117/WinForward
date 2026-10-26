@@ -234,7 +234,8 @@ sink 端口与 redirect 标记，不再关心进程选择器。
 
 ### 7.11 Host UDP 的实现事实（B0–B2b 实测）
 
-- **没有新的 WFP 层，也没有回程注入。** UDP 和 TCP 共用 `ALE_CONNECT_REDIRECT_V4/V6` 的 callout；redirect classify 分配 36 字节 `redirect_context`（`protocol=17`），所有权交给 WFP。listener 用 `IP_WFP_REDIRECT_CONTEXT`（IPv4，`IPPROTO_IP`）/ `IPV6_WFP_REDIRECT_CONTEXT`（IPv6，`IPPROTO_IPV6`）从 `WSARecvMsg` 的 cmsg 逐 datagram 取回原始目的地；回包由用户态用**同一个 listener socket** `sendto`，驱动不改源、不注入 NBL、不维护 UDP flow 表。
+- **没有新的 WFP 层，也没有回程注入。** UDP 和 TCP 共用 `ALE_CONNECT_REDIRECT_V4/V6` 的 callout；redirect classify 分配 36 字节 `redirect_context`（`protocol=17`），所有权交给 WFP。listener 用 `IP_WFP_REDIRECT_CONTEXT`（IPv4，`IPPROTO_IP`）/ `IPV6_WFP_REDIRECT_CONTEXT`（IPv6，`IPPROTO_IPV6`）从 `WSARecvMsg` 的 cmsg 逐 datagram 取回原始目的地。回包目前只能由用户态用**同一个 listener socket** `sendto`（驱动不改源、不注入 NBL、不维护 UDP flow 表），但产品实测否证了这一回包形状：回包的源是 listener 端点，而不是原始目的地。
+- **产品侧状态（deferred）：host UDP proxy 仍被闸关闭。** 用户态 listener/coordinator 脚手架已实现（`HostListenerSet`、`WfpUdpReceiver`、`WfpUdpContext`、`KernelHostUdpService`、`HostUdpResponseSink`），但 Kernel 数据路径不启动：同 socket `sendto` 的回包源是 listener 端点，unconnected 客户端看到的不是自己的原始目的地，而**驱动侧的回复注入（保留原始目的地为源）尚未实现**。因此 Kernel provider 拒绝任何可能匹配 UDP 的 `proxy` 规则（`WinForward.Host.Rules[i].Protocol`），UDP 继续使用 `Provider = WinpkFilter`；listener/coordinator 代码只作为脚手架保留，UDP 接收循环不运行。
 - **同 socket 回包不重新 classify。** 中继用同一个 listener socket 把响应 `sendto` 回客户端时，
   datagram 复用入站重定向关联，不会再次进入 `ALE_CONNECT_REDIRECT`，`udp_classify_calls` 不增；
   self-PID 闸由 U1 的独立 socket 出站场景验证（permitted_self_process 增长）。`self_process_ids` 仍然要配置：中继新开 socket 访问上游或其他出站

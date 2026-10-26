@@ -1,0 +1,29 @@
+{
+  "id": "kernel-host-udp",
+  "name": "kernel-host-udp",
+  "title": "Kernel provider host UDP",
+  "description": "在 Kernel provider 上接通 host UDP：WFP 监听/原始目的地/同 socket 回包、会话容量与空闲、local target/DNS、UoT，并完成 Windows E2E。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-10-26",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-26-host-udp-baseline",
+    "10-26-host-udp-reply-source"
+  ],
+  "parent": "10-25-kernel-backend-integration",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

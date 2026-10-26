@@ -1,0 +1,16 @@
+listening tcp=(40001, 40012) udp=(40010, 40011, 40013)
+1792989001.611 tcp port=40001 peer=('192.168.100.2', 40310) error=ConnectionResetError(104, 'Connection reset by peer')
+1792989001.612 tcp port=40001 peer=('192.168.100.2', 40311) error=ConnectionResetError(104, 'Connection reset by peer')
+1792989001.613 tcp port=40001 peer=('192.168.100.2', 40312) error=ConnectionResetError(104, 'Connection reset by peer')
+1792989001.614 tcp port=40001 peer=('192.168.100.2', 40313) error=ConnectionResetError(104, 'Connection reset by peer')
+1792989001.615 tcp port=40001 peer=('192.168.100.2', 40314) error=ConnectionResetError(104, 'Connection reset by peer')
+1792989001.617 tcp port=40001 peer=('192.168.100.2', 40315) error=ConnectionResetError(104, 'Connection reset by peer')
+1792989001.618 tcp port=40001 peer=('192.168.100.2', 40316) error=ConnectionResetError(104, 'Connection reset by peer')
+1792989001.652 tcp port=40001 peer=('192.168.100.2', 40310) error=ConnectionResetError(104, 'Connection reset by peer')
+1792989004.082 tcp port=40001 peer=('192.168.100.2', 58995) error=ConnectionResetError(104, 'Connection reset by peer')
+1792989034.881 tcp port=40001 peer=('192.168.100.2', 59017) bytes=0 data=b''
+1792989039.641 tcp port=40001 peer=('192.168.100.2', 59019) bytes=0 data=b''
+1792989137.284 udp port=40010 peer=('192.168.100.2', 50893) bytes=17 data=b'hello-udp-40010-0'
+1792989137.389 udp port=40010 peer=('192.168.100.2', 50893) bytes=17 data=b'hello-udp-40010-1'
+1792989137.393 udp port=40010 peer=('192.168.100.2', 50893) bytes=17 data=b'hello-udp-40010-2'
+1792989137.408 udp port=40011 peer=('192.168.100.2', 50894) bytes=17 data=b'hello-udp-40011-0'
