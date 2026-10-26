@@ -1,8 +1,8 @@
 #pragma once
 
-// 驱动内部共享面：probe_driver / probe_control / probe_classify / rule_table / block_filters /
-// redirect_target / probe_forwarded 七个翻译单元。设备与 WFP 对象的生命周期只在 probe_driver.cpp 里；
-// classify 侧只碰下面列出的窄接口。
+// 驱动内部共享面：probe_driver / probe_control / probe_classify / probe_facts / rule_table /
+// block_filters / redirect_target / probe_forwarded 八个翻译单元。设备与 WFP 对象的生命周期只在
+// probe_driver.cpp 里；classify 侧只碰下面列出的窄接口。
 #ifndef NDIS630
 #define NDIS630 1
 #endif

@@ -1,4 +1,5 @@
 #include "probe_driver.h"
+#include "probe_facts.h"
 
 namespace winforward::wfp::probe
 {
@@ -44,144 +45,6 @@ void count_udp_redirect(probe_state& state, std::uint8_t protocol) noexcept
     }
 }
 // </mutation>
-
-struct connection_facts
-{
-    SOCKADDR_STORAGE remote;
-    SOCKADDR_STORAGE local;
-    std::uint8_t remote_address[16];
-    std::uint8_t local_address[16];
-    std::uint32_t address_length;
-    UINT16 remote_port;
-    UINT16 local_port;
-    std::uint8_t protocol;
-    std::uint8_t family; // AF_INET / AF_INET6
-    UINT32 process_id;
-    UINT32 condition_flags;
-    char process_path[max_process_path_length];
-    std::uint32_t process_path_length;
-};
-
-[[nodiscard]] bool is_ipv6_layer(const FWPS_INCOMING_VALUES0* values) noexcept
-{
-    return values->layerId == FWPS_LAYER_ALE_CONNECT_REDIRECT_V6;
-}
-
-[[nodiscard]] bool is_redirect_layer(const FWPS_INCOMING_VALUES0* values) noexcept
-{
-    return values->layerId == FWPS_LAYER_ALE_CONNECT_REDIRECT_V4 ||
-           values->layerId == FWPS_LAYER_ALE_CONNECT_REDIRECT_V6;
-}
-
-[[nodiscard]] std::uint8_t field_u8(const FWPS_INCOMING_VALUES0* values, UINT16 index) noexcept
-{
-    if (index >= values->valueCount)
-    {
-        return 0;
-    }
-    const FWP_VALUE0& value = values->incomingValue[index].value;
-    return value.type == FWP_UINT8 ? value.uint8 : 0;
-}
-
-[[nodiscard]] std::uint32_t field_u32(const FWPS_INCOMING_VALUES0* values, UINT16 index) noexcept
-{
-    if (index >= values->valueCount)
-    {
-        return 0;
-    }
-    const FWP_VALUE0& value = values->incomingValue[index].value;
-    return value.type == FWP_UINT32 ? value.uint32 : 0;
-}
-
-[[nodiscard]] UINT16 host_port(const SOCKADDR* address) noexcept
-{
-    if (address->sa_family == AF_INET6)
-    {
-        return RtlUshortByteSwap(reinterpret_cast<const SOCKADDR_IN6*>(address)->sin6_port);
-    }
-    return RtlUshortByteSwap(reinterpret_cast<const SOCKADDR_IN*>(address)->sin_port);
-}
-
-void copy_address(const SOCKADDR* address, std::uint8_t* target, std::uint32_t& length) noexcept
-{
-    if (address->sa_family == AF_INET6)
-    {
-        RtlCopyMemory(target, reinterpret_cast<const SOCKADDR_IN6*>(address)->sin6_addr.s6_addr, 16);
-        length = 16;
-        return;
-    }
-    RtlCopyMemory(target, &reinterpret_cast<const SOCKADDR_IN*>(address)->sin_addr, 4);
-    length = 4;
-}
-
-[[nodiscard]] bool gather_facts(const FWPS_INCOMING_VALUES0* values,
-
-                                const FWPS_INCOMING_METADATA_VALUES0* metadata,
-                                void* layer_data,
-                                connection_facts& facts) noexcept
-{
-    if (values == nullptr || layer_data == nullptr || !is_redirect_layer(values))
-    {
-        return false;
-    }
-
-    RtlZeroMemory(&facts, sizeof(facts));
-    const bool ipv6 = is_ipv6_layer(values);
-    const auto* request = static_cast<const FWPS_CONNECT_REQUEST0*>(layer_data);
-    RtlCopyMemory(&facts.remote, &request->remoteAddressAndPort, sizeof(SOCKADDR_STORAGE));
-    RtlCopyMemory(&facts.local, &request->localAddressAndPort, sizeof(SOCKADDR_STORAGE));
-
-    const auto* remote = reinterpret_cast<const SOCKADDR*>(&facts.remote);
-    const auto* local = reinterpret_cast<const SOCKADDR*>(&facts.local);
-    if (ipv6)
-    {
-        if (remote->sa_family != AF_INET6 || local->sa_family != AF_INET6)
-        {
-            return false;
-        }
-    }
-    else if (remote->sa_family != AF_INET || local->sa_family != AF_INET)
-    {
-        return false;
-    }
-
-    facts.family = static_cast<std::uint8_t>(remote->sa_family);
-    facts.remote_port = host_port(remote);
-    facts.local_port = host_port(local);
-    copy_address(remote, facts.remote_address, facts.address_length);
-    std::uint32_t local_length = 0;
-    copy_address(local, facts.local_address, local_length);
-
-    const UINT16 protocol_field =
-        ipv6 ? FWPS_FIELD_ALE_CONNECT_REDIRECT_V6_IP_PROTOCOL : FWPS_FIELD_ALE_CONNECT_REDIRECT_V4_IP_PROTOCOL;
-    const UINT16 flags_field =
-        ipv6 ? FWPS_FIELD_ALE_CONNECT_REDIRECT_V6_FLAGS : FWPS_FIELD_ALE_CONNECT_REDIRECT_V4_FLAGS;
-    const UINT16 app_id_field =
-        ipv6 ? FWPS_FIELD_ALE_CONNECT_REDIRECT_V6_ALE_APP_ID : FWPS_FIELD_ALE_CONNECT_REDIRECT_V4_ALE_APP_ID;
-    facts.protocol = field_u8(values, protocol_field);
-    facts.condition_flags = field_u32(values, flags_field);
-
-    if (metadata != nullptr && FWPS_IS_METADATA_FIELD_PRESENT(metadata, FWPS_METADATA_FIELD_PROCESS_ID))
-    {
-        facts.process_id = static_cast<UINT32>(metadata->processId);
-    }
-    if (metadata != nullptr && FWPS_IS_METADATA_FIELD_PRESENT(metadata, FWPS_METADATA_FIELD_PROCESS_PATH))
-    {
-        // 诊断计数：官方 metadata 表说 redirect 层没有 PROCESS_PATH，实测应为 0。
-        probe_increment(probe_state_ref().stats.process_path_metadata_seen);
-    }
-
-    if (app_id_field < values->valueCount)
-    {
-        const FWP_VALUE0& value = values->incomingValue[app_id_field].value;
-        if (value.type == FWP_BYTE_BLOB_TYPE && value.byteBlob != nullptr)
-        {
-            collect_process_path(
-                value.byteBlob->data, value.byteBlob->size, facts.process_path, facts.process_path_length);
-        }
-    }
-    return true;
-}
 
 [[nodiscard]] bool process_id_in_set(const probe_config& config, UINT32 process_id) noexcept
 {
@@ -342,11 +205,10 @@ void redirect_classification(const classify_call& call) noexcept
     probe_increment(call.state.stats.contexts_allocated);
 
     original_destination destination{};
-    destination.family = call.facts.family == AF_INET6 ? address_family::ipv6 : address_family::ipv4;
+    destination.family = call.facts.matcher_family == rule_family_ipv6 ? address_family::ipv6 : address_family::ipv4;
     destination.protocol = call.facts.protocol == IPPROTO_UDP ? transport_protocol::udp : transport_protocol::tcp;
     destination.port = call.facts.remote_port;
-    std::uint32_t address_length = 0;
-    copy_address(remote, destination.address, address_length);
+    RtlCopyMemory(destination.address, call.facts.matcher_remote_address, sizeof(destination.address));
     *context = make_redirect_context(destination, call.facts.process_id, call.rule_index);
 
     const NTSTATUS status = apply_redirect(call, target, context);
@@ -561,10 +423,10 @@ void NTAPI probe_classify_fn(const FWPS_INCOMING_VALUES0* in_fixed_values,
     connection_view connection{};
     connection.process_path = facts.process_path_length == 0 ? nullptr : facts.process_path;
     connection.process_path_length = facts.process_path_length;
-    RtlCopyMemory(connection.remote_address, facts.remote_address, sizeof(connection.remote_address));
+    RtlCopyMemory(connection.remote_address, facts.matcher_remote_address, sizeof(connection.remote_address));
     connection.remote_port = facts.remote_port;
     connection.protocol = facts.protocol;
-    connection.family = facts.family == AF_INET6 ? address_family::ipv6 : address_family::ipv4;
+    connection.family = facts.matcher_family == rule_family_ipv6 ? address_family::ipv6 : address_family::ipv4;
 
     const match_result result = match(rules->view, connection);
     const std::uint32_t rule_index = result.matched ? result.rule_index : invalid_rule_index;

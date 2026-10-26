@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Parent design: the Kernel host TCP parity contract and the v4-mapped finding."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "WFP layer/family facts, the v4-mapped ALE behavior and the redirect-context contract."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Matcher selector/family semantics and the one-rule-per-config-rule invariant."}
+{"file": ".trellis/spec/backend/kernel/cpp-conventions.md", "reason": "Kernel-dialect C++ constraints for the portable helper/classify."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Native/Windows gates, mutations and evidence rules."}
+{"file": ".trellis/tasks/archive/2026-10/10-26-windows-kernel-e2e/verification/verification.md", "reason": "The E2E evidence and the exact dual-mode failure/observed behavior."}

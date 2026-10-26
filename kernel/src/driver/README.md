@@ -16,7 +16,8 @@ datagram 重复分类。Phase 0 的硬编码探针行为已被规则表取代。
 | `probe_driver.cpp` | `DriverEntry`/卸载、设备、WFP provider/callout/filter 的注册与拆除 |
 | `block_filters.cpp` | block sink 的固定 4 条 ALE_AUTH_CONNECT `FWP_ACTION_BLOCK` filter（V4/V6 × TCP/UDP；协议 + 远端端口 == sink + `IS_CONNECTION_REDIRECTED`；增删/滚动替换） |
 | `probe_control.cpp` | IOCTL 处理：配置（含 sink 端口校验与 0↔1 切换时固定 filter 的挂/摘）、规则下发、计数、事件、调用者校验 |
-| `probe_classify.cpp` | classify：facts、四道防循环闸、matcher、三个动作、重定向 / block 改道 sink |
+| `probe_facts.h/.cpp` | classify 的连接事实采集：`FWPS_CONNECT_REQUEST0` 的地址 / 端口、固定字段、`ALE_APP_ID`，并把 `::ffff:0:0/96` 归一成 matcher 用的 IPv4 事实 |
+| `probe_classify.cpp` | classify：四道防循环闸、matcher、三个动作、重定向 / block 改道 sink |
 | `process_path.cpp` | `ALE_APP_ID` 的 UTF-16 → UTF-8 转换（511 字节边界、代理对）与 0x807 诊断 |
 | `probe_forwarded.h/.cpp` | MAC 帧层（`INBOUND/OUTBOUND_MAC_FRAME_NATIVE`）的 forwarded 规则表、blob 校验、generation、IOCTL 面；callout / filter 的注册与注销 |
 | `probe_forwarded_classify.cpp` | NBL 解析（VLAN/IPv4/IPv6/TCP/UDP）、方向映射、防环、`match_forwarded`、pass/block 与计数 |

@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/10-25-kernel-backend-integration/design.md", "reason": "Verify the fix against the parent parity contract."}
+{"file": ".trellis/spec/backend/kernel/wfp-architecture.md", "reason": "Verify family/context semantics and no ABI drift."}
+{"file": ".trellis/spec/backend/kernel/host-rule-blob.md", "reason": "Verify matcher semantics/native IPv4/IPv6 preservation."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify native/Windows gates and the E2E evidence."}
+{"file": ".trellis/tasks/archive/2026-10/10-26-windows-kernel-e2e/verification/verification.md", "reason": "Verify the original failure is reproduced/fixed, not masked."}

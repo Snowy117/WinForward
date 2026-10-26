@@ -37,6 +37,11 @@ C# 工具的目标框架输出目录（如 `net10.0`）仍按工程当前配置�
   这两个工程——所有引用都从 `kernel\` 向上走到仓库根。
 - 这两个工程都经 `src\Directory.Build.props` 导入根 `Directory.Build.props` 并引用
   `analyzers\WinForward.Analyzers`，包版本来自根 `Directory.Packages.props`。
+- 驱动工程的 WDK 包也走中央包管理：`wfprobe.vcxproj` 只写 `PackageReference`，
+  `Microsoft.Windows.WDK.x64` / `Microsoft.Windows.SDK.cpp.x64` 的版本在根
+  `Directory.Packages.props`。Windows 构建还必须能还原根 trim/AOT 分析器触发的
+  `Microsoft.NET.ILLink.Tasks`；只配置 Visual Studio 离线源会报 NU1101，需要 nuget.org 或等价的
+  本地镜像。
 
 所以送到 Windows 机器上的必须是**完整仓库布局**：`<repo>\kernel\`、
 `<repo>\src\WinForward.Kernel.Contracts\` 与 `<repo>\src\WinForward.Kernel.Runtime\` 并存，`<repo>\`

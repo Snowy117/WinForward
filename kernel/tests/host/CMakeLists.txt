@@ -12,7 +12,8 @@ add_executable(wf_common_tests
     redirect_context_test.cpp
     rule_blob_builder.h
     rule_blob_test.cpp
-    rule_blob_validation_test.cpp)
+    rule_blob_validation_test.cpp
+    v4_mapped_test.cpp)
 target_link_libraries(wf_common_tests PRIVATE wf_common GTest::gtest GTest::gtest_main)
 
 gtest_discover_tests(wf_common_tests)

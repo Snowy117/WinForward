@@ -34,6 +34,7 @@ internal static class HostRuleParitySuite
         RunExactPathCases(device, echo, target, appId, sandbox, timeoutMs);
         RunDirectoryCases(device, echo, target, directoryAppId, sandbox, timeoutMs);
         RunArrayCases(device, echo, target, exeName, processId, timeoutMs);
+        RunDualModeCases(device, echo, target, timeoutMs);
         RunBlockCases(device, echo, target, exe, exeName, directoryAppId, appId, processId, sandbox, timeoutMs);
     }
 
@@ -210,6 +211,36 @@ internal static class HostRuleParitySuite
         matrixWrongProtocol.Families = new[] { Protocol.RuleFamilyIpv6, Protocol.RuleFamilyIpv4 };
         ExpectFallback("数组 AND：任一字段不满足（协议）即整条不命中", device, target, timeoutMs,
                        matrixWrongProtocol);
+    }
+
+    // 双模客户端（IPv6 socket + DualMode）连 v4-mapped 的 IPv4 字面量时，WFP 在
+    // ALE_CONNECT_REDIRECT_V6 上交付 ::ffff:a.b.c.d；host classify 归一成 IPv4 之后才进 matcher，
+    // 所以规则决定必须与包路径（看到 IPv4 报文）一致：IPv4 CIDR / 族命中，IPv6 CIDR / 族不命中。
+    private static void RunDualModeCases(WfpDevice device, EchoServer echo, IPEndPoint target, int timeoutMs)
+    {
+        TestRule ipv4Cidr = PermitAt(echo.Port);
+        ipv4Cidr.Networks = new[] { "127.0.0.0/8" };
+        ExpectDualModePermit("双模客户端连 IPv4 字面量：IPv4 CIDR 规则命中", device, target, timeoutMs, ipv4Cidr);
+        Check.True(device.GetEvents(64).Any(e => e.Decision == Protocol.DecisionPermittedRule &&
+                                                 e.RemotePort == echo.Port &&
+                                                 e.ProcessId == (uint)Environment.ProcessId &&
+                                                 e.Protocol == Protocol.RuleProtocolTcp &&
+                                                 e.MatchedRule == 0 &&
+                                                 e.Family == (byte)AddressFamily.InterNetworkV6),
+                   "双模连接在 V6 层 classify（probe_event 的 family 仍是 WFP 原值）", $"port={echo.Port}");
+
+        TestRule ipv4Family = PermitAt(echo.Port);
+        ipv4Family.Families = new[] { Protocol.RuleFamilyIpv4 };
+        ExpectDualModePermit("双模客户端连 IPv4 字面量：IPv4 族规则命中", device, target, timeoutMs, ipv4Family);
+
+        TestRule ipv6Cidr = PermitAt(echo.Port);
+        ipv6Cidr.Networks = new[] { "::ffff:127.0.0.0/104" };
+        ExpectDualModeFallback("双模客户端连 IPv4 字面量：v4-mapped 的 IPv6 CIDR 规则不命中", device, target,
+                               timeoutMs, ipv6Cidr);
+
+        TestRule ipv6Family = PermitAt(echo.Port);
+        ipv6Family.Families = new[] { Protocol.RuleFamilyIpv6 };
+        ExpectDualModeFallback("双模客户端连 IPv4 字面量：IPv6 族规则不命中", device, target, timeoutMs, ipv6Family);
     }
 
     private static void RunBlockCases(WfpDevice device,
@@ -522,6 +553,60 @@ internal static class HostRuleParitySuite
         Check.True(echoed, name, detail);
         Check.Equal(0, (long)(after.MatchedPermit - before.MatchedPermit), $"{name}：matched_permit +0");
         Check.Equal(1, (long)(after.FallbackPermit - before.FallbackPermit), $"{name}：fallback_permit +1");
+    }
+
+    private static void ExpectDualModePermit(string name,
+                                             WfpDevice device,
+                                             IPEndPoint target,
+                                             int timeoutMs,
+                                             params TestRule[] rules) =>
+        ExpectDualMode(name, device, target, timeoutMs, true, rules);
+
+    private static void ExpectDualModeFallback(string name,
+                                               WfpDevice device,
+                                               IPEndPoint target,
+                                               int timeoutMs,
+                                               params TestRule[] rules) =>
+        ExpectDualMode(name, device, target, timeoutMs, false, rules);
+
+    private static void ExpectDualMode(string name,
+                                       WfpDevice device,
+                                       IPEndPoint target,
+                                       int timeoutMs,
+                                       bool expectMatch,
+                                       TestRule[] rules)
+    {
+        device.SetRuleBlob(BlobBuilder.Build(rules, Protocol.RuleActionPermit));
+        Check.Equal(1, device.GetRuleInfo().RuleCount, $"{name}：blob 规则数=1");
+        ProbeStats before = device.GetStats();
+        bool echoed = TryDualModeEcho(target, timeoutMs, out string detail);
+        ProbeStats after = device.GetStats();
+        Check.True(echoed, name, detail);
+        Check.Equal(expectMatch ? 1 : 0, (long)(after.MatchedPermit - before.MatchedPermit),
+                    $"{name}：matched_permit +{(expectMatch ? 1 : 0)}");
+        Check.Equal(expectMatch ? 0 : 1, (long)(after.FallbackPermit - before.FallbackPermit),
+                    $"{name}：fallback_permit +{(expectMatch ? 0 : 1)}");
+    }
+
+    private static bool TryDualModeEcho(IPEndPoint target, int timeoutMs, out string detail)
+    {
+        using var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp)
+        {
+            NoDelay = true,
+            DualMode = true,
+        };
+        try
+        {
+            using var timeout = new CancellationTokenSource(timeoutMs);
+            var mapped = new IPEndPoint(target.Address.MapToIPv6(), target.Port);
+            socket.ConnectAsync(mapped, timeout.Token).AsTask().GetAwaiter().GetResult();
+            return SocketHelpers.TryEcho(socket, "parity", timeoutMs, out detail);
+        }
+        catch (Exception ex)
+        {
+            detail = $"{ex.GetType().Name}: {ex.Message}";
+            return false;
+        }
     }
 
     private static void ExpectChildPermit(string name,

@@ -194,6 +194,12 @@ process_path（UTF-8，已 ASCII 折叠）, process_path_length,
 remote_address[16], remote_port, protocol, family
 ```
 
+host classify 在构造 view 之前把 `::ffff:0:0/96` 的 v4-mapped 远端归一成 IPv4：`family` 变成 4、
+`remote_address` 前 4 字节是 v4 地址、其余为零。因此 `family_mask` 与 `network_prefix.family` 的
+比较都按 IPv4 进行——IPv6 CIDR / `AddressFamily=IPv6` 规则不命中这类连接，与包路径（看到 IPv4
+报文）一致；native IPv4 与 native IPv6 不归一。`probe_event` 里的 family / remote_address 仍是
+WFP 原值，只有 matcher 视图与 redirect context 的原始目的地使用归一后的地址。
+
 单条规则的匹配式：
 
 ```text
@@ -355,8 +361,9 @@ fail-open 放行，记 `redirect_failures` 与 `block_enforcement_failed` 事件
 
 驱动侧对应：`src/driver/rule_table.cpp`（`allocate_rule_table`、`contains_block`、引用计数与
 退役）、`src/driver/block_filters.cpp`（固定 4 条 sink filter 的安装/删除）、
-`src/driver/probe_control.cpp`（sink 端口校验与 filter 生命周期）、`src/driver/probe_classify.cpp`
-（block 改道 sink）、`src/driver/process_path.cpp`（`ALE_APP_ID` → UTF-8）。
+`src/driver/probe_control.cpp`（sink 端口校验与 filter 生命周期）、`src/driver/probe_facts.cpp`
+（classify 的连接事实采集与 v4-mapped 归一）、`src/driver/probe_classify.cpp`（classify 闸门、
+求值动作与 block 改道 sink）、`src/driver/process_path.cpp`（`ALE_APP_ID` → UTF-8）。
 
 验证入口：
 

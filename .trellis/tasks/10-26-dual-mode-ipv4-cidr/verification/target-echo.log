@@ -1,0 +1,14 @@
+listening 40001 40012 40013 40014
+1792983668.402 tcp port=40001 peer=('192.168.100.2', 40310) error=ConnectionResetError(104, 'Connection reset by peer')
+1792983668.404 tcp port=40001 peer=('192.168.100.2', 40311) error=ConnectionResetError(104, 'Connection reset by peer')
+1792983668.405 tcp port=40001 peer=('192.168.100.2', 40312) error=ConnectionResetError(104, 'Connection reset by peer')
+1792983668.406 tcp port=40001 peer=('192.168.100.2', 40313) error=ConnectionResetError(104, 'Connection reset by peer')
+1792983668.407 tcp port=40001 peer=('192.168.100.2', 40314) error=ConnectionResetError(104, 'Connection reset by peer')
+1792983668.408 tcp port=40001 peer=('192.168.100.2', 40315) error=ConnectionResetError(104, 'Connection reset by peer')
+1792983668.409 tcp port=40001 peer=('192.168.100.2', 40316) error=ConnectionResetError(104, 'Connection reset by peer')
+1792983668.448 tcp port=40001 peer=('192.168.100.2', 40310) error=ConnectionResetError(104, 'Connection reset by peer')
+1792983670.885 tcp port=40001 peer=('192.168.100.2', 58757) error=ConnectionResetError(104, 'Connection reset by peer')
+1792983702.709 tcp port=40001 peer=('192.168.100.2', 58779) bytes=0 data=b''
+1792983707.483 tcp port=40001 peer=('192.168.100.2', 58781) bytes=0 data=b''
+1792983948.146 tcp port=40012 peer=('192.168.100.2', 58862) bytes=11 data=b'hello-40012'
+1792983948.177 tcp port=40014 peer=('192.168.100.2', 58863) bytes=11 data=b'hello-40014'

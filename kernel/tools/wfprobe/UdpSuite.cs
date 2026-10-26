@@ -696,9 +696,8 @@ internal static class UdpSuite
             await client.WaitForReadyAsync(context.TimeoutMs);
             ReceivedDatagram datagram = context.Listener.Receive(context.TimeoutMs);
             RedirectContext redirect = ParseContext(datagram, "U10 v4-mapped connected");
-            Check.Equal(6, redirect.Family, "U10: v4-mapped connected family=6");
-            Check.True(IsMappedTo(redirect, "127.0.0.1"), "U10: v4-mapped connected 地址是 v4-mapped",
-                       ContextAddress(redirect));
+            Check.Equal(4, redirect.Family, "U10: v4-mapped connected family=4");
+            EqualText("127.0.0.1", ContextAddress(redirect), "U10: v4-mapped connected 原始地址是纯 v4");
             await client.WaitForExitAsync(context.TimeoutMs);
         }
         ProbeStats afterMappedConnected = context.Device.GetStats();
@@ -1015,15 +1014,6 @@ internal static class UdpSuite
     {
         return Program.AddressText(context.OriginalAddress, context.Family);
     }
-
-    private static unsafe bool IsMappedTo(RedirectContext context, string text)
-    {
-        var mapped = new IPAddress(new ReadOnlySpan<byte>(context.OriginalAddress, 16));
-        if (!mapped.IsIPv4MappedToIPv6)
-            return false;
-        return mapped.MapToIPv4().ToString() == text;
-    }
-
 
     private static string DescribeEvents(IEnumerable<ProbeEvent> events) =>
         string.Join(", ", events.Select(e => $"{Program.DecisionName(e.Decision)}/proto={e.Protocol}" +

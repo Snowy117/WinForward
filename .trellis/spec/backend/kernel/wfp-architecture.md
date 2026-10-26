@@ -248,7 +248,14 @@ sink 端口与 redirect 标记，不再关心进程选择器。
 - **固定 4 条 sink filter。** V4/V6 × TCP(6) / UDP(17) 各一条；每条显式写协议 + 远端端口 ==
   sink + `IS_CONNECTION_REDIRECTED`；不随规则数展开，也没有 128 预算。ICMP 等非 TCP/UDP
   协议不进 classify，也不会被这些 filter 命中。
-- **IPv6 / dual-mode 的 family 取决于实际层。** v4-mapped unconnected 走 V4（family=4、纯 v4 地址），v4-mapped connected 与 native v6 走 V6（family=6、v4-mapped/16 字节地址）。cmsg 解析要同时接受 level 0 与 41、type 70，并支持 `sockaddr_in6`；不能笼统断言「dual-mode 一定 family=6」。
+- **IPv6 / dual-mode 的 family 取决于实际层，v4-mapped 在 classify 归一。** v4-mapped unconnected 走 V4
+  （family=4、纯 v4 地址），v4-mapped connected 与 native v6 走 V6 层；host classify 把 `::ffff:0:0/96`
+  的 v4-mapped 远端归一成 IPv4（family=4、四个 v4 字节、尾部为零）之后才交给 matcher 与 redirect
+  context 的原始目的地，因此 IPv4 网段 / `AddressFamily=IPv4` 规则命中、IPv6 网段 / `AddressFamily=IPv6`
+  规则不命中，与包路径（看到 IPv4 报文）一致。native IPv4 与 native IPv6 保持各自族不变；
+  `probe_event` 的诊断事实、redirect target 与 listener 仍用 WFP 原族的地址，V6 层连接继续改道到 V6
+  层。cmsg 解析要同时接受 level 0 与 41、type 70，并支持 `sockaddr_in6`；不能笼统断言「dual-mode
+  一定 family=6」——归一只改变 family 字段的取值，不改变 cmsg 的 level。
 - **context 生命周期。** unconnected 在客户端 socket 关闭后 1s 内释放；connected 的释放窗口由 WFP 决定，B2b 观察到客户端退出 180s 后仍 outstanding、`sc stop` 后仍然存在，因此不能把「关闭即释放」当成保证，池断言只对 unconnected 严格。**已知 WFP 缺陷（26100）**：connected UDP 每包会给 `AleRedirectRecord` 加一次引用且不归还，refcount 随 datagram 增长，36B `WfPr` 直到重启才释放；实测 1/3/100 条 → 1/3/100，详见 [wfp-connected-udp-record-refcount-leak.md](./wfp-connected-udp-record-refcount-leak.md)。
 - **规则语义。** `protocol=udp` 是 17；`protocol=any` 同时覆盖 TCP 与 UDP（相对旧版的行为变化）；`permitted_non_tcp` 只表示既非 TCP 也非 UDP。
 - **配置约束。** 中继自身的出站由 `self_process_ids` 闸放行；没有配置 self-PID 时，无进程

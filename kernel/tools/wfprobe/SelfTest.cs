@@ -102,7 +102,7 @@ internal static class SelfTest
                         endpointCounts[key] = endpointCounts.TryGetValue(key, out int seen) ? seen + 1 : 1;
                     }
 
-                    if (TryCheckContext(server, remote, processId, dual, out string contextText, out string contextHex))
+                    if (TryCheckContext(server, remote, processId, out string contextText, out string contextHex))
                     {
                         contextsOk++;
                         if (index == 0)
@@ -171,14 +171,16 @@ internal static class SelfTest
                                                              : key.StartsWith("127.0.0.1:", StringComparison.Ordinal));
         Check.True(addressOk, "accepted 端点在预期地址族", string.Join(",", endpointCounts.Keys));
 
-        Console.WriteLine($"[selftest] verdict={(Check.Failures == 0 ? "PASS" : "FAIL")} dual={dual} family={(dual ? 6 : 4)}");
+        bool semanticIpv4 = remote.AddressFamily == AddressFamily.InterNetwork ||
+                            remote.Address.IsIPv4MappedToIPv6;
+        Console.WriteLine($"[selftest] verdict={(Check.Failures == 0 ? "PASS" : "FAIL")} dual={dual} " +
+                          $"family={(semanticIpv4 ? 4 : 6)}");
         return Check.Failures == 0 ? 0 : 5;
     }
 
     private static bool TryCheckContext(Socket socket,
                                         IPEndPoint remote,
                                         int processId,
-                                        bool dual,
                                         out string text,
                                         out string hex)
     {
@@ -198,33 +200,36 @@ internal static class SelfTest
                 context.OriginalPort != (ushort)remote.Port)
                 return false;
 
+            // 双模客户端连 IPv4 字面量时 WFP 在 V6 层给出 ::ffff:a.b.c.d；host classify 把它归一成
+            // IPv4 才写 redirect context。mapped 地址的前 10 个字节是零，v4 字节只能从 MapToIPv4 取，
+            // 直接读原始 16 字节的前四个会得到 0.0.0.0。
             byte[] remoteBytes = remote.Address.GetAddressBytes();
-            byte expectedFamily = dual ? (byte)6 : (byte)4;
+            bool expectIpv4 = remote.AddressFamily == AddressFamily.InterNetwork ||
+                              remote.Address.IsIPv4MappedToIPv6;
+            if (remote.Address.IsIPv4MappedToIPv6)
+                remoteBytes = remote.Address.MapToIPv4().GetAddressBytes();
+            byte expectedFamily = expectIpv4 ? (byte)4 : (byte)6;
             if (context.Family != expectedFamily)
                 return false;
 
             unsafe
             {
-                if (dual)
+                if (expectIpv4)
                 {
-                    if (remoteBytes.Length != 4)
-                        return false;
-                    for (int index = 0; index < 10; index++)
-                    {
-                        if (context.OriginalAddress[index] != 0)
-                            return false;
-                    }
-                    if (context.OriginalAddress[10] != 0xFF || context.OriginalAddress[11] != 0xFF)
-                        return false;
                     for (int index = 0; index < 4; index++)
                     {
-                        if (context.OriginalAddress[12 + index] != remoteBytes[index])
+                        if (context.OriginalAddress[index] != remoteBytes[index])
+                            return false;
+                    }
+                    for (int index = 4; index < 16; index++)
+                    {
+                        if (context.OriginalAddress[index] != 0)
                             return false;
                     }
                 }
                 else
                 {
-                    for (int index = 0; index < 4; index++)
+                    for (int index = 0; index < 16; index++)
                     {
                         if (context.OriginalAddress[index] != remoteBytes[index])
                             return false;

@@ -27,7 +27,9 @@
     "10-25-kernel-policy-compiler",
     "10-26-kernel-raw-socket-relay",
     "10-26-kernel-host-tcp-backend",
-    "10-26-windows-kernel-e2e"
+    "10-26-windows-kernel-e2e",
+    "10-26-winpkfilter-parity",
+    "10-26-dual-mode-ipv4-cidr"
   ],
   "parent": null,
   "relatedFiles": [],

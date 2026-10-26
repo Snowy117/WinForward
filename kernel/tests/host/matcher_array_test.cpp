@@ -1,11 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
 #include "matcher.h"
 #include "matcher_test_support.h"
 #include "rule_blob_builder.h"
+#include "v4_mapped.h"
 
 namespace
 {
@@ -223,6 +225,48 @@ TEST(matcher, matches_an_empty_rule_table)
     EXPECT_FALSE(result.matched);
     EXPECT_EQ(result.action, rule_action::permit);
     EXPECT_EQ(result.rule_index, rule_pool_index_any);
+}
+
+// v4-mapped 双模连接在 classify 里归一成 IPv4 之后才进 matcher：IPv4 网段命中、v4-mapped 的
+// IPv6 网段不命中。同一条 IPv6 网段对未归一的原始视图仍然命中，证明差异来自归一而不是 blob。
+TEST(matcher, normalized_v4_mapped_view_matches_ipv4_networks_only)
+{
+    const auto ipv4_cidr = build_blob(
+        [](wfp_test::rule_blob_builder& builder, rule& entry)
+        {
+            entry.family_mask = winforward::wfp::rule_family_mask_ipv4;
+            set_networks(builder, entry, { { 4, 8, make_ipv4(127, 0, 0, 0) } });
+        });
+    const auto ipv6_mapped_cidr = build_blob(
+        [](wfp_test::rule_blob_builder& builder, rule& entry)
+        {
+            set_networks(builder,
+                         entry,
+                         { { 6, 104, make_address({ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 127, 0, 0, 0 }) } });
+        });
+    const auto ipv6_native_cidr = build_blob(
+        [](wfp_test::rule_blob_builder& builder, rule& entry)
+        {
+            set_networks(builder, entry, { { 6, 32, make_address({ 0x20, 0x01, 0x0D, 0xB8 }) } });
+        });
+
+    const std::array<std::uint8_t, 16> mapped =
+        make_address({ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 127, 0, 0, 1 });
+    const auto raw_view = make_connection("app.exe", mapped, 80, tcp_protocol, address_family::ipv6);
+    EXPECT_TRUE(match_connection(ipv6_mapped_cidr, raw_view).matched);
+
+    std::uint8_t family = 0;
+    std::array<std::uint8_t, 16> normalized{};
+    ASSERT_TRUE(winforward::wfp::try_normalize_v4_mapped(6, mapped.data(), family, normalized.data()));
+    const auto normalized_view =
+        make_connection("app.exe", normalized, 80, tcp_protocol, static_cast<address_family>(family));
+    EXPECT_TRUE(match_connection(ipv4_cidr, normalized_view).matched);
+    EXPECT_FALSE(match_connection(ipv6_mapped_cidr, normalized_view).matched);
+
+    const auto native_view =
+        make_connection("app.exe", make_address({ 0x20, 0x01, 0x0D, 0xB8 }), 80, tcp_protocol, address_family::ipv6);
+    EXPECT_TRUE(match_connection(ipv6_native_cidr, native_view).matched);
+    EXPECT_FALSE(match_connection(ipv4_cidr, native_view).matched);
 }
 
 } // namespace

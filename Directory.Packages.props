@@ -12,6 +12,8 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.14.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4" />
+    <PackageVersion Include="Microsoft.Windows.WDK.x64" Version="10.0.28000.2526" />
+    <PackageVersion Include="Microsoft.Windows.SDK.cpp.x64" Version="10.0.28000.2526" />
     <PackageVersion Include="Meziantou.Analyzer" Version="3.0.104" />
     <PackageVersion Include="Microsoft.VisualStudio.Threading.Analyzers" Version="17.14.15" />
     <PackageVersion Include="Roslynator.Analyzers" Version="4.15.0" />

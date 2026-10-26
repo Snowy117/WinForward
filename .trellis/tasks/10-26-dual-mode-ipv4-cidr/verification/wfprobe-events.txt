@@ -1,0 +1,4 @@
+[event] seq=1 pid=1580 protocol=6 decision=redirected action=redirect branch=any_to_loopback family=23 rule=3 remote=0.0.0.0:40012 local=0.0.0.0:58860 redirect-port=58858
+[event] seq=3 pid=4028 protocol=6 decision=permitted_rule action=permit branch=none family=2 rule=0 remote=192.168.100.4:40012 local=0.0.0.0:58862 redirect-port=0
+[event] seq=4 pid=1580 protocol=6 decision=permitted_rule action=permit branch=none family=23 rule=2 remote=0.0.0.0:40014 local=0.0.0.0:58863 redirect-port=0
+[event] seq=5 pid=1580 protocol=6 decision=blocked_rule action=block branch=any_to_loopback family=23 rule=1 remote=0.0.0.0:40013 local=0.0.0.0:58864 redirect-port=56740

@@ -1,0 +1,14 @@
+stop WinForward pid=1928
+[control] config: abi=8 enabled=0 listener-pid=1928 port=58858 block-sink-port=56740 self-pids=[1928]
+[control] config: abi=8 enabled=0 listener-pid=1928 port=58858 block-sink-port=56740 self-pids=[1928]
+stop sing-box pid=4028
+--- residual processes ---
+--- service ---
+
+        STATE              : 4  RUNNING 
+--- tasks ---
+--- network ---
+True
+
+disabled enabled=0 listener_port=0
+[control] config: abi=8 enabled=0 listener-pid=0 port=0 block-sink-port=0 self-pids=[]
